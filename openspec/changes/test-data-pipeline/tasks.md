@@ -1,27 +1,27 @@
 ## 1. Crate Setup
 
-- [ ] 1.1 Create `thresh-data` crate with feature flags: `adsb`, `orbital`, `nuscenes`
+- [x] 1.1 Create `thresh-data` crate with feature flags: `adsb`, `orbital`, `nuscenes`
 - [ ] 1.2 Add workspace dependencies: `reqwest` (blocking), `csv`, `sgp4`, `toml` for credentials
-- [ ] 1.3 Define `Dataset` trait: `metadata()`, `frames()`, `ground_truth()`
-- [ ] 1.4 Define `Frame` struct: timestamp, measurements, optional ground truth, sensor metadata
-- [ ] 1.5 Define `DatasetMetadata`: name, source, target count, time span, coordinate frame
-- [ ] 1.6 Implement credential loader: env vars → `~/.thresh/credentials.toml` fallback
-- [ ] 1.7 Implement cache directory management: `~/.thresh/data/<source>/<dataset>/`
+- [x] 1.3 Define `Dataset` trait: `metadata()`, `frames()`, `ground_truth()`
+- [x] 1.4 Define `Frame` struct: timestamp, measurements, optional ground truth, sensor metadata
+- [x] 1.5 Define `DatasetMetadata`: name, source, target count, time span, coordinate frame
+- [x] 1.6 Implement credential loader: env vars → `~/.thresh/credentials.toml` fallback
+- [x] 1.7 Implement cache directory management: `~/.thresh/data/<source>/<dataset>/`
 
 ## 2. Coordinate Transforms
 
-- [ ] 2.1 Implement WGS84 geodetic (lat, lon, alt) → ECEF (x, y, z)
-- [ ] 2.2 Implement ECEF → ENU relative to configurable reference point
-- [ ] 2.3 Implement WGS84 → ENU convenience function (compose 2.1 + 2.2)
-- [ ] 2.4 Implement TEME → ECEF (for SGP4 output, includes Earth rotation via GMST)
-- [ ] 2.5 Implement ECI (J2000/GCRF) coordinate frame type and conversions
-- [ ] 2.6 Implement ECI → ECEF transform (Earth rotation angle via GMST/ERA)
-- [ ] 2.7 Implement ECEF → ECI inverse transform
-- [ ] 2.8 Implement ECI → ENU convenience function (compose ECI→ECEF + ECEF→ENU)
-- [ ] 2.9 Write tests: known reference points (e.g., JFK airport) match published ECEF coordinates
-- [ ] 2.10 Write tests: ENU roundtrip (WGS84 → ENU → WGS84) within 1 cm
-- [ ] 2.11 Write tests: ECI↔ECEF roundtrip at known epoch matches reference values
-- [ ] 2.12 Write tests: ECI→ENU for ISS pass matches published ground station observations
+- [x] 2.1 Implement WGS84 geodetic (lat, lon, alt) → ECEF (x, y, z)
+- [x] 2.2 Implement ECEF → ENU relative to configurable reference point
+- [x] 2.3 Implement WGS84 → ENU convenience function (compose 2.1 + 2.2)
+- [x] 2.4 Implement TEME → ECEF (for SGP4 output, includes Earth rotation via GMST)
+- [x] 2.5 Implement ECI (J2000/GCRF) coordinate frame type and conversions
+- [x] 2.6 Implement ECI → ECEF transform (Earth rotation angle via GMST/ERA)
+- [x] 2.7 Implement ECEF → ECI inverse transform
+- [x] 2.8 Implement ECI → ENU convenience function (compose ECI→ECEF + ECEF→ENU)
+- [x] 2.9 Write tests: known reference points (e.g., JFK airport) match published ECEF coordinates
+- [x] 2.10 Write tests: ENU roundtrip (WGS84 → ENU → WGS84) within 1 cm
+- [x] 2.11 Write tests: ECI↔ECEF roundtrip at known epoch matches reference values
+- [x] 2.12 Write tests: ECI→ENU for ISS pass matches published ground station observations
 
 ## 3. ADS-B Ingestion
 

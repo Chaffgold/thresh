@@ -29,7 +29,7 @@ jobs:
       - name: Run clippy for SonarCloud
         run: cargo clippy --workspace --all-targets --quiet --message-format=json > clippy-report.json
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@v5
+        uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
