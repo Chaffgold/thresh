@@ -1,0 +1,39 @@
+name: SonarCloud
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  sonarcloud:
+    name: SonarCloud Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Generate coverage
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+      - name: Run clippy for SonarCloud
+        run: cargo clippy --workspace --all-targets --message-format=json > clippy-report.json 2>&1 || true
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=chaffgold
+            -Dsonar.projectKey=Chaffgold_thresh
+            -Dsonar.sources=crates/
+            -Dsonar.tests=crates/
+            -Dsonar.test.inclusions=**/*test*/**,**/tests/**
+            -Dsonar.exclusions=**/target/**
+            -Dsonar.coverage.exclusions=**/tests/**,**/test*/**
+            -Dsonar.coverageReportPaths=lcov.info
+            -Dsonar.community.rust.clippy.reportPaths=clippy-report.json
