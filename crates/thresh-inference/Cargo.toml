@@ -5,5 +5,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+onnx = ["ort"]
+
 [dependencies]
 thresh-core = { path = "../thresh-core" }
+ort = { workspace = true, optional = true }

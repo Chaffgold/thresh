@@ -10,6 +10,7 @@ members = [
     "crates/thresh-bridge",
     "crates/thresh-synth",
     "crates/thresh-eval",
+    "crates/thresh",
 ]
 
 [workspace.package]
@@ -19,4 +20,7 @@ license = "Apache-2.0"
 repository = "https://github.com/Chaffgold/thresh"
 
 [workspace.dependencies]
-nalgebra = "0.33"
+nalgebra = { version = "0.33", features = ["serde-serialize"] }
+ort = "2.0.0-rc.12"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

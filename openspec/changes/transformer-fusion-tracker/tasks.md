@@ -1,45 +1,45 @@
 ## 1. Project Scaffolding
 
-- [ ] 1.1 Initialize Cargo workspace with `Cargo.toml` at root, defining all workspace members
-- [ ] 1.2 Create `thresh-core` crate with common types: `StateVector`, `Measurement` enum, `Covariance`, `Timestamp`, coordinate frame types
-- [ ] 1.3 Create `thresh-filter` crate with `nalgebra` dependency and `MotionModel` trait definition
-- [ ] 1.4 Create `thresh-association` crate skeleton
-- [ ] 1.5 Create `thresh-fusion` crate skeleton
-- [ ] 1.6 Create `thresh-inference` crate with `ort` dependency
-- [ ] 1.7 Create `thresh-tracker` crate skeleton
-- [ ] 1.8 Create `thresh-bridge` crate with `pyo3` dependency, gated behind `stonesoup` feature
-- [ ] 1.9 Create `thresh-synth` crate skeleton
-- [ ] 1.10 Create `thresh-eval` crate skeleton
-- [ ] 1.11 Create top-level `thresh` binary crate re-exporting workspace crates
-- [ ] 1.12 Configure workspace-level `.gitignore` for target/, generated ONNX files, Python venvs
+- [x] 1.1 Initialize Cargo workspace with `Cargo.toml` at root, defining all workspace members
+- [x] 1.2 Create `thresh-core` crate with common types: `StateVector`, `Measurement` enum, `Covariance`, `Timestamp`, coordinate frame types
+- [x] 1.3 Create `thresh-filter` crate with `nalgebra` dependency and `MotionModel` trait definition
+- [x] 1.4 Create `thresh-association` crate skeleton
+- [x] 1.5 Create `thresh-fusion` crate skeleton
+- [x] 1.6 Create `thresh-inference` crate with `ort` dependency
+- [x] 1.7 Create `thresh-tracker` crate skeleton
+- [x] 1.8 Create `thresh-bridge` crate with `pyo3` dependency, gated behind `stonesoup` feature
+- [x] 1.9 Create `thresh-synth` crate skeleton
+- [x] 1.10 Create `thresh-eval` crate skeleton
+- [x] 1.11 Create top-level `thresh` binary crate re-exporting workspace crates
+- [x] 1.12 Configure workspace-level `.gitignore` for target/, generated ONNX files, Python venvs
 
 ## 2. Core Types (thresh-core)
 
-- [ ] 2.1 Define `StateVector` type wrapping `nalgebra::DVector<f64>` with dimension metadata
-- [ ] 2.2 Define `CovarianceMatrix` type wrapping `nalgebra::DMatrix<f64>` with symmetry enforcement
-- [ ] 2.3 Define `Measurement` enum with `Radar`, `EoIr`, `AdsB` variants, each with observation matrix H and noise R
-- [ ] 2.4 Define `TrackId` (u64, globally unique), `TrackState` enum (Tentative, Confirmed, Coasting, Deleted)
-- [ ] 2.5 Define `BoundingBox3D` struct (x, y, z, l, w, h, yaw) for detection outputs
-- [ ] 2.6 Define `SensorRegistration` struct with position, orientation, coordinate transform methods
-- [ ] 2.7 Implement polar-to-Cartesian and Cartesian-to-polar coordinate transforms
-- [ ] 2.8 Write unit tests for all core type constructors and coordinate transforms
+- [x] 2.1 Define `StateVector` type wrapping `nalgebra::DVector<f64>` with dimension metadata
+- [x] 2.2 Define `CovarianceMatrix` type wrapping `nalgebra::DMatrix<f64>` with symmetry enforcement
+- [x] 2.3 Define `Measurement` enum with `Radar`, `EoIr`, `AdsB` variants, each with observation matrix H and noise R
+- [x] 2.4 Define `TrackId` (u64, globally unique), `TrackState` enum (Tentative, Confirmed, Coasting, Deleted)
+- [x] 2.5 Define `BoundingBox3D` struct (x, y, z, l, w, h, yaw) for detection outputs
+- [x] 2.6 Define `SensorRegistration` struct with position, orientation, coordinate transform methods
+- [x] 2.7 Implement polar-to-Cartesian and Cartesian-to-polar coordinate transforms
+- [x] 2.8 Write unit tests for all core type constructors and coordinate transforms
 
 ## 3. State Estimation (thresh-filter)
 
-- [ ] 3.1 Define `MotionModel` trait with `predict`, `jacobian`, `process_noise` methods
-- [ ] 3.2 Define `LinearModel` sub-trait extending `MotionModel` with constant `F` matrix access
-- [ ] 3.3 Implement Constant Velocity (CV) motion model — state [x, vx, y, vy, z, vz]
-- [ ] 3.4 Implement Constant Acceleration (CA) motion model — state [x, vx, ax, y, vy, ay, z, vz, az]
-- [ ] 3.5 Implement CTRV motion model — state [x, y, theta, v, omega] with omega→0 degenerate handling
-- [ ] 3.6 Implement Coordinated Turn model — state [x, vx, y, vy, omega] with quasi-linear transition
-- [ ] 3.7 Implement Linear Kalman Filter: predict step, update step with Joseph-form covariance
-- [ ] 3.8 Implement Extended Kalman Filter: Jacobian-based linearization, nonlinear predict/update
-- [ ] 3.9 Implement Unscented Kalman Filter: sigma point generation (Van der Merwe), weighted predict/update
-- [ ] 3.10 Add configurable UKF parameters (alpha, beta, kappa) with sensible defaults
-- [ ] 3.11 Write tests: KF convergence on linear system, verify covariance stays PSD over 1000 steps
-- [ ] 3.12 Write tests: EKF with CTRV model tracks a simulated turning target
-- [ ] 3.13 Write tests: UKF sigma point weights sum to 1, second-order accuracy on polar-to-Cartesian
-- [ ] 3.14 Write tests: CTRV model degenerates gracefully when omega < epsilon
+- [x] 3.1 Define `MotionModel` trait with `predict`, `jacobian`, `process_noise` methods
+- [x] 3.2 Define `LinearModel` sub-trait extending `MotionModel` with constant `F` matrix access
+- [x] 3.3 Implement Constant Velocity (CV) motion model — state [x, vx, y, vy, z, vz]
+- [x] 3.4 Implement Constant Acceleration (CA) motion model — state [x, vx, ax, y, vy, ay, z, vz, az]
+- [x] 3.5 Implement CTRV motion model — state [x, y, theta, v, omega] with omega→0 degenerate handling
+- [x] 3.6 Implement Coordinated Turn model — state [x, vx, y, vy, omega] with quasi-linear transition
+- [x] 3.7 Implement Linear Kalman Filter: predict step, update step with Joseph-form covariance
+- [x] 3.8 Implement Extended Kalman Filter: Jacobian-based linearization, nonlinear predict/update
+- [x] 3.9 Implement Unscented Kalman Filter: sigma point generation (Van der Merwe), weighted predict/update
+- [x] 3.10 Add configurable UKF parameters (alpha, beta, kappa) with sensible defaults
+- [x] 3.11 Write tests: KF convergence on linear system, verify covariance stays PSD over 1000 steps
+- [x] 3.12 Write tests: EKF with CTRV model tracks a simulated turning target
+- [x] 3.13 Write tests: UKF sigma point weights sum to 1, second-order accuracy on polar-to-Cartesian
+- [x] 3.14 Write tests: CTRV model degenerates gracefully when omega < epsilon
 
 ## 4. Data Association (thresh-association)
 
@@ -155,4 +155,4 @@
 - [ ] 11.3 Create a class-specific tracking test: mixed aerodynamic + ballistic targets with appropriate models
 - [ ] 11.4 Benchmark tracker throughput: measure Hz for 50-target scenario with UKF + Hungarian
 - [ ] 11.5 Document example usage in README.md with minimal code snippets
-- [ ] 11.6 Add CI configuration (GitHub Actions) for `cargo test`, `cargo clippy`, `cargo fmt --check`
+- [x] 11.6 Add CI configuration (GitHub Actions) for `cargo test`, `cargo clippy`, `cargo fmt --check`
