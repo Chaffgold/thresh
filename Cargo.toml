@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/thresh-core",
+    "crates/thresh-filter",
+    "crates/thresh-association",
+    "crates/thresh-fusion",
+    "crates/thresh-inference",
+    "crates/thresh-tracker",
+    "crates/thresh-bridge",
+    "crates/thresh-synth",
+    "crates/thresh-eval",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/Chaffgold/thresh"
+
+[workspace.dependencies]
+nalgebra = "0.33"
