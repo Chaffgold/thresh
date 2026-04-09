@@ -1,0 +1,10 @@
+[package]
+name = "thresh-association"
+description = "Data association algorithms (Hungarian, Mahalanobis gating)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thresh-core = { path = "../thresh-core" }
+nalgebra = { workspace = true }
