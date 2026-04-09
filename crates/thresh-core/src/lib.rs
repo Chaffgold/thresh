@@ -2,6 +2,8 @@
 
 pub mod coords;
 pub mod detection;
+pub mod eci;
+pub mod geodetic;
 pub mod measurement;
 pub mod sensor;
 pub mod state;
