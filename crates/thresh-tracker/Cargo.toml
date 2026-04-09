@@ -1,0 +1,13 @@
+[package]
+name = "thresh-tracker"
+description = "Track management, lifecycle, and class-specific tracking heads"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thresh-core = { path = "../thresh-core" }
+thresh-filter = { path = "../thresh-filter" }
+thresh-association = { path = "../thresh-association" }
+thresh-fusion = { path = "../thresh-fusion" }
+nalgebra = { workspace = true }

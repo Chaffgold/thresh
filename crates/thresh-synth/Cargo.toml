@@ -1,0 +1,10 @@
+[package]
+name = "thresh-synth"
+description = "Synthetic data generation for radar, EO/IR, and ADS-B sensors"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thresh-core = { path = "../thresh-core" }
+nalgebra = { workspace = true }

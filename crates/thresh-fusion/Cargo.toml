@@ -1,0 +1,10 @@
+[package]
+name = "thresh-fusion"
+description = "Multi-sensor fusion (centralized, information filter, covariance intersection)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thresh-core = { path = "../thresh-core" }
+nalgebra = { workspace = true }
