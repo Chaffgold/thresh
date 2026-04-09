@@ -142,3 +142,111 @@ fn benchmark_throughput() {
         "Tracker too slow: {hz:.1} Hz for {n_targets} targets"
     );
 }
+
+#[test]
+fn class_specific_mixed_targets() {
+    // Aircraft trajectories: CV segments, moderate speed, moderate altitude
+    let aircraft: Vec<Trajectory> = vec![
+        Trajectory {
+            target_id: 0,
+            initial_position: [0.0, 0.0, 5000.0],
+            initial_velocity: [250.0, 0.0, 0.0],
+            segments: vec![Segment {
+                segment_type: SegmentType::Cv,
+                duration: 15.0,
+            }],
+            dt: 1.0,
+        },
+        Trajectory {
+            target_id: 1,
+            initial_position: [0.0, 20000.0, 8000.0],
+            initial_velocity: [200.0, 50.0, 0.0],
+            segments: vec![Segment {
+                segment_type: SegmentType::Cv,
+                duration: 15.0,
+            }],
+            dt: 1.0,
+        },
+    ];
+
+    // Ballistic trajectories: high speed, high altitude, no drag
+    let ballistic: Vec<Trajectory> = vec![
+        Trajectory {
+            target_id: 2,
+            initial_position: [50000.0, 50000.0, 80000.0],
+            initial_velocity: [1500.0, 0.0, 200.0],
+            segments: vec![Segment {
+                segment_type: SegmentType::Ballistic {
+                    drag_coefficient: 0.0,
+                },
+                duration: 15.0,
+            }],
+            dt: 1.0,
+        },
+        Trajectory {
+            target_id: 3,
+            initial_position: [-40000.0, 60000.0, 100000.0],
+            initial_velocity: [1000.0, -500.0, 100.0],
+            segments: vec![Segment {
+                segment_type: SegmentType::Ballistic {
+                    drag_coefficient: 0.0,
+                },
+                duration: 15.0,
+            }],
+            dt: 1.0,
+        },
+    ];
+
+    let all_trajectories: Vec<&Trajectory> = aircraft.iter().chain(ballistic.iter()).collect();
+
+    let radar = RadarConfig {
+        p_detection: 1.0,
+        range_sigma: 5.0,
+        azimuth_sigma: 0.0005,
+        elevation_sigma: 0.0005,
+        ..Default::default()
+    };
+
+    let mut rng = rand::rng();
+    // Use a large gate to allow the CV model to associate ballistic targets
+    // despite model mismatch (no gravity in CV model).
+    let mut tracker = MultiObjectTracker::new_cv_position(100.0, 5000.0);
+
+    let all_wps: Vec<Vec<_>> = all_trajectories.iter().map(|t| t.generate()).collect();
+    let n_frames = all_wps.iter().map(|w| w.len()).min().unwrap();
+    let mut eval_frames = Vec::new();
+
+    for frame_idx in 0..n_frames {
+        let mut detections = Vec::new();
+        let mut gt = Vec::new();
+
+        for (traj_idx, target_wps) in all_wps.iter().enumerate() {
+            let wp = &target_wps[frame_idx];
+            gt.push((traj_idx as u64, wp.position));
+            if let Some(m) = generate_radar(wp, &radar, &mut rng) {
+                detections.push(radar_to_cartesian(&m.to_vector()));
+            }
+        }
+
+        tracker.step(&detections, 1.0);
+
+        let tracks: Vec<(u64, [f64; 3])> = tracker
+            .tracks
+            .iter()
+            .filter(|t| t.is_alive())
+            .map(|t| (t.id.0, [t.state[0], t.state[2], t.state[4]]))
+            .collect();
+        eval_frames.push(FrameData { gt, tracks });
+    }
+
+    // Large threshold for matching: ballistic targets under CV model
+    // accumulate position error from unmodeled gravity.
+    let (mota, _motp, _idsw) = compute_mot_metrics(&eval_frames, 2000.0);
+    let idf1 = compute_idf1(&eval_frames, 2000.0);
+
+    let alive = tracker.tracks.iter().filter(|t| t.is_alive()).count();
+
+    assert!(mota > 0.4, "MOTA too low for mixed-class scenario: {mota}");
+    assert!(idf1 > 0.0, "IDF1 should be positive: {idf1}");
+    assert!(alive >= 2, "Expected at least 2 alive tracks, got {alive}");
+}
