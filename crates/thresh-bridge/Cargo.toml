@@ -12,4 +12,4 @@ stonesoup = ["pyo3"]
 [dependencies]
 thresh-core = { path = "../thresh-core" }
 nalgebra = { workspace = true }
-pyo3 = { version = "0.23", optional = true }
+pyo3 = { version = "0.24", optional = true }
