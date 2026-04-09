@@ -7,3 +7,6 @@ license.workspace = true
 
 [dependencies]
 thresh-core = { path = "../thresh-core" }
+thresh-association = { path = "../thresh-association" }
+serde = { workspace = true }
+serde_json = { workspace = true }

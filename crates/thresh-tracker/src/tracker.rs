@@ -1,0 +1,244 @@
+//! Main tracker loop: predict -> associate -> update -> lifecycle.
+
+use nalgebra::{DMatrix, DVector};
+use thresh_association::gating::mahalanobis_squared;
+use thresh_association::hungarian::hungarian_assignment;
+use thresh_core::track::{TargetClass, TrackState};
+use thresh_filter::kf::KalmanFilter;
+use thresh_filter::models::cv::ConstantVelocity;
+use thresh_filter::traits::{LinearModel, MotionModel};
+
+use crate::heads::HeadRegistry;
+use crate::lifecycle::update_lifecycle;
+use crate::track::Track;
+
+/// Main multi-object tracker.
+pub struct MultiObjectTracker {
+    /// Active tracks.
+    pub tracks: Vec<Track>,
+    /// Class-specific head registry.
+    pub heads: HeadRegistry,
+    /// Observation matrix H (maps state to measurement).
+    pub observation_matrix: DMatrix<f64>,
+    /// Measurement noise R.
+    pub measurement_noise: DMatrix<f64>,
+    /// Gating threshold (chi-squared).
+    pub gate_threshold: f64,
+}
+
+impl MultiObjectTracker {
+    /// Create a tracker for position-only observations of CV-model tracks.
+    ///
+    /// Observes [x, y, z] from state [x, vx, y, vy, z, vz].
+    pub fn new_cv_position(measurement_noise_sigma: f64, gate_threshold: f64) -> Self {
+        let h = DMatrix::from_row_slice(
+            3,
+            6,
+            &[
+                1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                1.0, 0.0,
+            ],
+        );
+        let r = DMatrix::identity(3, 3) * (measurement_noise_sigma * measurement_noise_sigma);
+
+        Self {
+            tracks: Vec::new(),
+            heads: HeadRegistry::default(),
+            observation_matrix: h,
+            measurement_noise: r,
+            gate_threshold,
+        }
+    }
+
+    /// Run one tracking cycle: predict all tracks, associate with detections, update.
+    pub fn step(&mut self, detections: &[DVector<f64>], dt: f64) {
+        // 1. Predict all tracks
+        let model = ConstantVelocity::new(5.0);
+        let f = model.transition_matrix(dt);
+        let q = model.process_noise(dt);
+
+        for track in self.tracks.iter_mut() {
+            if track.is_alive() {
+                track.state = &f * &track.state;
+                track.covariance = &f * &track.covariance * f.transpose() + &q;
+            }
+        }
+
+        // 2. Build cost matrix (Mahalanobis distance)
+        let alive: Vec<usize> = self
+            .tracks
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.is_alive())
+            .map(|(i, _)| i)
+            .collect();
+
+        let h = &self.observation_matrix;
+        let r = &self.measurement_noise;
+
+        let mut cost_matrix = vec![vec![self.gate_threshold; detections.len()]; alive.len()];
+        for (ai, &ti) in alive.iter().enumerate() {
+            let track = &self.tracks[ti];
+            let pred_z = h * &track.state;
+            let s = h * &track.covariance * h.transpose() + r;
+            for (dj, det) in detections.iter().enumerate() {
+                let d2 = mahalanobis_squared(det, &pred_z, &s);
+                if d2 < self.gate_threshold {
+                    cost_matrix[ai][dj] = d2;
+                }
+            }
+        }
+
+        // 3. Hungarian assignment
+        let result = hungarian_assignment(&cost_matrix, self.gate_threshold);
+
+        // 4. Update matched tracks
+        let mut associated_tracks = vec![false; alive.len()];
+        let mut associated_dets = vec![false; detections.len()];
+
+        for &(ai, dj) in &result.matches {
+            associated_tracks[ai] = true;
+            associated_dets[dj] = true;
+
+            let ti = alive[ai];
+            let track = &self.tracks[ti];
+
+            // KF update
+            let mut kf = KalmanFilter::new(track.state.clone(), track.covariance.clone());
+            kf.update(&detections[dj], h, r);
+
+            self.tracks[ti].state = kf.x;
+            self.tracks[ti].covariance = kf.p;
+        }
+
+        // 5. Lifecycle updates
+        let heads = self.heads.clone();
+        for (ai, &ti) in alive.iter().enumerate() {
+            let was_associated = associated_tracks[ai];
+            let head = heads.get(self.tracks[ti].class);
+            update_lifecycle(
+                &mut self.tracks[ti],
+                was_associated,
+                &head.confirmation,
+                &head.deletion,
+            );
+        }
+
+        // 6. Birth new tracks from unassigned detections
+        for (dj, det) in detections.iter().enumerate() {
+            if !associated_dets[dj] {
+                self.birth_track(det, TargetClass::Unknown);
+            }
+        }
+
+        // 7. Remove deleted tracks
+        self.tracks.retain(|t| t.lifecycle != TrackState::Deleted);
+    }
+
+    /// Create a new track from a detection.
+    fn birth_track(&mut self, detection: &DVector<f64>, class: TargetClass) {
+        let head = self.heads.get(class);
+        let mut state = DVector::zeros(head.state_dim);
+        // Initialize position from detection, velocity from zero
+        let h = &self.observation_matrix;
+        let m_dim = detection.len();
+        for i in 0..m_dim.min(head.state_dim) {
+            // Map measurement indices to state indices via H
+            for j in 0..head.state_dim {
+                if h[(i, j)].abs() > 0.5 {
+                    state[j] = detection[i];
+                }
+            }
+        }
+
+        let cov = DMatrix::from_diagonal(&DVector::from_column_slice(&head.initial_covariance));
+        let track = Track::new(state, cov, class);
+        self.tracks.push(track);
+    }
+
+    /// Number of confirmed tracks.
+    pub fn confirmed_count(&self) -> usize {
+        self.tracks
+            .iter()
+            .filter(|t| t.lifecycle == TrackState::Confirmed)
+            .count()
+    }
+
+    /// Number of alive tracks (tentative + confirmed + coasting).
+    pub fn alive_count(&self) -> usize {
+        self.tracks.iter().filter(|t| t.is_alive()).count()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn track_birth_and_confirmation() {
+        let mut tracker = MultiObjectTracker::new_cv_position(10.0, 50.0);
+
+        // Frame 1: detection at (100, 200, 50)
+        let det = DVector::from_column_slice(&[100.0, 200.0, 50.0]);
+        tracker.step(std::slice::from_ref(&det), 1.0);
+        assert_eq!(tracker.alive_count(), 1);
+        assert_eq!(tracker.confirmed_count(), 0); // still tentative
+
+        // Frames 2-4: same detection (close enough)
+        for _ in 0..3 {
+            tracker.step(std::slice::from_ref(&det), 1.0);
+        }
+        assert_eq!(tracker.confirmed_count(), 1);
+    }
+
+    #[test]
+    fn track_coast_and_delete() {
+        let mut tracker = MultiObjectTracker::new_cv_position(10.0, 50.0);
+
+        // Create and confirm a track
+        let det = DVector::from_column_slice(&[100.0, 200.0, 50.0]);
+        for _ in 0..5 {
+            tracker.step(std::slice::from_ref(&det), 1.0);
+        }
+        assert_eq!(tracker.confirmed_count(), 1);
+
+        // No detections for many frames -> coast then delete
+        for _ in 0..10 {
+            tracker.step(&[], 1.0);
+        }
+        assert_eq!(tracker.alive_count(), 0);
+    }
+
+    #[test]
+    fn track_identity_preserved() {
+        let mut tracker = MultiObjectTracker::new_cv_position(10.0, 50.0);
+
+        let det = DVector::from_column_slice(&[100.0, 200.0, 50.0]);
+        tracker.step(std::slice::from_ref(&det), 1.0);
+        let id = tracker.tracks[0].id;
+
+        // Re-associate for several frames
+        for _ in 0..5 {
+            tracker.step(std::slice::from_ref(&det), 1.0);
+        }
+        assert_eq!(tracker.tracks[0].id, id);
+    }
+
+    #[test]
+    fn no_id_collisions_many_tracks() {
+        use std::collections::HashSet;
+        let mut tracker = MultiObjectTracker::new_cv_position(10.0, 100.0);
+
+        for cycle in 0..1000 {
+            // Create detections far apart so each spawns a new track
+            let det = DVector::from_column_slice(&[cycle as f64 * 1000.0, 0.0, 0.0]);
+            tracker.step(&[det], 1.0);
+
+            // Check no duplicate IDs within the current live set
+            let mut ids = HashSet::new();
+            for t in &tracker.tracks {
+                assert!(ids.insert(t.id), "Duplicate TrackId in live set: {}", t.id);
+            }
+        }
+    }
+}

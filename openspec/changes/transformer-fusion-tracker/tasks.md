@@ -71,38 +71,38 @@
 
 ## 6. Transformer Inference (thresh-inference)
 
-- [ ] 6.1 Set up `ort` crate with ONNX Runtime session creation and execution provider selection (CPU/CUDA/TensorRT)
-- [ ] 6.2 Implement execution provider fallback chain: TensorRT → CUDA → CPU with logging
-- [ ] 6.3 Implement ONNX model loader that creates sessions with dynamic axes support
-- [ ] 6.4 Implement pipeline orchestrator: define stage ordering, pass intermediate tensors between sessions
-- [ ] 6.5 Implement BEVFusion-style pipeline config: camera encoder → LiDAR encoder → BEV pool → fusion → detection head
-- [ ] 6.6 Implement query-based pipeline config: backbone → transformer decoder with cross-attention → detections
-- [ ] 6.7 Implement per-component latency measurement and total pipeline timing
-- [ ] 6.8 Implement FP16/INT8 precision configuration per session
-- [ ] 6.9 Parse detection outputs (boxes, scores, classes, velocities) from ONNX output tensors into `BoundingBox3D`
+- [x] 6.1 Set up `ort` crate with ONNX Runtime session creation and execution provider selection (CPU/CUDA/TensorRT)
+- [x] 6.2 Implement execution provider fallback chain: TensorRT → CUDA → CPU with logging
+- [x] 6.3 Implement ONNX model loader that creates sessions with dynamic axes support
+- [x] 6.4 Implement pipeline orchestrator: define stage ordering, pass intermediate tensors between sessions
+- [x] 6.5 Implement BEVFusion-style pipeline config: camera encoder → LiDAR encoder → BEV pool → fusion → detection head
+- [x] 6.6 Implement query-based pipeline config: backbone → transformer decoder with cross-attention → detections
+- [x] 6.7 Implement per-component latency measurement and total pipeline timing
+- [x] 6.8 Implement FP16/INT8 precision configuration per session
+- [x] 6.9 Parse detection outputs (boxes, scores, classes, velocities) from ONNX output tensors into `BoundingBox3D`
 - [ ] 6.10 Write tests: load a simple test ONNX model, verify session creation and inference runs
 - [ ] 6.11 Write tests: dynamic shape input with different batch sizes produces correct output shapes
 
 ## 7. Track Management (thresh-tracker)
 
-- [ ] 7.1 Implement Track struct: id, state, covariance, lifecycle state, class, history
-- [ ] 7.2 Implement track lifecycle state machine: Tentative → Confirmed → Coasting → Deleted
-- [ ] 7.3 Implement M-of-N confirmation policy (configurable M and N)
-- [ ] 7.4 Implement max-coast-age deletion policy
-- [ ] 7.5 Implement track birth from unassigned detections with configurable initial covariance
-- [ ] 7.6 Implement multi-sensor corroborated track initialization (spatial gating across sensors)
-- [ ] 7.7 Implement class-specific track heads: mapping target class → motion model + noise params + policies
-- [ ] 7.8 Implement track class reclassification with motion model switching and state adaptation
-- [ ] 7.9 Implement globally unique TrackId allocation (monotonic counter, never reused)
-- [ ] 7.10 Implement the main tracker loop: predict all tracks → get detections → associate → update → manage lifecycle
-- [ ] 7.11 Write tests: M-of-N confirmation with 3-of-5 policy
-- [ ] 7.12 Write tests: track coasts for N frames then gets deleted
-- [ ] 7.13 Write tests: track identity preserved through coast and re-association
-- [ ] 7.14 Write tests: 10,000 track create/delete cycles — no ID collisions
+- [x] 7.1 Implement Track struct: id, state, covariance, lifecycle state, class, history
+- [x] 7.2 Implement track lifecycle state machine: Tentative → Confirmed → Coasting → Deleted
+- [x] 7.3 Implement M-of-N confirmation policy (configurable M and N)
+- [x] 7.4 Implement max-coast-age deletion policy
+- [x] 7.5 Implement track birth from unassigned detections with configurable initial covariance
+- [x] 7.6 Implement multi-sensor corroborated track initialization (spatial gating across sensors)
+- [x] 7.7 Implement class-specific track heads: mapping target class → motion model + noise params + policies
+- [x] 7.8 Implement track class reclassification with motion model switching and state adaptation
+- [x] 7.9 Implement globally unique TrackId allocation (monotonic counter, never reused)
+- [x] 7.10 Implement the main tracker loop: predict all tracks → get detections → associate → update → manage lifecycle
+- [x] 7.11 Write tests: M-of-N confirmation with 3-of-5 policy
+- [x] 7.12 Write tests: track coasts for N frames then gets deleted
+- [x] 7.13 Write tests: track identity preserved through coast and re-association
+- [x] 7.14 Write tests: 10,000 track create/delete cycles — no ID collisions
 
 ## 8. Stone Soup Bridge (thresh-bridge)
 
-- [ ] 8.1 Set up PyO3 with pyo3-build-config, gated behind `stonesoup` Cargo feature
+- [x] 8.1 Set up PyO3 with pyo3-build-config, gated behind `stonesoup` Cargo feature
 - [ ] 8.2 Implement nalgebra-to-numpy type conversion (DVector → numpy array, DMatrix → numpy 2D array)
 - [ ] 8.3 Implement Measurement → Stone Soup Detection conversion
 - [ ] 8.4 Implement wrapper for Stone Soup JPDA data associator
@@ -111,42 +111,42 @@
 - [ ] 8.7 Implement wrapper for Stone Soup Gaussian Mixture PHD filter
 - [ ] 8.8 Handle GIL management: acquire for Python calls, release during Rust compute
 - [ ] 8.9 Implement graceful error when Python/Stone Soup is not installed at runtime
-- [ ] 8.10 Write tests: build without `stonesoup` feature succeeds, core tracking works
+- [x] 8.10 Write tests: build without `stonesoup` feature succeeds, core tracking works
 - [ ] 8.11 Write integration tests: JPDA via bridge matches Stone Soup's own output on reference scenario
 
 ## 9. Synthetic Data Generation (thresh-synth)
 
-- [ ] 9.1 Implement trajectory generator base: initial state, time step, duration, segment list
-- [ ] 9.2 Implement CV trajectory segment
-- [ ] 9.3 Implement CA trajectory segment
-- [ ] 9.4 Implement CTRV maneuver trajectory segment with configurable turn rate
-- [ ] 9.5 Implement ballistic trajectory segment with gravity and optional drag
-- [ ] 9.6 Implement multi-segment trajectory stitching with smooth transitions
-- [ ] 9.7 Implement radar measurement generator: range/azimuth/elevation noise, P_d, Poisson clutter
+- [x] 9.1 Implement trajectory generator base: initial state, time step, duration, segment list
+- [x] 9.2 Implement CV trajectory segment
+- [x] 9.3 Implement CA trajectory segment
+- [x] 9.4 Implement CTRV maneuver trajectory segment with configurable turn rate
+- [x] 9.5 Implement ballistic trajectory segment with gravity and optional drag
+- [x] 9.6 Implement multi-segment trajectory stitching with smooth transitions
+- [x] 9.7 Implement radar measurement generator: range/azimuth/elevation noise, P_d, Poisson clutter
 - [ ] 9.8 Implement RCS-dependent detection probability via radar equation
-- [ ] 9.9 Implement EO/IR measurement generator: angular noise, FOV constraints, IR-signature-dependent P_d
-- [ ] 9.10 Implement ADS-B message generator: 1 Hz position with NACp quantization and dropout
-- [ ] 9.11 Implement multi-target scenario composer: N targets × M sensors, time-ordered output stream
-- [ ] 9.12 Implement scenario serialization to JSON for reproducible test cases
-- [ ] 9.13 Write tests: CV trajectory matches analytical position at each timestep
-- [ ] 9.14 Write tests: radar measurement noise statistics match configured sigma over 10K samples
-- [ ] 9.15 Write tests: multi-target scenario with 50 targets generates coherent data
+- [x] 9.9 Implement EO/IR measurement generator: angular noise, FOV constraints, IR-signature-dependent P_d
+- [x] 9.10 Implement ADS-B message generator: 1 Hz position with NACp quantization and dropout
+- [x] 9.11 Implement multi-target scenario composer: N targets × M sensors, time-ordered output stream
+- [x] 9.12 Implement scenario serialization to JSON for reproducible test cases
+- [x] 9.13 Write tests: CV trajectory matches analytical position at each timestep
+- [x] 9.14 Write tests: radar measurement noise statistics match configured sigma over 10K samples
+- [x] 9.15 Write tests: multi-target scenario with 50 targets generates coherent data
 
 ## 10. Evaluation Metrics (thresh-eval)
 
-- [ ] 10.1 Implement ground-truth to track matching via Hungarian assignment at each frame
-- [ ] 10.2 Implement MOTA computation: 1 - (FN + FP + IDSW) / GT
-- [ ] 10.3 Implement MOTP computation: average localization error for matched pairs
-- [ ] 10.4 Implement IDF1 computation: optimal global trajectory matching, 2*IDTP / (2*IDTP + IDFP + IDFN)
-- [ ] 10.5 Implement HOTA computation: sqrt(DetA * AssA) integrated over IoU thresholds 0.05 to 0.95
-- [ ] 10.6 Implement per-threshold HOTA breakdown (DetA, AssA at each alpha)
-- [ ] 10.7 Implement AMOTA: MOTA averaged over multiple recall thresholds
-- [ ] 10.8 Implement per-class metric breakdown
-- [ ] 10.9 Implement JSON report output with all metrics keyed by name and class
-- [ ] 10.10 Implement human-readable table output (terminal-formatted)
-- [ ] 10.11 Write tests: perfect tracking yields MOTA=1.0, HOTA=1.0
-- [ ] 10.12 Write tests: known ID switch scenario yields correct IDSW count and MOTA penalty
-- [ ] 10.13 Write tests: HOTA decomposition — high DetA + low AssA reflects in overall score
+- [x] 10.1 Implement ground-truth to track matching via Hungarian assignment at each frame
+- [x] 10.2 Implement MOTA computation: 1 - (FN + FP + IDSW) / GT
+- [x] 10.3 Implement MOTP computation: average localization error for matched pairs
+- [x] 10.4 Implement IDF1 computation: optimal global trajectory matching, 2*IDTP / (2*IDTP + IDFP + IDFN)
+- [x] 10.5 Implement HOTA computation: sqrt(DetA * AssA) integrated over IoU thresholds 0.05 to 0.95
+- [x] 10.6 Implement per-threshold HOTA breakdown (DetA, AssA at each alpha)
+- [x] 10.7 Implement AMOTA: MOTA averaged over multiple recall thresholds
+- [x] 10.8 Implement per-class metric breakdown
+- [x] 10.9 Implement JSON report output with all metrics keyed by name and class
+- [x] 10.10 Implement human-readable table output (terminal-formatted)
+- [x] 10.11 Write tests: perfect tracking yields MOTA=1.0, HOTA=1.0
+- [x] 10.12 Write tests: known ID switch scenario yields correct IDSW count and MOTA penalty
+- [x] 10.13 Write tests: HOTA decomposition — high DetA + low AssA reflects in overall score
 
 ## 11. Integration and End-to-End Testing
 
