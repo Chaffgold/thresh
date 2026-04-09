@@ -4,9 +4,9 @@ use thresh_association::hungarian::hungarian_assignment;
 
 /// A frame's ground truth and track positions.
 pub struct FrameData {
-    /// Ground truth positions [(id, [x,y,z])].
+    /// Ground truth positions `[(id, [x,y,z])]`.
     pub gt: Vec<(u64, [f64; 3])>,
-    /// Track positions [(id, [x,y,z])].
+    /// Track positions `[(id, [x,y,z])]`.
     pub tracks: Vec<(u64, [f64; 3])>,
 }
 

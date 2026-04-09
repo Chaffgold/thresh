@@ -914,6 +914,7 @@ dependencies = [
 name = "thresh-bridge"
 version = "0.1.0"
 dependencies = [
+ "nalgebra",
  "pyo3",
  "thresh-core",
 ]
