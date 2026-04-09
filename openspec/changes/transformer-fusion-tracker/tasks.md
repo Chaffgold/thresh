@@ -150,9 +150,9 @@
 
 ## 11. Integration and End-to-End Testing
 
-- [ ] 11.1 Create an end-to-end integration test: synth scenario → tracker (KF + Hungarian) → eval metrics
-- [ ] 11.2 Create a multi-sensor integration test: radar + EO/IR → centralized fusion → tracker → eval
+- [x] 11.1 Create an end-to-end integration test: synth scenario → tracker (KF + Hungarian) → eval metrics
+- [x] 11.2 Create a multi-sensor integration test: radar + EO/IR → centralized fusion → tracker → eval
 - [ ] 11.3 Create a class-specific tracking test: mixed aerodynamic + ballistic targets with appropriate models
-- [ ] 11.4 Benchmark tracker throughput: measure Hz for 50-target scenario with UKF + Hungarian
-- [ ] 11.5 Document example usage in README.md with minimal code snippets
+- [x] 11.4 Benchmark tracker throughput: measure Hz for 50-target scenario with UKF + Hungarian
+- [x] 11.5 Document example usage in README.md with minimal code snippets
 - [x] 11.6 Add CI configuration (GitHub Actions) for `cargo test`, `cargo clippy`, `cargo fmt --check`

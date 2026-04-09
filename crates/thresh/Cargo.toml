@@ -21,3 +21,7 @@ stonesoup = ["thresh-bridge/stonesoup"]
 
 [dependencies.thresh-bridge]
 path = "../thresh-bridge"
+
+[dev-dependencies]
+nalgebra = { workspace = true }
+rand = "0.9"
