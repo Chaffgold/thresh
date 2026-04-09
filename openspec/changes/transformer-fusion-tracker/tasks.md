@@ -80,8 +80,8 @@
 - [x] 6.7 Implement per-component latency measurement and total pipeline timing
 - [x] 6.8 Implement FP16/INT8 precision configuration per session
 - [x] 6.9 Parse detection outputs (boxes, scores, classes, velocities) from ONNX output tensors into `BoundingBox3D`
-- [ ] 6.10 Write tests: load a simple test ONNX model, verify session creation and inference runs
-- [ ] 6.11 Write tests: dynamic shape input with different batch sizes produces correct output shapes
+- [x] 6.10 Write tests: load a simple test ONNX model, verify session creation and inference runs
+- [x] 6.11 Write tests: dynamic shape input with different batch sizes produces correct output shapes
 
 ## 7. Track Management (thresh-tracker)
 
@@ -103,16 +103,16 @@
 ## 8. Stone Soup Bridge (thresh-bridge)
 
 - [x] 8.1 Set up PyO3 with pyo3-build-config, gated behind `stonesoup` Cargo feature
-- [ ] 8.2 Implement nalgebra-to-numpy type conversion (DVector → numpy array, DMatrix → numpy 2D array)
-- [ ] 8.3 Implement Measurement → Stone Soup Detection conversion
-- [ ] 8.4 Implement wrapper for Stone Soup JPDA data associator
-- [ ] 8.5 Implement wrapper for Stone Soup MHT tracker
-- [ ] 8.6 Implement wrapper for Stone Soup IMM filter
-- [ ] 8.7 Implement wrapper for Stone Soup Gaussian Mixture PHD filter
-- [ ] 8.8 Handle GIL management: acquire for Python calls, release during Rust compute
-- [ ] 8.9 Implement graceful error when Python/Stone Soup is not installed at runtime
+- [x] 8.2 Implement nalgebra-to-numpy type conversion (DVector → numpy array, DMatrix → numpy 2D array)
+- [x] 8.3 Implement Measurement → Stone Soup Detection conversion
+- [x] 8.4 Implement wrapper for Stone Soup JPDA data associator
+- [x] 8.5 Implement wrapper for Stone Soup MHT tracker
+- [x] 8.6 Implement wrapper for Stone Soup IMM filter
+- [x] 8.7 Implement wrapper for Stone Soup Gaussian Mixture PHD filter
+- [x] 8.8 Handle GIL management: acquire for Python calls, release during Rust compute
+- [x] 8.9 Implement graceful error when Python/Stone Soup is not installed at runtime
 - [x] 8.10 Write tests: build without `stonesoup` feature succeeds, core tracking works
-- [ ] 8.11 Write integration tests: JPDA via bridge matches Stone Soup's own output on reference scenario
+- [x] 8.11 Write integration tests: JPDA via bridge matches Stone Soup's own output on reference scenario
 
 ## 9. Synthetic Data Generation (thresh-synth)
 
@@ -123,7 +123,7 @@
 - [x] 9.5 Implement ballistic trajectory segment with gravity and optional drag
 - [x] 9.6 Implement multi-segment trajectory stitching with smooth transitions
 - [x] 9.7 Implement radar measurement generator: range/azimuth/elevation noise, P_d, Poisson clutter
-- [ ] 9.8 Implement RCS-dependent detection probability via radar equation
+- [x] 9.8 Implement RCS-dependent detection probability via radar equation
 - [x] 9.9 Implement EO/IR measurement generator: angular noise, FOV constraints, IR-signature-dependent P_d
 - [x] 9.10 Implement ADS-B message generator: 1 Hz position with NACp quantization and dropout
 - [x] 9.11 Implement multi-target scenario composer: N targets × M sensors, time-ordered output stream
@@ -152,7 +152,7 @@
 
 - [x] 11.1 Create an end-to-end integration test: synth scenario → tracker (KF + Hungarian) → eval metrics
 - [x] 11.2 Create a multi-sensor integration test: radar + EO/IR → centralized fusion → tracker → eval
-- [ ] 11.3 Create a class-specific tracking test: mixed aerodynamic + ballistic targets with appropriate models
+- [x] 11.3 Create a class-specific tracking test: mixed aerodynamic + ballistic targets with appropriate models
 - [x] 11.4 Benchmark tracker throughput: measure Hz for 50-target scenario with UKF + Hungarian
 - [x] 11.5 Document example usage in README.md with minimal code snippets
 - [x] 11.6 Add CI configuration (GitHub Actions) for `cargo test`, `cargo clippy`, `cargo fmt --check`
