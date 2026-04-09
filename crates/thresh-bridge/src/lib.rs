@@ -1,7 +1,7 @@
 //! PyO3 bridge to Stone Soup for advanced tracking algorithms (JPDA, MHT, IMM).
 //!
 //! All modules are gated behind the `stonesoup` Cargo feature which pulls in
-//! [`pyo3`].  When the feature is disabled, this crate is intentionally empty
+//! `pyo3`.  When the feature is disabled, this crate is intentionally empty
 //! so that downstream crates can unconditionally depend on it without requiring
 //! a Python installation.
 
