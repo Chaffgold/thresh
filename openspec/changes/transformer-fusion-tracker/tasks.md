@@ -43,31 +43,31 @@
 
 ## 4. Data Association (thresh-association)
 
-- [ ] 4.1 Implement Hungarian algorithm (Jonker-Volgenant) for optimal linear assignment on cost matrices
-- [ ] 4.2 Handle rectangular cost matrices with unassigned track/detection lists
-- [ ] 4.3 Implement Mahalanobis distance computation: d^2 = (z - Hx)^T S^{-1} (z - Hx)
-- [ ] 4.4 Implement chi-squared gating with configurable significance level and auto-adjustment for measurement dimension
-- [ ] 4.5 Implement 2D IoU computation for bounding boxes
-- [ ] 4.6 Implement 3D IoU computation for rotated bounding boxes (x, y, z, l, w, h, yaw)
-- [ ] 4.7 Implement fused cost matrix: C = alpha * d_motion + (1-alpha) * d_appearance with configurable alpha
-- [ ] 4.8 Implement cascaded association: high-confidence first pass, low-confidence second pass
-- [ ] 4.9 Write tests: Hungarian on known 5x5 matrix matches expected optimal assignment
-- [ ] 4.10 Write tests: Mahalanobis gating correctly rejects out-of-gate detections
-- [ ] 4.11 Write tests: 3D IoU returns 1.0 for identical boxes, 0.0 for non-overlapping
+- [x] 4.1 Implement Hungarian algorithm (Jonker-Volgenant) for optimal linear assignment on cost matrices
+- [x] 4.2 Handle rectangular cost matrices with unassigned track/detection lists
+- [x] 4.3 Implement Mahalanobis distance computation: d^2 = (z - Hx)^T S^{-1} (z - Hx)
+- [x] 4.4 Implement chi-squared gating with configurable significance level and auto-adjustment for measurement dimension
+- [x] 4.5 Implement 2D IoU computation for bounding boxes
+- [x] 4.6 Implement 3D IoU computation for rotated bounding boxes (x, y, z, l, w, h, yaw)
+- [x] 4.7 Implement fused cost matrix: C = alpha * d_motion + (1-alpha) * d_appearance with configurable alpha
+- [x] 4.8 Implement cascaded association: high-confidence first pass, low-confidence second pass
+- [x] 4.9 Write tests: Hungarian on known 5x5 matrix matches expected optimal assignment
+- [x] 4.10 Write tests: Mahalanobis gating correctly rejects out-of-gate detections
+- [x] 4.11 Write tests: 3D IoU returns 1.0 for identical boxes, 0.0 for non-overlapping
 
 ## 5. Sensor Fusion (thresh-fusion)
 
-- [ ] 5.1 Implement centralized measurement stacking: z_stacked, H_stacked, R_stacked (block-diagonal)
-- [ ] 5.2 Implement single-update centralized fusion with stacked measurements
-- [ ] 5.3 Implement asynchronous sensor updates — apply individual sensor measurements as they arrive
-- [ ] 5.4 Implement Information Filter: Y = P^{-1}, y_hat = P^{-1} x_hat, additive update
-- [ ] 5.5 Implement information-to-covariance conversion (Y^{-1} → P, x_hat recovery)
-- [ ] 5.6 Implement Covariance Intersection (CI) with 1D line search for optimal omega
-- [ ] 5.7 Implement sensor registration: store sensor params, transform measurements to common frame
-- [ ] 5.8 Implement radar polar-to-Cartesian measurement conversion using sensor registration
-- [ ] 5.9 Write tests: centralized fusion of 2 sensors matches sequential independent updates
-- [ ] 5.10 Write tests: information filter produces equivalent result to standard KF update
-- [ ] 5.11 Write tests: CI fused covariance bounds both input covariances
+- [x] 5.1 Implement centralized measurement stacking: z_stacked, H_stacked, R_stacked (block-diagonal)
+- [x] 5.2 Implement single-update centralized fusion with stacked measurements
+- [x] 5.3 Implement asynchronous sensor updates — apply individual sensor measurements as they arrive
+- [x] 5.4 Implement Information Filter: Y = P^{-1}, y_hat = P^{-1} x_hat, additive update
+- [x] 5.5 Implement information-to-covariance conversion (Y^{-1} → P, x_hat recovery)
+- [x] 5.6 Implement Covariance Intersection (CI) with 1D line search for optimal omega
+- [x] 5.7 Implement sensor registration: store sensor params, transform measurements to common frame
+- [x] 5.8 Implement radar polar-to-Cartesian measurement conversion using sensor registration
+- [x] 5.9 Write tests: centralized fusion of 2 sensors matches sequential independent updates
+- [x] 5.10 Write tests: information filter produces equivalent result to standard KF update
+- [x] 5.11 Write tests: CI fused covariance bounds both input covariances
 
 ## 6. Transformer Inference (thresh-inference)
 
