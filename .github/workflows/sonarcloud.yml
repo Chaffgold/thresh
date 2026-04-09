@@ -35,5 +35,5 @@ jobs:
             -Dsonar.test.inclusions=**/*test*/**,**/tests/**
             -Dsonar.exclusions=**/target/**
             -Dsonar.coverage.exclusions=**/tests/**,**/test*/**
-            -Dsonar.coverageReportPaths=lcov.info
+            -Dsonar.community.rust.lcov.reportPaths=lcov.info
             -Dsonar.community.rust.clippy.reportPaths=clippy-report.json
