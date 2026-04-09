@@ -29,3 +29,10 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
+
+      - id: openspec-validate
+        name: openspec validate
+        entry: openspec validate --all --strict --no-interactive
+        language: system
+        files: ^openspec/
+        pass_filenames: false
