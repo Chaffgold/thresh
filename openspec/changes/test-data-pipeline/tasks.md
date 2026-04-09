@@ -14,8 +14,14 @@
 - [ ] 2.2 Implement ECEF → ENU relative to configurable reference point
 - [ ] 2.3 Implement WGS84 → ENU convenience function (compose 2.1 + 2.2)
 - [ ] 2.4 Implement TEME → ECEF (for SGP4 output, includes Earth rotation via GMST)
-- [ ] 2.5 Write tests: known reference points (e.g., JFK airport) match published ECEF coordinates
-- [ ] 2.6 Write tests: ENU roundtrip (WGS84 → ENU → WGS84) within 1 cm
+- [ ] 2.5 Implement ECI (J2000/GCRF) coordinate frame type and conversions
+- [ ] 2.6 Implement ECI → ECEF transform (Earth rotation angle via GMST/ERA)
+- [ ] 2.7 Implement ECEF → ECI inverse transform
+- [ ] 2.8 Implement ECI → ENU convenience function (compose ECI→ECEF + ECEF→ENU)
+- [ ] 2.9 Write tests: known reference points (e.g., JFK airport) match published ECEF coordinates
+- [ ] 2.10 Write tests: ENU roundtrip (WGS84 → ENU → WGS84) within 1 cm
+- [ ] 2.11 Write tests: ECI↔ECEF roundtrip at known epoch matches reference values
+- [ ] 2.12 Write tests: ECI→ENU for ISS pass matches published ground station observations
 
 ## 3. ADS-B Ingestion
 
