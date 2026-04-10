@@ -12,10 +12,17 @@ nuscenes = []
 
 [dependencies]
 thresh-core = { path = "../thresh-core" }
+thresh-synth = { path = "../thresh-synth" }
+thresh-tracker = { path = "../thresh-tracker" }
+thresh-eval = { path = "../thresh-eval" }
 nalgebra = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
+rand = "0.9"
 reqwest = { workspace = true, optional = true }
 csv = { workspace = true, optional = true }
 sgp4 = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = "3"
