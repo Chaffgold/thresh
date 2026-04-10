@@ -280,8 +280,9 @@ mod tests {
         let altitude = 400_000.0;
         let sat_r = r_earth + altitude;
 
-        // ECI position such that, when rotated by GMST, the satellite is along ECEF +x.
-        // pos_eci = R_z(-gmst) * (sat_r, 0, 0)
+        // ECI position chosen so that after R_z(gmst) rotation it maps to ECEF +x.
+        // R_z(gmst) * pos_eci = (sat_r, 0, 0) => pos_eci = R_z(-gmst) * (sat_r, 0, 0)
+        //   = (sat_r * cos(gmst), sat_r * sin(gmst), 0)
         let pos_eci = Vector3::new(sat_r * gmst.cos(), sat_r * gmst.sin(), 0.0);
 
         let enu = eci_to_enu(&pos_eci, jd, 0.0, 0.0, 0.0);

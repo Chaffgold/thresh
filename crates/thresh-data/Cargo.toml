@@ -6,12 +6,16 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-adsb = []
-orbital = []
+adsb = ["reqwest", "csv"]
+orbital = ["sgp4"]
 nuscenes = []
 
 [dependencies]
 thresh-core = { path = "../thresh-core" }
+nalgebra = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
+reqwest = { workspace = true, optional = true }
+csv = { workspace = true, optional = true }
+sgp4 = { workspace = true, optional = true }

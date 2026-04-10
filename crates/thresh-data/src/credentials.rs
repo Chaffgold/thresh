@@ -20,9 +20,11 @@ fn credentials_path() -> Option<PathBuf> {
     dirs_home().map(|h| h.join(".thresh").join("credentials.toml"))
 }
 
-/// Return the user's home directory.
+/// Return the user's home directory (cross-platform).
 fn dirs_home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
 }
 
 /// Load credentials for `service` (e.g. `"opensky"`).
@@ -73,11 +75,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn env_vars_override_file() {
-        // With no env vars and no file, everything should be None.
+    fn returns_none_when_no_credentials_configured() {
         let creds = load_credentials("nonexistent_test_service_xyz");
         assert!(creds.username.is_none());
         assert!(creds.password.is_none());
         assert!(creds.api_key.is_none());
+    }
+
+    #[test]
+    fn env_vars_are_read() {
+        let service = "covtest_svc_12345";
+        let upper = service.to_uppercase();
+        // SAFETY: test-only, no concurrent access to these unique env vars
+        unsafe {
+            std::env::set_var(format!("THRESH_{upper}_USERNAME"), "alice");
+            std::env::set_var(format!("THRESH_{upper}_PASSWORD"), "secret");
+            std::env::set_var(format!("THRESH_{upper}_API_KEY"), "key123");
+        }
+
+        let creds = load_credentials(service);
+        assert_eq!(creds.username.as_deref(), Some("alice"));
+        assert_eq!(creds.password.as_deref(), Some("secret"));
+        assert_eq!(creds.api_key.as_deref(), Some("key123"));
+
+        // Clean up
+        unsafe {
+            std::env::remove_var(format!("THRESH_{upper}_USERNAME"));
+            std::env::remove_var(format!("THRESH_{upper}_PASSWORD"));
+            std::env::remove_var(format!("THRESH_{upper}_API_KEY"));
+        }
+    }
+
+    #[test]
+    fn credentials_path_returns_some() {
+        // As long as HOME or USERPROFILE is set, we should get a path
+        let path = credentials_path();
+        assert!(path.is_some());
+        let p = path.unwrap();
+        assert!(p.ends_with("credentials.toml"));
     }
 }
