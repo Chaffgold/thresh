@@ -76,6 +76,24 @@ impl Track {
     }
 }
 
+impl crate::cost_matrix::LinearTrack for Track {
+    fn is_alive(&self) -> bool {
+        self.is_alive()
+    }
+    fn state(&self) -> &DVector<f64> {
+        &self.state
+    }
+    fn state_mut(&mut self) -> &mut DVector<f64> {
+        &mut self.state
+    }
+    fn covariance(&self) -> &DMatrix<f64> {
+        &self.covariance
+    }
+    fn covariance_mut(&mut self) -> &mut DMatrix<f64> {
+        &mut self.covariance
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -18,7 +18,7 @@
 use nalgebra::{DMatrix, DVector};
 use thresh_association::hungarian::hungarian_assignment;
 
-use crate::cost_matrix::{build_cost_matrix, predict_linear};
+use crate::cost_matrix::{alive_indices, build_track_cost_matrix, predict_all};
 use thresh_core::measurement::Measurement;
 use thresh_core::othr::{OthrSensorRegistration, vincenty_direct};
 use thresh_core::track::{TargetClass, TrackId, TrackState};
@@ -197,6 +197,24 @@ impl StereoTrack {
     }
 }
 
+impl crate::cost_matrix::LinearTrack for StereoTrack {
+    fn is_alive(&self) -> bool {
+        self.is_alive()
+    }
+    fn state(&self) -> &DVector<f64> {
+        &self.state
+    }
+    fn state_mut(&mut self) -> &mut DVector<f64> {
+        &mut self.state
+    }
+    fn covariance(&self) -> &DMatrix<f64> {
+        &self.covariance
+    }
+    fn covariance_mut(&mut self) -> &mut DMatrix<f64> {
+        &mut self.covariance
+    }
+}
+
 /// Multi-object tracker operating in a local stereographic projection.
 pub struct MultiObjectTrackerStereographic {
     /// Active tracks.
@@ -263,39 +281,19 @@ impl MultiObjectTrackerStereographic {
 
     /// Run one predict → associate → update → lifecycle cycle.
     pub fn step(&mut self, detections: &[DVector<f64>], dt: f64) {
-        // 1. Predict all alive tracks (uses shared predict_linear helper).
+        // 1. Predict all alive tracks
         let (f, q) = self.transition(dt);
-        for track in self.tracks.iter_mut() {
-            if track.is_alive() {
-                let (s, c) = predict_linear(&track.state, &track.covariance, &f, &q);
-                track.state = s;
-                track.covariance = c;
-            }
-        }
+        predict_all(&mut self.tracks, &f, &q);
 
-        // 2. Build Mahalanobis cost matrix (uses shared build_cost_matrix helper).
-        let alive: Vec<usize> = self
-            .tracks
-            .iter()
-            .enumerate()
-            .filter(|(_, t)| t.is_alive())
-            .map(|(i, _)| i)
-            .collect();
-
+        // 2. Build Mahalanobis cost matrix
+        let alive = alive_indices(&self.tracks);
         let h = Self::observation_matrix();
         let r = Self::default_measurement_noise();
-
-        let predicted_obs: Vec<DVector<f64>> = alive
-            .iter()
-            .map(|&ti| &h * &self.tracks[ti].state)
-            .collect();
-        let innovation_covs: Vec<DMatrix<f64>> = alive
-            .iter()
-            .map(|&ti| &h * &self.tracks[ti].covariance * h.transpose() + &r)
-            .collect();
-        let cost_matrix = build_cost_matrix(
-            &predicted_obs,
-            &innovation_covs,
+        let cost_matrix = build_track_cost_matrix(
+            &self.tracks,
+            &alive,
+            &h,
+            &r,
             detections,
             self.gate_threshold,
         );

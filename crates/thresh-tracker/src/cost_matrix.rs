@@ -6,6 +6,57 @@
 use nalgebra::{DMatrix, DVector};
 use thresh_association::gating::mahalanobis_squared;
 
+/// Trait used by [`predict_all`] and [`build_track_cost_matrix`] so the same
+/// helpers can drive multiple tracker variants whose track types only differ
+/// in fields beyond the linear-Gaussian core.
+pub trait LinearTrack {
+    fn is_alive(&self) -> bool;
+    fn state(&self) -> &DVector<f64>;
+    fn state_mut(&mut self) -> &mut DVector<f64>;
+    fn covariance(&self) -> &DMatrix<f64>;
+    fn covariance_mut(&mut self) -> &mut DMatrix<f64>;
+}
+
+/// Apply a linear-Gaussian predict step to every alive track in `tracks`.
+pub fn predict_all<T: LinearTrack>(tracks: &mut [T], f: &DMatrix<f64>, q: &DMatrix<f64>) {
+    for track in tracks.iter_mut() {
+        if !track.is_alive() {
+            continue;
+        }
+        let (s, c) = predict_linear(track.state(), track.covariance(), f, q);
+        *track.state_mut() = s;
+        *track.covariance_mut() = c;
+    }
+}
+
+/// Collect indices of alive tracks.
+pub fn alive_indices<T: LinearTrack>(tracks: &[T]) -> Vec<usize> {
+    tracks
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.is_alive())
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Build a Mahalanobis cost matrix for a set of alive tracks given the
+/// observation matrix and measurement noise that apply uniformly to all tracks.
+pub fn build_track_cost_matrix<T: LinearTrack>(
+    tracks: &[T],
+    alive: &[usize],
+    h: &DMatrix<f64>,
+    r: &DMatrix<f64>,
+    detections: &[DVector<f64>],
+    gate_threshold: f64,
+) -> Vec<Vec<f64>> {
+    let predicted_obs: Vec<DVector<f64>> = alive.iter().map(|&ti| h * tracks[ti].state()).collect();
+    let innovation_covs: Vec<DMatrix<f64>> = alive
+        .iter()
+        .map(|&ti| h * tracks[ti].covariance() * h.transpose() + r)
+        .collect();
+    build_cost_matrix(&predicted_obs, &innovation_covs, detections, gate_threshold)
+}
+
 /// Build a Mahalanobis-distance cost matrix between predicted track
 /// observations and raw detection vectors.
 ///
