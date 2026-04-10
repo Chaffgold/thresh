@@ -16,8 +16,9 @@
 //! vertical channel left untouched.
 
 use nalgebra::{DMatrix, DVector};
-use thresh_association::gating::mahalanobis_squared;
 use thresh_association::hungarian::hungarian_assignment;
+
+use crate::cost_matrix::{build_cost_matrix, predict_linear};
 use thresh_core::measurement::Measurement;
 use thresh_core::othr::{OthrSensorRegistration, vincenty_direct};
 use thresh_core::track::{TargetClass, TrackId, TrackState};
@@ -262,16 +263,17 @@ impl MultiObjectTrackerStereographic {
 
     /// Run one predict → associate → update → lifecycle cycle.
     pub fn step(&mut self, detections: &[DVector<f64>], dt: f64) {
-        // 1. Predict all alive tracks.
+        // 1. Predict all alive tracks (uses shared predict_linear helper).
         let (f, q) = self.transition(dt);
         for track in self.tracks.iter_mut() {
             if track.is_alive() {
-                track.state = &f * &track.state;
-                track.covariance = &f * &track.covariance * f.transpose() + &q;
+                let (s, c) = predict_linear(&track.state, &track.covariance, &f, &q);
+                track.state = s;
+                track.covariance = c;
             }
         }
 
-        // 2. Build Mahalanobis cost matrix over alive tracks.
+        // 2. Build Mahalanobis cost matrix (uses shared build_cost_matrix helper).
         let alive: Vec<usize> = self
             .tracks
             .iter()
@@ -283,18 +285,20 @@ impl MultiObjectTrackerStereographic {
         let h = Self::observation_matrix();
         let r = Self::default_measurement_noise();
 
-        let mut cost_matrix = vec![vec![self.gate_threshold; detections.len()]; alive.len()];
-        for (ai, &ti) in alive.iter().enumerate() {
-            let track = &self.tracks[ti];
-            let pred_z = &h * &track.state;
-            let s = &h * &track.covariance * h.transpose() + &r;
-            for (dj, det) in detections.iter().enumerate() {
-                let d2 = mahalanobis_squared(det, &pred_z, &s);
-                if d2 < self.gate_threshold {
-                    cost_matrix[ai][dj] = d2;
-                }
-            }
-        }
+        let predicted_obs: Vec<DVector<f64>> = alive
+            .iter()
+            .map(|&ti| &h * &self.tracks[ti].state)
+            .collect();
+        let innovation_covs: Vec<DMatrix<f64>> = alive
+            .iter()
+            .map(|&ti| &h * &self.tracks[ti].covariance * h.transpose() + &r)
+            .collect();
+        let cost_matrix = build_cost_matrix(
+            &predicted_obs,
+            &innovation_covs,
+            detections,
+            self.gate_threshold,
+        );
 
         // 3. Hungarian assignment.
         let result = hungarian_assignment(&cost_matrix, self.gate_threshold);

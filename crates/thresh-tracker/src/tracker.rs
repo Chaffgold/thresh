@@ -1,12 +1,13 @@
 //! Main tracker loop: predict -> associate -> update -> lifecycle.
 
 use nalgebra::{DMatrix, DVector};
-use thresh_association::gating::mahalanobis_squared;
 use thresh_association::hungarian::hungarian_assignment;
 use thresh_core::track::{TargetClass, TrackState};
 use thresh_filter::kf::KalmanFilter;
 use thresh_filter::models::cv::ConstantVelocity;
 use thresh_filter::traits::{LinearModel, MotionModel};
+
+use crate::cost_matrix::{build_cost_matrix, predict_linear};
 
 use crate::heads::HeadRegistry;
 use crate::lifecycle::update_lifecycle;
@@ -52,19 +53,19 @@ impl MultiObjectTracker {
 
     /// Run one tracking cycle: predict all tracks, associate with detections, update.
     pub fn step(&mut self, detections: &[DVector<f64>], dt: f64) {
-        // 1. Predict all tracks
+        // 1. Predict all tracks (uses shared predict_linear helper)
         let model = ConstantVelocity::new(5.0);
         let f = model.transition_matrix(dt);
         let q = model.process_noise(dt);
-
         for track in self.tracks.iter_mut() {
             if track.is_alive() {
-                track.state = &f * &track.state;
-                track.covariance = &f * &track.covariance * f.transpose() + &q;
+                let (s, c) = predict_linear(&track.state, &track.covariance, &f, &q);
+                track.state = s;
+                track.covariance = c;
             }
         }
 
-        // 2. Build cost matrix (Mahalanobis distance)
+        // 2. Build Mahalanobis cost matrix (uses shared build_cost_matrix helper)
         let alive: Vec<usize> = self
             .tracks
             .iter()
@@ -76,18 +77,18 @@ impl MultiObjectTracker {
         let h = &self.observation_matrix;
         let r = &self.measurement_noise;
 
-        let mut cost_matrix = vec![vec![self.gate_threshold; detections.len()]; alive.len()];
-        for (ai, &ti) in alive.iter().enumerate() {
-            let track = &self.tracks[ti];
-            let pred_z = h * &track.state;
-            let s = h * &track.covariance * h.transpose() + r;
-            for (dj, det) in detections.iter().enumerate() {
-                let d2 = mahalanobis_squared(det, &pred_z, &s);
-                if d2 < self.gate_threshold {
-                    cost_matrix[ai][dj] = d2;
-                }
-            }
-        }
+        let predicted_obs: Vec<DVector<f64>> =
+            alive.iter().map(|&ti| h * &self.tracks[ti].state).collect();
+        let innovation_covs: Vec<DMatrix<f64>> = alive
+            .iter()
+            .map(|&ti| h * &self.tracks[ti].covariance * h.transpose() + r)
+            .collect();
+        let cost_matrix = build_cost_matrix(
+            &predicted_obs,
+            &innovation_covs,
+            detections,
+            self.gate_threshold,
+        );
 
         // 3. Hungarian assignment
         let result = hungarian_assignment(&cost_matrix, self.gate_threshold);
