@@ -94,17 +94,15 @@ impl Dataset for SyntheticDataset {
     }
 
     fn ground_truth(&self) -> Option<Box<dyn Iterator<Item = Frame> + '_>> {
-        let gt_frames: Vec<Frame> = self
-            .frames
-            .iter()
-            .filter(|f| f.ground_truth.is_some())
-            .cloned()
-            .collect();
-
-        if gt_frames.is_empty() {
-            None
+        if self.frames.iter().any(|f| f.ground_truth.is_some()) {
+            Some(Box::new(
+                self.frames
+                    .iter()
+                    .filter(|f| f.ground_truth.is_some())
+                    .cloned(),
+            ))
         } else {
-            Some(Box::new(gt_frames.into_iter()))
+            None
         }
     }
 }
