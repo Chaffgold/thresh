@@ -475,9 +475,9 @@ pub fn orbital_to_radar_measurements(
         };
 
         measurements.push(Measurement::Radar {
-            range: range + noise_config.range_sigma_m * 0.0, // noise-free baseline
-            azimuth: azimuth + noise_config.azimuth_sigma_rad * 0.0,
-            elevation: elevation + noise_config.elevation_sigma_rad * 0.0,
+            range,
+            azimuth,
+            elevation,
             range_rate,
             time,
             sensor_id: noise_config.sensor_id,

@@ -766,7 +766,12 @@ pub struct AdsBDataset {
 
 impl AdsBDataset {
     /// Create a dataset from a collection of state vectors.
-    pub fn from_states(name: impl Into<String>, states: Vec<StateVector>) -> Self {
+    pub fn from_states(name: impl Into<String>, mut states: Vec<StateVector>) -> Self {
+        states.sort_by(|a, b| {
+            let ta = a.time_position.unwrap_or(a.last_contact);
+            let tb = b.time_position.unwrap_or(b.last_contact);
+            ta.total_cmp(&tb)
+        });
         let ground_truth_trajectories = extract_ground_truth(&states);
         Self {
             name: name.into(),
