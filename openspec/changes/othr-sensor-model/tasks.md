@@ -79,14 +79,14 @@
 
 ### 8.B Great-Circle Motion Model
 
-- [ ] 8.B.1 Define `GreatCircleState`: lat, lon, alt, ground_speed, heading, climb_rate (6-state geodetic)
-- [ ] 8.B.2 Implement `GreatCircleMotionModel`: predict step uses Vincenty direct formula to advance lat/lon along current heading
-- [ ] 8.B.3 Implement geodetic state Jacobian for EKF (analytical or numerical via finite differences)
-- [ ] 8.B.4 Implement `MultiObjectTrackerGreatCircle`: tracker variant with geodetic state and OTHR/radar observation models
-- [ ] 8.B.5 Implement initialization: convert single OTHR detection to initial geodetic state with assumed altitude and zero velocity
-- [ ] 8.B.6 Write tests: great-circle tracker correctly maintains aircraft constant-heading flight over 1000+ km
-- [ ] 8.B.7 Write tests: great-circle tracker handles polar regions without singularity (longitude wraparound)
-- [ ] 8.B.8 Write benchmark: great-circle vs ENU tracker on long-duration aircraft track
+- [x] 8.B.1 Define `GreatCircleState`: lat, lon, alt, ground_speed, heading, climb_rate (6-state geodetic)
+- [x] 8.B.2 Implement `GreatCircleMotionModel`: predict step uses Vincenty direct formula to advance lat/lon along current heading
+- [x] 8.B.3 Implement geodetic state Jacobian for EKF (analytical or numerical via finite differences)
+- [x] 8.B.4 Implement `MultiObjectTrackerGreatCircle`: tracker variant with geodetic state and OTHR/radar observation models
+- [x] 8.B.5 Implement initialization: convert single OTHR detection to initial geodetic state with assumed altitude and zero velocity
+- [x] 8.B.6 Write tests: great-circle tracker correctly maintains aircraft constant-heading flight over 1000+ km
+- [x] 8.B.7 Write tests: great-circle tracker handles polar regions without singularity (longitude wraparound)
+- [x] 8.B.8 Write benchmark: great-circle vs ENU tracker on long-duration aircraft track
 
 ### 8.C Recentered ENU Tracker
 
