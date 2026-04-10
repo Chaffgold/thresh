@@ -1618,10 +1618,14 @@ name = "thresh-tracker"
 version = "0.1.0"
 dependencies = [
  "nalgebra",
+ "rand",
+ "rand_distr",
  "thresh-association",
  "thresh-core",
+ "thresh-eval",
  "thresh-filter",
  "thresh-fusion",
+ "thresh-synth",
 ]
 
 [[package]]

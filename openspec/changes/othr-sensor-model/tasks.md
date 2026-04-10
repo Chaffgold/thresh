@@ -56,13 +56,13 @@
 
 ## 7. Tracker Integration
 
-- [ ] 7.1 Implement OTHR observation matrix: state [x, vx, y, vy, z, vz] → [ground_range, azimuth, doppler]
-- [ ] 7.2 Implement OTHR observation Jacobian for EKF (nonlinear ground-range/azimuth mapping)
-- [ ] 7.3 Implement OTHR-specific gating: account for coarse resolution in Mahalanobis distance
-- [ ] 7.4 Implement OTHR + conventional radar fusion scenario: OTHR cueing → conventional radar track refinement
-- [ ] 7.5 Write tests: OTHR-only tracking of CV target converges (with higher position uncertainty)
-- [ ] 7.6 Write tests: OTHR + radar fusion reduces position error compared to OTHR alone
-- [ ] 7.7 Write integration test: multi-target scenario with OTHR and radar, compute MOTA/IDF1
+- [x] 7.1 Implement OTHR observation matrix: state [x, vx, y, vy, z, vz] → [ground_range, azimuth, doppler]
+- [x] 7.2 Implement OTHR observation Jacobian for EKF (nonlinear ground-range/azimuth mapping)
+- [x] 7.3 Implement OTHR-specific gating: account for coarse resolution in Mahalanobis distance
+- [x] 7.4 Implement OTHR + conventional radar fusion scenario: OTHR cueing → conventional radar track refinement
+- [x] 7.5 Write tests: OTHR-only tracking of CV target converges (with higher position uncertainty)
+- [x] 7.6 Write tests: OTHR + radar fusion reduces position error compared to OTHR alone
+- [x] 7.7 Write integration test: multi-target scenario with OTHR and radar, compute MOTA/IDF1
 
 ## 8. Long-Range Tracking Frames
 
