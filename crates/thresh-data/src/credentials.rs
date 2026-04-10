@@ -20,9 +20,11 @@ fn credentials_path() -> Option<PathBuf> {
     dirs_home().map(|h| h.join(".thresh").join("credentials.toml"))
 }
 
-/// Return the user's home directory.
+/// Return the user's home directory (cross-platform).
 fn dirs_home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
 }
 
 /// Load credentials for `service` (e.g. `"opensky"`).
@@ -73,8 +75,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn env_vars_override_file() {
-        // With no env vars and no file, everything should be None.
+    fn returns_none_when_no_credentials_configured() {
         let creds = load_credentials("nonexistent_test_service_xyz");
         assert!(creds.username.is_none());
         assert!(creds.password.is_none());
