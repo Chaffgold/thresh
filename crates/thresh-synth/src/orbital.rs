@@ -449,9 +449,9 @@ pub fn propagate(
     let mut results = Vec::new();
     let mut pos = initial.position;
     let mut vel = initial.velocity;
-    let mut t = 0.0_f64;
-    let mut next_output = 0.0_f64;
     let dt = config.dt_s;
+    let n_steps = (duration_s / dt).ceil() as usize;
+    let output_step_interval = (output_dt_s / dt).round().max(1.0) as usize;
 
     // Record initial state
     results.push(OrbitalState {
@@ -459,23 +459,25 @@ pub fn propagate(
         velocity: vel,
         epoch_jd: initial.epoch_jd,
     });
-    next_output += output_dt_s;
 
-    while t < duration_s - 1e-9 {
-        let step = dt.min(duration_s - t);
-        let (new_pos, new_vel) = rk4_step(&pos, &vel, step, config);
+    for step_i in 1..=n_steps {
+        let t = (step_i as f64) * dt;
+        let actual_step = if t > duration_s {
+            duration_s - (t - dt)
+        } else {
+            dt
+        };
+        let (new_pos, new_vel) = rk4_step(&pos, &vel, actual_step, config);
         pos = new_pos;
         vel = new_vel;
-        t += step;
 
-        // Check if we should output
-        while next_output <= t + 1e-9 && next_output <= duration_s + 1e-9 {
+        let elapsed = t.min(duration_s);
+        if step_i % output_step_interval == 0 || step_i == n_steps {
             results.push(OrbitalState {
                 position: pos,
                 velocity: vel,
-                epoch_jd: initial.epoch_jd + t / SECONDS_PER_DAY,
+                epoch_jd: initial.epoch_jd + elapsed / SECONDS_PER_DAY,
             });
-            next_output += output_dt_s;
         }
     }
 
