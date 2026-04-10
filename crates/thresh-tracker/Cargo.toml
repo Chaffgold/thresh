@@ -11,3 +11,9 @@ thresh-filter = { path = "../thresh-filter" }
 thresh-association = { path = "../thresh-association" }
 thresh-fusion = { path = "../thresh-fusion" }
 nalgebra = { workspace = true }
+
+[dev-dependencies]
+thresh-synth = { path = "../thresh-synth" }
+thresh-eval = { path = "../thresh-eval" }
+rand = "0.9"
+rand_distr = "0.5"
