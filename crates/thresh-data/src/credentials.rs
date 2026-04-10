@@ -81,4 +81,37 @@ mod tests {
         assert!(creds.password.is_none());
         assert!(creds.api_key.is_none());
     }
+
+    #[test]
+    fn env_vars_are_read() {
+        let service = "covtest_svc_12345";
+        let upper = service.to_uppercase();
+        // SAFETY: test-only, no concurrent access to these unique env vars
+        unsafe {
+            std::env::set_var(format!("THRESH_{upper}_USERNAME"), "alice");
+            std::env::set_var(format!("THRESH_{upper}_PASSWORD"), "secret");
+            std::env::set_var(format!("THRESH_{upper}_API_KEY"), "key123");
+        }
+
+        let creds = load_credentials(service);
+        assert_eq!(creds.username.as_deref(), Some("alice"));
+        assert_eq!(creds.password.as_deref(), Some("secret"));
+        assert_eq!(creds.api_key.as_deref(), Some("key123"));
+
+        // Clean up
+        unsafe {
+            std::env::remove_var(format!("THRESH_{upper}_USERNAME"));
+            std::env::remove_var(format!("THRESH_{upper}_PASSWORD"));
+            std::env::remove_var(format!("THRESH_{upper}_API_KEY"));
+        }
+    }
+
+    #[test]
+    fn credentials_path_returns_some() {
+        // As long as HOME or USERPROFILE is set, we should get a path
+        let path = credentials_path();
+        assert!(path.is_some());
+        let p = path.unwrap();
+        assert!(p.ends_with("credentials.toml"));
+    }
 }

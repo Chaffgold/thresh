@@ -104,3 +104,146 @@ impl Dataset for SyntheticDataset {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::frame::GroundTruthEntry;
+    use thresh_core::measurement::Measurement;
+
+    fn radar_measurement(time: f64) -> Measurement {
+        Measurement::Radar {
+            range: 10000.0,
+            azimuth: 0.5,
+            elevation: 0.1,
+            range_rate: None,
+            time,
+            sensor_id: 0,
+        }
+    }
+
+    fn gt_entry(id: u64) -> GroundTruthEntry {
+        GroundTruthEntry {
+            target_id: id,
+            position: [100.0, 200.0, 300.0],
+            velocity: Some([10.0, 20.0, 0.0]),
+            class: None,
+        }
+    }
+
+    fn make_frame(timestamp: f64, gt: Option<Vec<GroundTruthEntry>>) -> Frame {
+        Frame {
+            timestamp,
+            measurements: vec![radar_measurement(timestamp)],
+            ground_truth: gt,
+            sensor_metadata: None,
+        }
+    }
+
+    #[test]
+    fn from_frames_sorts_by_timestamp() {
+        let ds = SyntheticDataset::from_frames(
+            "test".into(),
+            vec![
+                make_frame(3.0, None),
+                make_frame(1.0, None),
+                make_frame(2.0, None),
+            ],
+        );
+        let timestamps: Vec<f64> = ds.frames().map(|f| f.timestamp).collect();
+        assert_eq!(timestamps, vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn from_measurements_buckets_correctly() {
+        let measurements = vec![
+            (0.0, radar_measurement(0.0)),
+            (0.5, radar_measurement(0.5)),
+            (1.0, radar_measurement(1.0)),
+            (1.3, radar_measurement(1.3)),
+        ];
+        let ground_truth = vec![(0.0, gt_entry(1)), (1.0, gt_entry(2))];
+
+        let ds =
+            SyntheticDataset::from_measurements("test".into(), measurements, ground_truth, 1.0);
+        let frames: Vec<Frame> = ds.frames().collect();
+
+        assert_eq!(frames.len(), 2);
+        // Bucket 0: t=0.0, t=0.5 → 2 measurements
+        assert_eq!(frames[0].measurements.len(), 2);
+        // Bucket 1: t=1.0, t=1.3 → 2 measurements
+        assert_eq!(frames[1].measurements.len(), 2);
+        // GT: bucket 0 has target 1, bucket 1 has target 2
+        assert_eq!(frames[0].ground_truth.as_ref().unwrap().len(), 1);
+        assert_eq!(frames[1].ground_truth.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn from_measurements_empty_gt_is_none() {
+        let measurements = vec![(0.0, radar_measurement(0.0))];
+        let ds = SyntheticDataset::from_measurements("test".into(), measurements, vec![], 1.0);
+        let frames: Vec<Frame> = ds.frames().collect();
+        assert_eq!(frames.len(), 1);
+        assert!(frames[0].ground_truth.is_none());
+    }
+
+    #[test]
+    fn metadata_returns_correct_values() {
+        let ds = SyntheticDataset::from_frames(
+            "my_scenario".into(),
+            vec![make_frame(1.0, None), make_frame(5.0, None)],
+        );
+        let meta = ds.metadata();
+        assert_eq!(meta.name, "my_scenario");
+        assert_eq!(meta.source, "synthetic");
+        assert!(meta.target_count.is_none());
+        let (start, end) = meta.time_span.unwrap();
+        assert!((start - 1.0).abs() < 1e-10);
+        assert!((end - 5.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn metadata_empty_dataset() {
+        let ds = SyntheticDataset::from_frames("empty".into(), vec![]);
+        let meta = ds.metadata();
+        assert!(meta.time_span.is_none());
+    }
+
+    #[test]
+    fn ground_truth_returns_only_gt_frames() {
+        let ds = SyntheticDataset::from_frames(
+            "test".into(),
+            vec![
+                make_frame(0.0, Some(vec![gt_entry(1)])),
+                make_frame(1.0, None),
+                make_frame(2.0, Some(vec![gt_entry(2)])),
+            ],
+        );
+        let gt: Vec<Frame> = ds.ground_truth().unwrap().collect();
+        assert_eq!(gt.len(), 2);
+        assert!((gt[0].timestamp - 0.0).abs() < 1e-10);
+        assert!((gt[1].timestamp - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn ground_truth_returns_none_when_no_gt() {
+        let ds = SyntheticDataset::from_frames(
+            "test".into(),
+            vec![make_frame(0.0, None), make_frame(1.0, None)],
+        );
+        assert!(ds.ground_truth().is_none());
+    }
+
+    #[test]
+    fn frames_iterator_yields_all() {
+        let ds = SyntheticDataset::from_frames(
+            "test".into(),
+            vec![
+                make_frame(0.0, None),
+                make_frame(1.0, None),
+                make_frame(2.0, None),
+            ],
+        );
+        assert_eq!(ds.frames().count(), 3);
+    }
+}

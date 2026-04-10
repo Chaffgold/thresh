@@ -288,6 +288,36 @@ mod tests {
     }
 
     #[test]
+    fn mixed_ground_truth_merges() {
+        let ds1 = SyntheticDataset::from_frames(
+            "ds1".into(),
+            vec![make_frame(0.0, 1, Some(1)), make_frame(0.2, 1, Some(1))],
+        );
+        let ds2 = SyntheticDataset::from_frames("ds2".into(), vec![make_frame(0.1, 1, Some(2))]);
+
+        let mixed = MixedDataset::new("test".into(), vec![Box::new(ds1), Box::new(ds2)]);
+        let gt: Vec<Frame> = mixed.ground_truth().unwrap().collect();
+        assert_eq!(gt.len(), 3);
+        // Should be time-ordered
+        assert!(gt[0].timestamp <= gt[1].timestamp);
+        assert!(gt[1].timestamp <= gt[2].timestamp);
+    }
+
+    #[test]
+    fn mixed_ground_truth_none_when_empty() {
+        let ds1 = SyntheticDataset::from_frames("ds1".into(), vec![make_frame(0.0, 1, None)]);
+
+        let mixed = MixedDataset::new("test".into(), vec![Box::new(ds1)]);
+        assert!(mixed.ground_truth().is_none());
+    }
+
+    #[test]
+    fn bucket_frames_empty_input() {
+        let result = bucket_frames(vec![], 0.05);
+        assert!(result.is_empty());
+    }
+
+    #[test]
     fn metadata_combines_correctly() {
         let ds1 = SyntheticDataset {
             name: "ds1".into(),
