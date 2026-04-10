@@ -3,6 +3,7 @@
 pub mod eoir_physics;
 pub mod measurement_gen;
 pub mod orbital;
+pub mod othr_generator;
 pub mod radar_equation;
 pub mod scenario;
 pub mod swerling;
