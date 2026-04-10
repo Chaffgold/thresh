@@ -252,6 +252,16 @@ fn measurement_to_cartesian(m: &thresh_core::measurement::Measurement) -> DVecto
             // Bearing-only: not directly usable for position-based tracker
             DVector::from_column_slice(&[0.0, 0.0, 0.0])
         }
+        thresh_core::measurement::Measurement::Othr {
+            ground_range_m,
+            azimuth_rad,
+            ..
+        } => {
+            // Approximate Cartesian from ground range and azimuth (flat-earth approx)
+            let x = ground_range_m * azimuth_rad.sin();
+            let y = ground_range_m * azimuth_rad.cos();
+            DVector::from_column_slice(&[x, y, 0.0])
+        }
     }
 }
 

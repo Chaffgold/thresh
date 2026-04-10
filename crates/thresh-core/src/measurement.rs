@@ -45,6 +45,32 @@ pub enum Measurement {
         /// Timestamp in seconds.
         time: f64,
     },
+    /// Over-the-horizon radar measurement.
+    Othr {
+        /// Ground range along Earth's surface (meters).
+        ground_range_m: f64,
+        /// Azimuth from transmitter (radians, clockwise from north).
+        azimuth_rad: f64,
+        /// Doppler velocity (m/s, positive = approaching).
+        doppler_m_s: f64,
+        /// Ionospheric propagation mode.
+        propagation_mode: PropagationMode,
+        /// Measurement time.
+        time: f64,
+        /// Sensor identifier.
+        sensor_id: u32,
+    },
+}
+
+/// Ionospheric propagation mode for OTHR signals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PropagationMode {
+    /// Single E-layer reflection.
+    ELayer,
+    /// Single F-layer reflection.
+    FLayer,
+    /// Multiple ionospheric hops.
+    MultiHop(u8),
 }
 
 impl Measurement {
@@ -54,6 +80,7 @@ impl Measurement {
             Measurement::Radar { time, .. } => *time,
             Measurement::EoIr { time, .. } => *time,
             Measurement::AdsB { time, .. } => *time,
+            Measurement::Othr { time, .. } => *time,
         }
     }
 
@@ -89,6 +116,12 @@ impl Measurement {
                     DVector::from_column_slice(&[*lat, *lon, *alt])
                 }
             }
+            Measurement::Othr {
+                ground_range_m,
+                azimuth_rad,
+                doppler_m_s,
+                ..
+            } => DVector::from_column_slice(&[*ground_range_m, *azimuth_rad, *doppler_m_s]),
         }
     }
 
@@ -110,6 +143,7 @@ impl Measurement {
                     3
                 }
             }
+            Measurement::Othr { .. } => 3,
         }
     }
 
@@ -149,6 +183,15 @@ impl Measurement {
                 } else {
                     DMatrix::from_diagonal(&DVector::from_column_slice(&[25.0, 25.0, 100.0]))
                 }
+            }
+            Measurement::Othr { .. } => {
+                // [ground_range, azimuth, doppler] noise
+                // ground_range: ~10 km std, azimuth: ~1° std, doppler: ~10 m/s std
+                DMatrix::from_diagonal(&DVector::from_column_slice(&[
+                    10_000.0 * 10_000.0,            // ground range: 10 km std
+                    (1.0_f64.to_radians()).powi(2), // azimuth: 1° std
+                    100.0,                          // doppler: 10 m/s std
+                ]))
             }
         }
     }
@@ -211,6 +254,71 @@ mod tests {
         assert_eq!(m.dim(), 6);
         let z = m.to_vector();
         assert_eq!(z[3], 100.0);
+    }
+
+    #[test]
+    fn othr_measurement_vector() {
+        let m = Measurement::Othr {
+            ground_range_m: 2_000_000.0,
+            azimuth_rad: 1.0,
+            doppler_m_s: -50.0,
+            propagation_mode: PropagationMode::FLayer,
+            time: 10.0,
+            sensor_id: 5,
+        };
+        assert_eq!(m.dim(), 3);
+        let z = m.to_vector();
+        assert_eq!(z[0], 2_000_000.0);
+        assert_eq!(z[1], 1.0);
+        assert_eq!(z[2], -50.0);
+        assert_eq!(m.time(), 10.0);
+    }
+
+    #[test]
+    fn othr_serialization_roundtrip() {
+        let m = Measurement::Othr {
+            ground_range_m: 1_500_000.0,
+            azimuth_rad: 0.785,
+            doppler_m_s: 25.0,
+            propagation_mode: PropagationMode::ELayer,
+            time: 5.0,
+            sensor_id: 3,
+        };
+        let json = serde_json::to_string(&m).expect("serialize");
+        let m2: Measurement = serde_json::from_str(&json).expect("deserialize");
+        let z1 = m.to_vector();
+        let z2 = m2.to_vector();
+        assert_eq!(z1, z2);
+        assert_eq!(m.time(), m2.time());
+    }
+
+    #[test]
+    fn propagation_mode_serialization_roundtrip() {
+        for mode in &[
+            PropagationMode::ELayer,
+            PropagationMode::FLayer,
+            PropagationMode::MultiHop(2),
+            PropagationMode::MultiHop(5),
+        ] {
+            let json = serde_json::to_string(mode).expect("serialize");
+            let mode2: PropagationMode = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(*mode, mode2);
+        }
+    }
+
+    #[test]
+    fn othr_noise_dimensions_match() {
+        let m = Measurement::Othr {
+            ground_range_m: 1_000_000.0,
+            azimuth_rad: 0.0,
+            doppler_m_s: 0.0,
+            propagation_mode: PropagationMode::MultiHop(3),
+            time: 0.0,
+            sensor_id: 0,
+        };
+        let r = m.default_noise();
+        assert_eq!(r.nrows(), m.dim());
+        assert_eq!(r.ncols(), m.dim());
     }
 
     #[test]
