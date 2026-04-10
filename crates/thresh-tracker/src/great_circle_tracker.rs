@@ -82,6 +82,26 @@ fn wrap_angle(a: f64) -> f64 {
     x - PI
 }
 
+/// Normalize a geodetic state vector after a linear update: clamp/reflect
+/// latitude into [-π/2, π/2] (handling pole crossings by flipping longitude
+/// and reversing heading) and wrap longitude/heading into [-π, π].
+fn normalize_geodetic_state(state: &mut DVector<f64>) {
+    let half_pi = PI / 2.0;
+    if state[0] > half_pi {
+        // Crossed the north pole: reflect lat, flip lon by π, reverse heading.
+        state[0] = PI - state[0];
+        state[1] += PI;
+        state[4] += PI;
+    } else if state[0] < -half_pi {
+        // Crossed the south pole.
+        state[0] = -PI - state[0];
+        state[1] += PI;
+        state[4] += PI;
+    }
+    state[1] = wrap_angle(state[1]);
+    state[4] = wrap_angle(state[4]);
+}
+
 /// Extract OTHR measurement tuples (ground_range, azimuth, doppler) from a heterogeneous batch.
 fn extract_othr_measurements(measurements: &[Measurement]) -> Vec<[f64; 3]> {
     measurements
@@ -107,6 +127,8 @@ pub struct GreatCircleMotionModel {
     pub heading_noise_rad: f64,
     /// 1-sigma process noise on ground speed (m/s / sqrt(s)).
     pub speed_noise_m_s: f64,
+    /// 1-sigma process noise on climb rate (m/s / sqrt(s)).
+    pub climb_noise_m_s: f64,
 }
 
 impl Default for GreatCircleMotionModel {
@@ -114,6 +136,7 @@ impl Default for GreatCircleMotionModel {
         Self {
             heading_noise_rad: 0.01_f64.to_radians(),
             speed_noise_m_s: 1.0,
+            climb_noise_m_s: 0.5,
         }
     }
 }
@@ -165,13 +188,18 @@ impl GreatCircleMotionModel {
             xm[i] -= eps[i];
             let fp = self.predict_vec(&xp, dt);
             let fm = self.predict_vec(&xm, dt);
-            let mut col = (fp - fm) / (2.0 * eps[i]);
-            // Angular outputs (lon, heading) can straddle the ±π seam which
-            // corrupts the finite difference; collapse those back to `[-π, π]`.
-            col[1] = wrap_angle_delta(col[1]);
-            col[4] = wrap_angle_delta(col[4]);
+
+            // Wrap angular *differences* before dividing by 2*eps so a ±π seam
+            // crossing in the raw output (lon, heading) becomes a small delta
+            // rather than a ~2π jump that would produce a huge derivative.
+            let denom = 2.0 * eps[i];
             for r in 0..n {
-                j[(r, i)] = col[r];
+                let diff = if r == 1 || r == 4 {
+                    wrap_angle(fp[r] - fm[r])
+                } else {
+                    fp[r] - fm[r]
+                };
+                j[(r, i)] = diff / denom;
             }
         }
 
@@ -179,18 +207,23 @@ impl GreatCircleMotionModel {
     }
 
     /// Process noise covariance matrix for a `dt` step.
+    ///
+    /// Diagonal model: horizontal position uncertainty is driven by ground
+    /// speed noise (converted to angular variance via Earth radius), altitude
+    /// position uncertainty is driven by climb rate noise, and the velocity
+    /// terms scale linearly with dt. Cross-covariances are omitted because the
+    /// filter is measurement-driven.
     pub fn process_noise(&self, dt: f64) -> DMatrix<f64> {
         let mut q = DMatrix::<f64>::zeros(6, 6);
-        // Position uncertainty grows with heading/speed noise projected over dt.
-        // We use a simple diagonal block that is positive-definite and small
-        // enough that the filter is driven by measurements, not process noise.
-        let horiz_pos_var = (self.speed_noise_m_s * dt).powi(2) * 1e-12; // rad^2
-        q[(0, 0)] = horiz_pos_var;
-        q[(1, 1)] = horiz_pos_var;
-        q[(2, 2)] = (self.speed_noise_m_s * dt).powi(2); // alt
-        q[(3, 3)] = self.speed_noise_m_s.powi(2) * dt;
-        q[(4, 4)] = self.heading_noise_rad.powi(2) * dt;
-        q[(5, 5)] = (self.speed_noise_m_s * dt).powi(2) * 0.01;
+        // Convert horizontal speed noise (m/s) over dt to angular variance
+        // (rad²) using inverse Earth radius squared.
+        let horiz_pos_var = (self.speed_noise_m_s * dt).powi(2) * 1e-12;
+        q[(0, 0)] = horiz_pos_var; // lat
+        q[(1, 1)] = horiz_pos_var; // lon
+        q[(2, 2)] = (self.climb_noise_m_s * dt).powi(2); // alt
+        q[(3, 3)] = self.speed_noise_m_s.powi(2) * dt; // ground_speed
+        q[(4, 4)] = self.heading_noise_rad.powi(2) * dt; // heading
+        q[(5, 5)] = self.climb_noise_m_s.powi(2) * dt; // climb_rate
         q
     }
 }
@@ -503,8 +536,7 @@ impl MultiObjectTrackerGreatCircle {
                 + &k * &self.measurement_noise * k.transpose();
 
             track.state = new_state;
-            track.state[1] = wrap_angle(track.state[1]);
-            track.state[4] = wrap_angle(track.state[4]);
+            normalize_geodetic_state(&mut track.state);
             track.covariance = new_cov;
             track.hits += 1;
             track.misses = 0;
@@ -540,17 +572,45 @@ impl MultiObjectTrackerGreatCircle {
         for (dj, associated) in associated_dets.iter().enumerate() {
             if !*associated {
                 let raw = &othr_meas[dj];
-                let m = Measurement::Othr {
-                    ground_range_m: raw[0],
-                    azimuth_rad: raw[1],
-                    doppler_m_s: raw[2],
-                    propagation_mode: thresh_core::measurement::PropagationMode::FLayer,
-                    time: 0.0,
-                    sensor_id: 0,
-                };
-                self.init_from_othr(&m, &self.registration.clone(), self.assumed_alt_m);
+                self.birth_track_from_raw(raw[0], raw[1], raw[2]);
             }
         }
+    }
+
+    /// Internal track-birth helper that uses `self.registration` directly,
+    /// avoiding the clone needed when calling the public `init_from_othr` API.
+    fn birth_track_from_raw(&mut self, ground_range: f64, azimuth: f64, doppler: f64) {
+        let (lat, lon) = vincenty_direct(
+            self.registration.transmitter_lat_rad,
+            self.registration.transmitter_lon_rad,
+            azimuth,
+            ground_range.max(0.0),
+        );
+        let state = GreatCircleState {
+            lat_rad: lat,
+            lon_rad: wrap_angle(lon),
+            alt_m: self.assumed_alt_m,
+            ground_speed_m_s: doppler.abs(),
+            heading_rad: wrap_angle(azimuth),
+            climb_rate_m_s: 0.0,
+        };
+        let diag = DVector::from_column_slice(&[
+            (1.0_f64.to_radians()).powi(2),
+            (1.0_f64.to_radians()).powi(2),
+            1_000_000.0,
+            (200.0_f64).powi(2),
+            (30.0_f64.to_radians()).powi(2),
+            (5.0_f64).powi(2),
+        ]);
+        self.tracks.push(GreatCircleTrack {
+            id: TrackId::new(),
+            state: state.to_vector(),
+            covariance: DMatrix::from_diagonal(&diag),
+            lifecycle: TrackState::Tentative,
+            class: TargetClass::Aircraft,
+            hits: 1,
+            misses: 0,
+        });
     }
 
     /// Initialize a new track from a single OTHR detection.
