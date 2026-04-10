@@ -61,7 +61,11 @@ mod tests {
 
     #[test]
     fn is_cached_returns_false_for_missing() {
-        assert!(!is_cached("nonexistent_src", "nonexistent_ds", "nofile.bin"));
+        assert!(!is_cached(
+            "nonexistent_src",
+            "nonexistent_ds",
+            "nofile.bin"
+        ));
     }
 
     #[test]
