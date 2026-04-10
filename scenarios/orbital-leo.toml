@@ -1,0 +1,11 @@
+name = "orbital-leo"
+description = "LEO satellite tracking — requires network access for TLE data"
+
+[source.Orbital]
+norad_ids = [25544, 48274, 41335]
+
+[parameters]
+duration_s = 600.0
+dt = 10.0
+measurement_noise_sigma = 50.0
+gate_threshold = 200.0

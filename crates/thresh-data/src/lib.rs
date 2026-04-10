@@ -2,6 +2,7 @@
 
 #[cfg(feature = "adsb")]
 pub mod adsb;
+pub mod benchmark;
 pub mod cache;
 pub mod credentials;
 pub mod dataset;

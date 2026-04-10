@@ -1552,11 +1552,16 @@ version = "0.1.0"
 dependencies = [
  "csv",
  "nalgebra",
+ "rand",
  "reqwest",
  "serde",
  "serde_json",
  "sgp4",
+ "tempfile",
  "thresh-core",
+ "thresh-eval",
+ "thresh-synth",
+ "thresh-tracker",
  "toml",
 ]
 

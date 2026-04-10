@@ -1,0 +1,11 @@
+name = "adsb-conus"
+description = "ADS-B data from CONUS region — requires network access"
+
+[source.AdsB]
+region = "conus"
+
+[parameters]
+duration_s = 300.0
+dt = 1.0
+measurement_noise_sigma = 5.0
+gate_threshold = 50.0

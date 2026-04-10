@@ -1,0 +1,12 @@
+name = "synth-heterogeneous"
+description = "Mixed aircraft (CV) and ballistic targets"
+source = "Synthetic"
+
+[parameters]
+duration_s = 40.0
+dt = 0.5
+measurement_noise_sigma = 20.0
+gate_threshold = 100.0
+
+[baselines]
+mota = 0.4
