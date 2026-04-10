@@ -82,6 +82,22 @@ fn wrap_angle(a: f64) -> f64 {
     x - PI
 }
 
+/// Extract OTHR measurement tuples (ground_range, azimuth, doppler) from a heterogeneous batch.
+fn extract_othr_measurements(measurements: &[Measurement]) -> Vec<[f64; 3]> {
+    measurements
+        .iter()
+        .filter_map(|m| match m {
+            Measurement::Othr {
+                ground_range_m,
+                azimuth_rad,
+                doppler_m_s,
+                ..
+            } => Some([*ground_range_m, *azimuth_rad, *doppler_m_s]),
+            _ => None,
+        })
+        .collect()
+}
+
 // ── Motion model ───────────────────────────────────────────────────────────
 
 /// Constant-heading great-circle motion model.
@@ -358,7 +374,32 @@ impl MultiObjectTrackerGreatCircle {
 
     /// Run one tracking cycle on a batch of OTHR measurements.
     pub fn step(&mut self, measurements: &[Measurement], dt: f64) {
-        // 1. Predict each track with Vincenty direct.
+        self.predict_all(dt);
+
+        let alive: Vec<usize> = self
+            .tracks
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.lifecycle != TrackState::Deleted)
+            .map(|(i, _)| i)
+            .collect();
+
+        let othr_meas = extract_othr_measurements(measurements);
+        let per_track_cache = self.build_observation_cache(&alive);
+        let cost_matrix = self.build_cost_matrix(&alive, &othr_meas, &per_track_cache);
+
+        let result = hungarian_assignment(&cost_matrix, self.gate_threshold);
+        let (associated_tracks, associated_dets) =
+            self.update_associated(&alive, &othr_meas, &per_track_cache, &cost_matrix, &result);
+
+        self.update_lifecycle(&alive, &associated_tracks);
+        self.birth_unassociated(&othr_meas, &associated_dets);
+
+        self.tracks.retain(|t| t.lifecycle != TrackState::Deleted);
+    }
+
+    /// Phase 1: Predict each non-deleted track using Vincenty direct.
+    fn predict_all(&mut self, dt: f64) {
         for track in self.tracks.iter_mut() {
             if track.lifecycle == TrackState::Deleted {
                 continue;
@@ -370,35 +411,15 @@ impl MultiObjectTrackerGreatCircle {
             track.state = predicted.to_vector();
             track.covariance = &f_jac * &track.covariance * f_jac.transpose() + q;
         }
+    }
 
-        // Collect alive track indices.
-        let alive: Vec<usize> = self
-            .tracks
-            .iter()
-            .enumerate()
-            .filter(|(_, t)| t.lifecycle != TrackState::Deleted)
-            .map(|(i, _)| i)
-            .collect();
-
-        // 2. Extract OTHR measurement vectors.
-        let othr_meas: Vec<[f64; 3]> = measurements
-            .iter()
-            .filter_map(|m| match m {
-                Measurement::Othr {
-                    ground_range_m,
-                    azimuth_rad,
-                    doppler_m_s,
-                    ..
-                } => Some([*ground_range_m, *azimuth_rad, *doppler_m_s]),
-                _ => None,
-            })
-            .collect();
-
-        // 3. Build cost matrix via Mahalanobis distance in measurement space.
-        let mut cost_matrix = vec![vec![self.gate_threshold; othr_meas.len()]; alive.len()];
-        let mut per_track_cache: Vec<(DVector<f64>, DMatrix<f64>, DMatrix<f64>)> =
-            Vec::with_capacity(alive.len());
-        for &ti in alive.iter() {
+    /// Build per-track (predicted observation, H Jacobian, innovation covariance).
+    fn build_observation_cache(
+        &self,
+        alive: &[usize],
+    ) -> Vec<(DVector<f64>, DMatrix<f64>, DMatrix<f64>)> {
+        let mut cache = Vec::with_capacity(alive.len());
+        for &ti in alive {
             let track = &self.tracks[ti];
             let state = GreatCircleState::from_vector(&track.state);
             let z_hat = predict_othr_observation(
@@ -413,28 +434,43 @@ impl MultiObjectTrackerGreatCircle {
                 self.registration.transmitter_lon_rad,
             );
             let s = &h_jac * &track.covariance * h_jac.transpose() + &self.measurement_noise;
-            per_track_cache.push((z_hat_v, h_jac, s));
+            cache.push((z_hat_v, h_jac, s));
         }
+        cache
+    }
 
-        for (ai, &_ti) in alive.iter().enumerate() {
+    /// Build the Mahalanobis cost matrix between alive tracks and OTHR measurements.
+    fn build_cost_matrix(
+        &self,
+        alive: &[usize],
+        othr_meas: &[[f64; 3]],
+        per_track_cache: &[(DVector<f64>, DMatrix<f64>, DMatrix<f64>)],
+    ) -> Vec<Vec<f64>> {
+        let mut cost_matrix = vec![vec![self.gate_threshold; othr_meas.len()]; alive.len()];
+        let zero = DVector::<f64>::zeros(3);
+        for (ai, _) in alive.iter().enumerate() {
             let (z_hat_v, _, s) = &per_track_cache[ai];
-            let zero = DVector::<f64>::zeros(3);
             for (dj, m) in othr_meas.iter().enumerate() {
                 let mut diff = DVector::from_column_slice(m) - z_hat_v;
-                // Azimuth residual wrap.
                 diff[1] = wrap_angle(diff[1]);
-                // Mahalanobis on the (wrapped) innovation: pass innovation as
-                // the "observation" and zero as the "prediction".
                 let d2 = mahalanobis_squared(&diff, &zero, s);
                 if d2 < self.gate_threshold {
                     cost_matrix[ai][dj] = d2;
                 }
             }
         }
+        cost_matrix
+    }
 
-        // 4. Hungarian assignment.
-        let result = hungarian_assignment(&cost_matrix, self.gate_threshold);
-
+    /// Apply EKF updates to associated tracks. Returns (associated_tracks, associated_dets).
+    fn update_associated(
+        &mut self,
+        alive: &[usize],
+        othr_meas: &[[f64; 3]],
+        per_track_cache: &[(DVector<f64>, DMatrix<f64>, DMatrix<f64>)],
+        cost_matrix: &[Vec<f64>],
+        result: &thresh_association::hungarian::AssignmentResult,
+    ) -> (Vec<bool>, Vec<bool>) {
         let mut associated_tracks = vec![false; alive.len()];
         let mut associated_dets = vec![false; othr_meas.len()];
 
@@ -451,7 +487,6 @@ impl MultiObjectTrackerGreatCircle {
             let ti = alive[ai];
             let (z_hat_v, h_jac, s) = &per_track_cache[ai];
 
-            // EKF update with azimuth wraparound on the innovation.
             let mut innovation = DVector::from_column_slice(&othr_meas[dj]) - z_hat_v;
             innovation[1] = wrap_angle(innovation[1]);
 
@@ -468,7 +503,6 @@ impl MultiObjectTrackerGreatCircle {
                 + &k * &self.measurement_noise * k.transpose();
 
             track.state = new_state;
-            // Wrap lat/lon/heading back into canonical ranges.
             track.state[1] = wrap_angle(track.state[1]);
             track.state[4] = wrap_angle(track.state[4]);
             track.covariance = new_cov;
@@ -476,11 +510,14 @@ impl MultiObjectTrackerGreatCircle {
             track.misses = 0;
         }
 
-        // 5. Lifecycle: confirm / coast / delete.
+        (associated_tracks, associated_dets)
+    }
+
+    /// Update lifecycle states (confirm / coast / delete) based on association results.
+    fn update_lifecycle(&mut self, alive: &[usize], associated_tracks: &[bool]) {
         for (ai, &ti) in alive.iter().enumerate() {
-            let was_associated = associated_tracks[ai];
             let track = &mut self.tracks[ti];
-            if was_associated {
+            if associated_tracks[ai] {
                 let promote_tentative = track.lifecycle == TrackState::Tentative
                     && track.hits >= self.confirmation_hits;
                 if promote_tentative || track.lifecycle == TrackState::Coasting {
@@ -496,8 +533,10 @@ impl MultiObjectTrackerGreatCircle {
                 }
             }
         }
+    }
 
-        // 6. Birth new tracks from unassigned measurements.
+    /// Birth new tracks from any measurements that did not associate with an existing track.
+    fn birth_unassociated(&mut self, othr_meas: &[[f64; 3]], associated_dets: &[bool]) {
         for (dj, associated) in associated_dets.iter().enumerate() {
             if !*associated {
                 let raw = &othr_meas[dj];
@@ -512,9 +551,6 @@ impl MultiObjectTrackerGreatCircle {
                 self.init_from_othr(&m, &self.registration.clone(), self.assumed_alt_m);
             }
         }
-
-        // 7. Remove deleted tracks.
-        self.tracks.retain(|t| t.lifecycle != TrackState::Deleted);
     }
 
     /// Initialize a new track from a single OTHR detection.
