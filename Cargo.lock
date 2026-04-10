@@ -1510,6 +1510,7 @@ version = "0.1.0"
 dependencies = [
  "nalgebra",
  "rand",
+ "rand_distr",
  "thresh-association",
  "thresh-bridge",
  "thresh-core",
