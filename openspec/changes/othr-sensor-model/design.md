@@ -61,6 +61,25 @@ Non-Goals:
 
 **Rationale:** Multi-path is a fundamental OTHR phenomenology. Both layers can produce valid returns for the same target, and the tracker must handle this or it will create ghost tracks. Explicit modeling in the synthetic generator ensures the tracker is tested against this scenario.
 
+### 6. Long-range tracking frame
+
+**Decision:** Initial OTHR tracker integration converts measurements to ENU (East-North-Up) coordinates centered at the OTHR transmitter, then feeds them to the existing Cartesian CV-model tracker. Document the limitations of this approach and plan an explicit upgrade path to ECEF tracking, great-circle motion models, or recentered/local projections for scenarios where the simple ENU approach is inadequate.
+
+**Rationale:** Vincenty's formulae correctly place OTHR measurements anywhere on the WGS84 ellipsoid, so coordinate placement is exact at any range. The CV motion model in ENU is *approximate* — a target moving at constant heading actually follows a great circle, which appears curved in any single ENU frame. Quantitative analysis shows this error is small relative to OTHR's noise budget for typical scenarios:
+
+- Aircraft at 2000 km moving 250 m/s, 5-min track: great-circle vs straight-line error ≈ 2-3 km
+- OTHR range noise: 10-30 km
+- → Motion model error is dominated by sensor noise
+
+For scenarios where this approximation breaks down (ballistic missiles, satellites, multi-hour aircraft tracks, cross-coverage transits), a more sophisticated tracking frame is required. We will implement these as separate tracker variants in a follow-on workstream:
+
+1. **ECEF tracking** — Single global Earth-centered Earth-fixed frame; appropriate for any target dynamics
+2. **Great-circle motion model** — Custom CV variant that integrates target motion along the surface
+3. **Recentered ENU** — ENU origin follows the track centroid, recentered as the track moves
+4. **Local stereographic projection** — Range-preserving projection from a center point, suitable for OTHR coverage areas
+
+**Alternatives considered:** Implementing ECEF tracking from the start would be more correct but adds significant complexity (different observation matrices, longer convergence times, ambiguity in track state interpretation) for marginal accuracy gain in nominal OTHR scenarios. Starting simple and providing an upgrade path is more pragmatic.
+
 ## Risks / Trade-offs
 
 **[Trade-off] Simplified ionosphere vs fidelity** → The Chapman-layer model won't capture sporadic-E, traveling ionospheric disturbances, or polar effects. Mitigation: model is parameterizable, so users can inject measured ionospheric parameters for specific scenarios.
@@ -70,6 +89,8 @@ Non-Goals:
 **[Trade-off] No surface-wave support** → Limits maritime OTHR applications. Mitigation: surface-wave can be added later as a separate propagation mode without changing the measurement type.
 
 **[Risk] Tracker performance with coarse OTHR resolution** → 10-30 km range resolution may cause association ambiguity in dense target environments. Mitigation: Doppler discrimination significantly helps, and cascaded association (OTHR first pass, then conventional sensor refinement) is a natural operational pattern.
+
+**[Risk] Long-range Cartesian CV motion model** → ENU + CV approximates great-circle motion; error grows with track duration and target traverse distance. Mitigation: error is dominated by OTHR noise for typical scenarios (aircraft, minutes-scale tracks). For ballistic, orbital, or long-duration tracks, switch to ECEF tracking (Section 8 follow-on tasks).
 
 ## Open Questions
 

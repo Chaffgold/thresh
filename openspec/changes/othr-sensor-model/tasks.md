@@ -63,3 +63,54 @@
 - [ ] 7.5 Write tests: OTHR-only tracking of CV target converges (with higher position uncertainty)
 - [ ] 7.6 Write tests: OTHR + radar fusion reduces position error compared to OTHR alone
 - [ ] 7.7 Write integration test: multi-target scenario with OTHR and radar, compute MOTA/IDF1
+
+## 8. Long-Range Tracking Frames
+
+### 8.A ECEF Tracking Variant
+
+- [ ] 8.A.1 Implement `EcefMotionModel`: 6-state CV in ECEF coordinates with proper centrifugal/Coriolis terms for Earth-fixed frame
+- [ ] 8.A.2 Implement `MultiObjectTrackerEcef`: tracker variant with ECEF state and observation models
+- [ ] 8.A.3 Implement OTHR observation matrix for ECEF state: ground_range from great-circle, azimuth from initial bearing, doppler from radial velocity
+- [ ] 8.A.4 Implement conventional radar observation matrix for ECEF state (range/azimuth/elevation from sensor ECEF position)
+- [ ] 8.A.5 Implement track output conversion: ECEF state → ENU at user-supplied reference point for visualization/eval
+- [ ] 8.A.6 Write tests: ECEF tracker maintains position accuracy on 3000 km cross-coverage transit
+- [ ] 8.A.7 Write tests: ECEF tracker correctly tracks a great-circle aircraft path over 1 hour
+- [ ] 8.A.8 Write benchmark: ECEF vs ENU tracker on long-traverse scenario, compare MOTA
+
+### 8.B Great-Circle Motion Model
+
+- [ ] 8.B.1 Define `GreatCircleState`: lat, lon, alt, ground_speed, heading, climb_rate (6-state geodetic)
+- [ ] 8.B.2 Implement `GreatCircleMotionModel`: predict step uses Vincenty direct formula to advance lat/lon along current heading
+- [ ] 8.B.3 Implement geodetic state Jacobian for EKF (analytical or numerical via finite differences)
+- [ ] 8.B.4 Implement `MultiObjectTrackerGreatCircle`: tracker variant with geodetic state and OTHR/radar observation models
+- [ ] 8.B.5 Implement initialization: convert single OTHR detection to initial geodetic state with assumed altitude and zero velocity
+- [ ] 8.B.6 Write tests: great-circle tracker correctly maintains aircraft constant-heading flight over 1000+ km
+- [ ] 8.B.7 Write tests: great-circle tracker handles polar regions without singularity (longitude wraparound)
+- [ ] 8.B.8 Write benchmark: great-circle vs ENU tracker on long-duration aircraft track
+
+### 8.C Recentered ENU Tracker
+
+- [ ] 8.C.1 Implement per-track ENU origin tracking: each track stores its own ENU reference point
+- [ ] 8.C.2 Implement origin recentering policy: when track centroid drifts more than threshold (e.g., 200 km), recenter ENU at current centroid
+- [ ] 8.C.3 Implement state transformation across recentering: rotate state vector and covariance into new ENU frame
+- [ ] 8.C.4 Implement measurement transformation per track: convert measurement to track's local ENU before update
+- [ ] 8.C.5 Write tests: recentering preserves filter state continuity (no jumps in track output)
+- [ ] 8.C.6 Write tests: recentered ENU tracker matches ECEF tracker accuracy on long-traverse scenario
+
+### 8.D Local Stereographic Projection
+
+- [ ] 8.D.1 Implement stereographic projection: geodetic (lat, lon) → 2D plane preserving distances from a center point
+- [ ] 8.D.2 Implement inverse stereographic projection: 2D plane → geodetic
+- [ ] 8.D.3 Define `MultiObjectTrackerStereographic`: tracker variant using stereographic 2D + altitude state
+- [ ] 8.D.4 Implement OTHR observation matrix for stereographic state (range/azimuth direct mapping)
+- [ ] 8.D.5 Implement projection center selection: place at OTHR transmitter or coverage centroid
+- [ ] 8.D.6 Write tests: stereographic projection roundtrip within 1 m at OTHR coverage ranges
+- [ ] 8.D.7 Write tests: stereographic tracker accurately tracks targets across full OTHR coverage area
+- [ ] 8.D.8 Write benchmark: stereographic vs ENU vs ECEF on representative OTHR scenarios
+
+### 8.E Tracker Selection and Documentation
+
+- [ ] 8.E.1 Define `TrackerVariant` enum and factory function for selecting appropriate tracker based on scenario
+- [ ] 8.E.2 Document selection guidance: ENU for short tracks <500 km traverse, ECEF for ballistic/orbital, great-circle for aircraft >1000 km, stereographic for area surveillance
+- [ ] 8.E.3 Add scenario-driven tracker selection to benchmark runner
+- [ ] 8.E.4 Write end-to-end comparison: same OTHR scenario tracked by all 4 variants, document accuracy/runtime tradeoffs
