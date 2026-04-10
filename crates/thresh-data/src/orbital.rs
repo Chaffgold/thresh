@@ -703,7 +703,11 @@ impl Dataset for OrbitalDataset {
                 sensor_metadata: None,
             })
             .collect();
-        Some(Box::new(gt.into_iter()))
+        if gt.is_empty() {
+            None
+        } else {
+            Some(Box::new(gt.into_iter()))
+        }
     }
 }
 

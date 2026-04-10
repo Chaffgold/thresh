@@ -177,7 +177,9 @@ pub struct SbsMessage {
 pub struct GroundTruthTrajectory {
     /// ICAO24 transponder address.
     pub icao24: String,
-    /// Time-ordered list of ground-truth entries.
+    /// Start time (Unix timestamp) of the trajectory.
+    pub start_time: f64,
+    /// Time-ordered list of ground-truth entries at 1-second intervals.
     pub entries: Vec<GroundTruthEntry>,
 }
 
@@ -630,8 +632,10 @@ pub fn extract_ground_truth(states: &[StateVector]) -> Vec<GroundTruthTrajectory
                     }
                     _ => None,
                 };
+                let start_time = sv.time_position.unwrap_or(sv.last_contact);
                 trajectories.push(GroundTruthTrajectory {
                     icao24,
+                    start_time,
                     entries: vec![GroundTruthEntry {
                         target_id: u64::from_str_radix(&sv.icao24, 16).unwrap_or(0),
                         position: [lat, lon, alt],
@@ -727,7 +731,11 @@ pub fn extract_ground_truth(states: &[StateVector]) -> Vec<GroundTruthTrajectory
         }
 
         if !entries.is_empty() {
-            trajectories.push(GroundTruthTrajectory { icao24, entries });
+            trajectories.push(GroundTruthTrajectory {
+                icao24,
+                start_time: t_start,
+                entries,
+            });
         }
     }
 
@@ -841,12 +849,12 @@ impl Dataset for AdsBDataset {
             return None;
         }
 
-        // Flatten all entries into frames grouped by position in the trajectory.
-        // Each trajectory's entries are at 1-second intervals.
+        // Flatten all entries into frames using real timestamps.
+        // Each trajectory's entries are at 1-second intervals from start_time.
         let mut all_entries: Vec<(f64, GroundTruthEntry)> = Vec::new();
         for traj in &self.ground_truth_trajectories {
             for (i, entry) in traj.entries.iter().enumerate() {
-                all_entries.push((i as f64, entry.clone()));
+                all_entries.push((traj.start_time + i as f64, entry.clone()));
             }
         }
 

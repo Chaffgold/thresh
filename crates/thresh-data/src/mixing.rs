@@ -48,7 +48,11 @@ impl Dataset for MixedDataset {
             } else {
                 None
             },
-            coordinate_frame: CoordinateFrame::Enu,
+            coordinate_frame: self
+                .datasets
+                .first()
+                .map(|ds| ds.metadata().coordinate_frame)
+                .unwrap_or(CoordinateFrame::Enu),
         }
     }
 
@@ -123,14 +127,18 @@ impl Iterator for MergeIter<'_> {
 /// Measurements within `window` seconds of each other are merged into a
 /// single frame. The bucket's timestamp is the midpoint of the bucket
 /// interval. Ground truth entries from all merged frames are combined.
+/// # Panics
+///
+/// Panics if `window <= 0.0`.
 pub fn bucket_frames(frames: Vec<Frame>, window: f64) -> Vec<Frame> {
+    assert!(window > 0.0, "window must be positive, got {window}");
     if frames.is_empty() {
         return Vec::new();
     }
 
     // Sort by timestamp first.
     let mut frames = frames;
-    frames.sort_by(|a, b| a.timestamp.partial_cmp(&b.timestamp).unwrap());
+    frames.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
 
     let t_start = frames[0].timestamp;
     let mut buckets: std::collections::BTreeMap<i64, Vec<Frame>> =

@@ -20,7 +20,7 @@ impl SyntheticDataset {
         let mut dataset = Self { name, frames };
         dataset
             .frames
-            .sort_by(|a, b| a.timestamp.partial_cmp(&b.timestamp).unwrap());
+            .sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
         dataset
     }
 
@@ -29,12 +29,16 @@ impl SyntheticDataset {
     /// Measurements and ground truth entries are grouped into frames using
     /// `dt` as the bucket width. Each bucket's timestamp is the midpoint of
     /// the bucket interval.
+    /// # Panics
+    ///
+    /// Panics if `dt <= 0.0`.
     pub fn from_measurements(
         name: String,
         measurements: Vec<(f64, Measurement)>,
         ground_truth: Vec<(f64, GroundTruthEntry)>,
         dt: f64,
     ) -> Self {
+        assert!(dt > 0.0, "dt must be positive, got {dt}");
         // Bucket index -> (measurements, ground_truth)
         let mut buckets: BTreeMap<i64, (Vec<Measurement>, Vec<GroundTruthEntry>)> = BTreeMap::new();
 
