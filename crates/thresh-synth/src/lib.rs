@@ -2,6 +2,7 @@
 
 pub mod eoir_physics;
 pub mod ionosphere;
+pub mod jsbsim;
 pub mod measurement_gen;
 pub mod multipath;
 pub mod orbital;

@@ -1606,6 +1606,7 @@ name = "thresh-synth"
 version = "0.1.0"
 dependencies = [
  "nalgebra",
+ "pyo3",
  "rand",
  "rand_distr",
  "serde",
