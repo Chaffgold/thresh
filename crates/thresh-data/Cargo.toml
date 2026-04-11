@@ -25,5 +25,12 @@ csv = { workspace = true, optional = true }
 sgp4 = { workspace = true, optional = true }
 pyo3 = { version = "0.24", optional = true }
 
+# Benchmark scenario runner CLI. Always built (no feature gate) since the
+# synthetic scenario path only needs types from thresh-core / thresh-synth /
+# thresh-tracker that are already in the default build graph.
+[[bin]]
+name = "thresh-data"
+path = "src/bin/thresh_data.rs"
+
 [dev-dependencies]
 tempfile = "3"

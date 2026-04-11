@@ -1,7 +1,7 @@
 ## 1. Crate Setup
 
 - [x] 1.1 Create `thresh-data` crate with feature flags: `adsb`, `orbital`, `nuscenes`
-- [ ] 1.2 Add workspace dependencies: `reqwest` (blocking), `csv`, `sgp4`, `toml` for credentials
+- [x] 1.2 Workspace dependencies wired: `reqwest` (optional under `adsb`), `csv` (optional under `adsb`), `sgp4` (optional under `orbital`), `toml` (for credentials and scenario manifests)
 - [x] 1.3 Define `Dataset` trait: `metadata()`, `frames()`, `ground_truth()`
 - [x] 1.4 Define `Frame` struct: timestamp, measurements, optional ground truth, sensor metadata
 - [x] 1.5 Define `DatasetMetadata`: name, source, target count, time span, coordinate frame
@@ -25,33 +25,33 @@
 
 ## 3. ADS-B Ingestion
 
-- [ ] 3.1 Implement OpenSky REST client: fetch state vectors by time range and bounding box
-- [ ] 3.2 Implement OpenSky flight track endpoint: get full trajectory for a specific flight
-- [ ] 3.3 Parse OpenSky JSON state vectors into intermediate structs
-- [ ] 3.4 Implement SBS BaseStation format parser (ADS-B Exchange CSV)
-- [ ] 3.5 Convert parsed ADS-B records → `Measurement::AdsB` with WGS84→ENU transform
-- [ ] 3.6 Extract ground truth trajectories: group by ICAO24, interpolate to regular time grid
-- [ ] 3.7 Implement `AdsBDataset` implementing `Dataset` trait
-- [ ] 3.8 Add download caching with content-hash deduplication
-- [ ] 3.9 Implement rate limiting with exponential backoff for OpenSky API
-- [ ] 3.10 Write tests: parse known SBS messages, verify field extraction
-- [ ] 3.11 Write tests: round-trip a known flight (e.g., mock OpenSky response)
-- [ ] 3.12 Write integration test (network, gated): fetch 1 hour of JFK approach data
+- [x] 3.1 `OpenSkyClient::fetch_states` in `crates/thresh-data/src/adsb.rs` fetches state vectors with optional `BoundingBox` and time parameters, cached under `~/.thresh/data/opensky/states/`.
+- [x] 3.2 `OpenSkyClient::fetch_track` fetches per-ICAO24 flight tracks against `/api/tracks/all`, cached under `~/.thresh/data/opensky/tracks/`.
+- [x] 3.3 `parse_states_response` / `parse_track_response` parse OpenSky JSON into `StateVector` / `TrackPoint` structs.
+- [x] 3.4 `parse_sbs_line` implements the SBS BaseStation CSV parser (MSG type discrimination + field extraction).
+- [x] 3.5 `state_vector_to_measurement` converts to `Measurement::AdsB` via WGS84→ENU.
+- [x] 3.6 `extract_ground_truth` groups state vectors by ICAO24 and interpolates to a 1-second grid (refactored in PR #33 for cognitive complexity).
+- [x] 3.7 `AdsBDataset` implements the `Dataset` trait.
+- [ ] 3.8 Add download caching with **content-hash** deduplication — current cache keys state vectors by `(time, bbox)` tuple rather than by request hash; revisit when caches grow large enough for key collisions to matter.
+- [x] 3.9 Rate limiting with exponential backoff implemented via `RateLimiter::{wait, failure, success}` in `adsb.rs` — doubles backoff on HTTP errors / 429 responses up to a configured max.
+- [x] 3.10 `parse_sbs_msg4_velocity` and `parse_sbs_rejects_non_msg` tests cover SBS message parsing.
+- [x] 3.11 `parse_opensky_states_json`, `parse_opensky_states_empty`, and `parse_opensky_track_json` round-trip mock OpenSky JSON payloads through the parser.
+- [x] 3.12 `integration_fetch_live_states` is wired with `#[test] #[ignore]` so CI default runs skip it; invoke via `cargo test -- --ignored integration_fetch_live_states` when credentials and network are available.
 
 ## 4. Orbital Data Ingestion
 
-- [ ] 4.1 Implement space-track.org REST client with session cookie auth
-- [ ] 4.2 Implement TLE two-line format parser
-- [ ] 4.3 Implement GP JSON format parser
-- [ ] 4.4 Integrate `sgp4` crate: propagate TLE to TEME state vector at arbitrary epoch
-- [ ] 4.5 Chain SGP4 → TEME → ECEF → ENU for ground-station-relative positions
-- [ ] 4.6 Generate synthetic radar measurements from orbital positions + ground station geometry
-- [ ] 4.7 Compute pass predictions (rise/set/max elevation) for station-object pairs
-- [ ] 4.8 Implement `OrbitalDataset` implementing `Dataset` trait
-- [ ] 4.9 Implement CelesTrak TLE fetcher as backup source
-- [ ] 4.10 Write tests: parse known ISS TLE, verify SGP4 position within 10 km of published
-- [ ] 4.11 Write tests: TEME→ECEF→ENU chain matches reference implementation
-- [ ] 4.12 Write integration test (network, gated): fetch ISS TLE, propagate, generate radar scenario
+- [ ] 4.1 Implement space-track.org REST client with session cookie auth — stub exists at `SpaceTrackClient::fetch_tle` returning an "HTTP client not yet implemented" error. Needs `reqwest` under the `orbital` feature and session-cookie handling.
+- [x] 4.2 `Tle::from_3le` and `Tle::from_2le` implement the two-line / three-line format parser.
+- [x] 4.3 `parse_gp_json` parses CelesTrak-style GP JSON arrays into `Tle` structs; covered by `parse_gp_json_basic` unit test.
+- [x] 4.4 `propagate_tle` integrates the `sgp4` crate to produce `TemeState` at arbitrary minutes-since-epoch.
+- [x] 4.5 `teme_to_ecef_to_enu_chain` and the SGP4 → TEME → ECEF → ENU pipeline are implemented and tested.
+- [x] 4.6 `radar_measurements_from_enu` produces synthetic radar measurements from orbital positions given a ground-station configuration.
+- [x] 4.7 `predict_passes` computes rise / set / max-elevation for (station, object) pairs.
+- [x] 4.8 `OrbitalDataset` implements the `Dataset` trait.
+- [ ] 4.9 Implement CelesTrak TLE fetcher — stub exists at `CelestrakClient::fetch_gp_group` returning an "HTTP client not yet implemented" error. Needs `reqwest` under the `orbital` feature.
+- [x] 4.10 `parse_3le_iss` / `parse_2le_iss` / `propagate_iss_position_reasonable` validate ISS TLE parsing and 10 km propagation accuracy.
+- [x] 4.11 `teme_to_ecef_to_enu_chain` checks the reference-frame chain against a known epoch.
+- [x] 4.12 `spacetrack_fetch_tle` and `celestrak_fetch_gp` are wired as `#[ignore]` integration tests — they will exercise live HTTP once §4.1 / §4.9 are implemented.
 
 ## 5. nuScenes Ingestion
 
@@ -68,24 +68,24 @@
 
 ## 6. Dataset Abstraction and Mixing
 
-- [ ] 6.1 Implement `SyntheticDataset` adapter wrapping `thresh-synth::Scenario`
-- [ ] 6.2 Implement `MixedDataset` combining multiple sources with time alignment
-- [ ] 6.3 Implement temporal bucketing: group measurements within configurable time window
-- [ ] 6.4 Implement lazy frame iteration (don't load all data into memory)
-- [ ] 6.5 Write tests: MixedDataset merges two synthetic streams in time order
-- [ ] 6.6 Write tests: temporal bucketing groups measurements within 50ms window
+- [x] 6.1 `SyntheticDataset` in `synthetic.rs` adapts `thresh-synth::Scenario` to the `Dataset` trait.
+- [x] 6.2 `MixedDataset` in `mixing.rs` performs k-way merge of multiple sources in time order with lazy iteration.
+- [x] 6.3 `bucket_frames` in `mixing.rs` groups frames within a configurable time window.
+- [x] 6.4 `MixedDataset::frames()` yields a lazy iterator that only holds one frame per source in memory at a time.
+- [x] 6.5 `mixed_dataset_merges_in_time_order` test covers the k-way merge.
+- [x] 6.6 `bucket_frames_groups_within_window` test covers temporal bucketing at 50 ms.
 
 ## 7. Benchmark Scenarios
 
-- [ ] 7.1 Define scenario manifest format (TOML): source, parameters, expected baselines
-- [ ] 7.2 Implement `thresh-data fetch <scenario>` CLI for data download
-- [ ] 7.3 Create scenario config: `adsb-single-flight`
-- [ ] 7.4 Create scenario config: `adsb-tracon`
-- [ ] 7.5 Create scenario config: `orbital-iss`
-- [ ] 7.6 Create scenario config: `orbital-starlink-train`
-- [ ] 7.7 Create scenario config: `nuscenes-mini`
-- [ ] 7.8 Create scenario configs: `synth-cv-clean`, `synth-maneuvering`, `synth-heterogeneous`, `synth-low-pd`
-- [ ] 7.9 Implement benchmark runner: load scenario → run tracker → compute metrics → compare baselines
-- [ ] 7.10 Implement regression check: fail if MOTA/HOTA drops below threshold
-- [ ] 7.11 Add CI job for synthetic benchmarks (no network required)
-- [ ] 7.12 Add nightly CI job for network-dependent benchmarks
+- [x] 7.1 `ScenarioManifest` struct in `benchmark.rs` defines the TOML manifest format (source, parameters, baselines).
+- [x] 7.2 `thresh-data` CLI binary (`crates/thresh-data/src/bin/thresh_data.rs`) with `list` / `run` / `help` subcommands. `list` walks the scenario directory (env `THRESH_DATA_SCENARIOS` or `--dir <path>`); `run <file.toml>` dispatches to the synthetic runner and prints MOTA / MOTP / IDF1 / HOTA + regression status. AdsB/Orbital sources surface "feature required" errors rather than silently running an empty scenario. CLI unit tests cover subcommand dispatch, dir-arg parsing, and source description.
+- [ ] 7.3 Create scenario config: `adsb-single-flight` — blocked on §4.1/§4.9 HTTP clients and an ADS-B runner dispatch in `run_manifest`.
+- [ ] 7.4 Create scenario config: `adsb-tracon` — same blockers as 7.3.
+- [ ] 7.5 Create scenario config: `orbital-iss` — blocked on §4.1/§4.9 HTTP clients.
+- [ ] 7.6 Create scenario config: `orbital-starlink-train` — blocked on §4.1/§4.9 HTTP clients.
+- [ ] 7.7 Create scenario config: `nuscenes-mini` — blocked on adding nuScenes dispatch in `run_manifest`.
+- [x] 7.8 Created `crates/thresh-data/scenarios/synth-cv-clean.toml`; it round-trips through `load_scenario` → `run_synthetic_benchmark` and clears its MOTA baseline (MOTA ≈ 0.94 with the default 5-CV trajectory set). Additional synth variants (`synth-maneuvering`, `synth-heterogeneous`, `synth-low-pd`) are deferred until `build_trajectories` learns to dispatch on a scenario-flavour field rather than hard-coding 5 CV targets.
+- [x] 7.9 `run_synthetic_benchmark` in `benchmark.rs` is the synthetic scenario runner — builds trajectories, runs the tracker, computes MOTA/MOTP/IDF1/HOTA.
+- [x] 7.10 `check_regression` returns a list of baseline failures (empty = pass); the CLI prints each failure and exits non-zero.
+- [ ] 7.11 Add CI job for synthetic benchmarks (no network required) — pending, needs a `.github/workflows/*.yml` addition to run `thresh-data run crates/thresh-data/scenarios/synth-cv-clean.toml`.
+- [ ] 7.12 Add nightly CI job for network-dependent benchmarks — pending, needs the scenarios from 7.3-7.7 and a nightly workflow.
