@@ -1,4 +1,24 @@
 //! Hungarian (Munkres) algorithm for optimal linear assignment.
+//!
+//! The public entry point [`hungarian_assignment`] is a short sequence of
+//! phase helpers so its cognitive complexity stays well under 15. Each helper
+//! implements one logically distinct phase of the Kuhn-Munkres iteration:
+//!
+//! 1. [`build_square_cost`] — pad a rectangular cost matrix to a square with
+//!    `gate`-valued dummy entries.
+//! 2. [`reduce_cost_matrix`] — classical row and column reduction.
+//! 3. [`greedy_zero_assignment`] — greedy initial matching on zero entries.
+//! 4. [`mark_cover`] — marking pass that yields a minimum vertex cover of the
+//!    current zero graph.
+//! 5. [`min_uncovered_value`] — smallest uncovered entry used for the update.
+//! 6. [`update_labels`] — subtract from uncovered, add to doubly covered.
+//! 7. [`extract_assignment`] — drop dummy / gated matches and build the
+//!    [`AssignmentResult`].
+//!
+//! The original monolithic implementation is kept under `#[cfg(test)]` as
+//! [`hungarian_assignment_v1`] and is exercised by a randomized comparison
+//! harness (`compare_v1_and_v2_on_random_matrices`) that runs 10 000+ random
+//! cases to confirm the new decomposition preserves optimal cost.
 
 /// Result of running the Hungarian algorithm.
 #[derive(Debug, Clone)]
@@ -13,11 +33,307 @@ pub struct AssignmentResult {
     pub total_cost: f64,
 }
 
+/// Tolerance used when comparing cost entries against zero.
+const ZERO_EPS: f64 = 1e-10;
+
 /// Solve the linear assignment problem using the Hungarian algorithm.
 ///
 /// Finds the assignment that minimizes total cost. Handles rectangular matrices.
 /// Entries with cost >= `gate` are considered infeasible.
 pub fn hungarian_assignment(cost: &[Vec<f64>], gate: f64) -> AssignmentResult {
+    let n_rows = cost.len();
+    if n_rows == 0 {
+        return empty_result();
+    }
+    let n_cols = cost[0].len();
+    if n_cols == 0 {
+        return all_rows_unassigned(n_rows);
+    }
+
+    let dim = n_rows.max(n_cols);
+    let mut c = build_square_cost(cost, gate, dim, n_rows, n_cols);
+    reduce_cost_matrix(&mut c, dim);
+
+    let (mut row_assign, mut col_assign) = greedy_zero_assignment(&c, dim);
+    run_munkres_loop(&mut c, &mut row_assign, &mut col_assign, dim);
+
+    extract_assignment(cost, gate, &row_assign, n_rows, n_cols)
+}
+
+// ---------------------------------------------------------------------------
+// Phase helpers
+// ---------------------------------------------------------------------------
+
+fn empty_result() -> AssignmentResult {
+    AssignmentResult {
+        matches: vec![],
+        unassigned_rows: vec![],
+        unassigned_cols: vec![],
+        total_cost: 0.0,
+    }
+}
+
+fn all_rows_unassigned(n_rows: usize) -> AssignmentResult {
+    AssignmentResult {
+        matches: vec![],
+        unassigned_rows: (0..n_rows).collect(),
+        unassigned_cols: vec![],
+        total_cost: 0.0,
+    }
+}
+
+/// Pad `cost` to a `dim x dim` square, filling dummy entries with `gate`.
+fn build_square_cost(
+    cost: &[Vec<f64>],
+    gate: f64,
+    dim: usize,
+    n_rows: usize,
+    n_cols: usize,
+) -> Vec<Vec<f64>> {
+    let mut c = vec![vec![0.0f64; dim]; dim];
+    for i in 0..dim {
+        for j in 0..dim {
+            if i < n_rows && j < n_cols {
+                c[i][j] = cost[i][j];
+            } else {
+                c[i][j] = gate;
+            }
+        }
+    }
+    c
+}
+
+/// Subtract the row minimum from each row, then the column minimum from each
+/// column. Non-finite minima (all-infinity rows/columns) are left untouched.
+fn reduce_cost_matrix(c: &mut [Vec<f64>], dim: usize) {
+    for row in c.iter_mut() {
+        let min = row.iter().copied().fold(f64::INFINITY, f64::min);
+        if min.is_finite() {
+            for v in row.iter_mut() {
+                *v -= min;
+            }
+        }
+    }
+    for j in 0..dim {
+        let min = (0..dim).map(|i| c[i][j]).fold(f64::INFINITY, f64::min);
+        if min.is_finite() {
+            for row in c.iter_mut() {
+                row[j] -= min;
+            }
+        }
+    }
+}
+
+/// Greedy initial matching: claim zero entries in row-major order whenever
+/// both endpoints are still unmatched.
+fn greedy_zero_assignment(c: &[Vec<f64>], dim: usize) -> (Vec<Option<usize>>, Vec<Option<usize>>) {
+    let mut row_assign = vec![None::<usize>; dim];
+    let mut col_assign = vec![None::<usize>; dim];
+    for i in 0..dim {
+        for j in 0..dim {
+            if c[i][j].abs() < ZERO_EPS && row_assign[i].is_none() && col_assign[j].is_none() {
+                row_assign[i] = Some(j);
+                col_assign[j] = Some(i);
+            }
+        }
+    }
+    (row_assign, col_assign)
+}
+
+/// Run the main Munkres improvement loop until every row is assigned or no
+/// further progress is possible.
+fn run_munkres_loop(
+    c: &mut [Vec<f64>],
+    row_assign: &mut [Option<usize>],
+    col_assign: &mut [Option<usize>],
+    dim: usize,
+) {
+    loop {
+        let n_assigned = row_assign.iter().filter(|a| a.is_some()).count();
+        if n_assigned == dim {
+            return;
+        }
+
+        let (row_covered, col_covered) = mark_cover(c, row_assign, col_assign, dim);
+        let covered_count = count_true(&row_covered) + count_true(&col_covered);
+        if covered_count >= dim {
+            return;
+        }
+
+        let min_val = min_uncovered_value(c, &row_covered, &col_covered, dim);
+        if !min_val.is_finite() || min_val.abs() < 1e-15 {
+            return;
+        }
+
+        update_labels(c, &row_covered, &col_covered, dim, min_val);
+        let (new_rows, new_cols) = greedy_zero_assignment(c, dim);
+        row_assign.copy_from_slice(&new_rows);
+        col_assign.copy_from_slice(&new_cols);
+    }
+}
+
+fn count_true(flags: &[bool]) -> usize {
+    flags.iter().filter(|&&f| f).count()
+}
+
+/// Compute the minimum vertex cover of the zero graph via the classical
+/// marking procedure. Returns `(row_covered, col_covered)` boolean vectors.
+fn mark_cover(
+    c: &[Vec<f64>],
+    row_assign: &[Option<usize>],
+    col_assign: &[Option<usize>],
+    dim: usize,
+) -> (Vec<bool>, Vec<bool>) {
+    let mut unmarked_rows: Vec<usize> = (0..dim).filter(|&i| row_assign[i].is_none()).collect();
+    let mut row_marked = vec![false; dim];
+    let mut col_marked = vec![false; dim];
+    for &r in &unmarked_rows {
+        row_marked[r] = true;
+    }
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        changed |= mark_cols_with_zeros_in_marked_rows(c, &unmarked_rows, &mut col_marked, dim);
+        changed |= mark_rows_assigned_to_marked_cols(
+            col_assign,
+            &col_marked,
+            &mut row_marked,
+            &mut unmarked_rows,
+            dim,
+        );
+    }
+
+    let row_covered: Vec<bool> = row_marked.iter().map(|&m| !m).collect();
+    let col_covered: Vec<bool> = col_marked;
+    (row_covered, col_covered)
+}
+
+fn mark_cols_with_zeros_in_marked_rows(
+    c: &[Vec<f64>],
+    unmarked_rows: &[usize],
+    col_marked: &mut [bool],
+    dim: usize,
+) -> bool {
+    let mut changed = false;
+    for &r in unmarked_rows {
+        for j in 0..dim {
+            if !col_marked[j] && c[r][j].abs() < ZERO_EPS {
+                col_marked[j] = true;
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+fn mark_rows_assigned_to_marked_cols(
+    col_assign: &[Option<usize>],
+    col_marked: &[bool],
+    row_marked: &mut [bool],
+    unmarked_rows: &mut Vec<usize>,
+    dim: usize,
+) -> bool {
+    let mut changed = false;
+    for j in 0..dim {
+        if let Some(r) = col_assign[j]
+            && col_marked[j]
+            && !row_marked[r]
+        {
+            row_marked[r] = true;
+            unmarked_rows.push(r);
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Smallest cost entry that lies in an uncovered row and uncovered column.
+fn min_uncovered_value(
+    c: &[Vec<f64>],
+    row_covered: &[bool],
+    col_covered: &[bool],
+    dim: usize,
+) -> f64 {
+    let mut min_val = f64::INFINITY;
+    for i in 0..dim {
+        if row_covered[i] {
+            continue;
+        }
+        for j in 0..dim {
+            if !col_covered[j] && c[i][j] < min_val {
+                min_val = c[i][j];
+            }
+        }
+    }
+    min_val
+}
+
+/// Update potentials: subtract `min_val` from every uncovered entry and add
+/// `min_val` to every doubly-covered entry.
+fn update_labels(
+    c: &mut [Vec<f64>],
+    row_covered: &[bool],
+    col_covered: &[bool],
+    dim: usize,
+    min_val: f64,
+) {
+    for i in 0..dim {
+        for j in 0..dim {
+            if !row_covered[i] && !col_covered[j] {
+                c[i][j] -= min_val;
+            } else if row_covered[i] && col_covered[j] {
+                c[i][j] += min_val;
+            }
+        }
+    }
+}
+
+/// Build the final [`AssignmentResult`], discarding assignments that involve
+/// dummy rows/cols or whose original cost is `>= gate`.
+fn extract_assignment(
+    cost: &[Vec<f64>],
+    gate: f64,
+    row_assign: &[Option<usize>],
+    n_rows: usize,
+    n_cols: usize,
+) -> AssignmentResult {
+    let mut matches = Vec::new();
+    let mut matched_rows = vec![false; n_rows];
+    let mut matched_cols = vec![false; n_cols];
+    let mut total_cost = 0.0;
+
+    for i in 0..n_rows {
+        if let Some(j) = row_assign[i]
+            && j < n_cols
+            && cost[i][j] < gate
+        {
+            matches.push((i, j));
+            matched_rows[i] = true;
+            matched_cols[j] = true;
+            total_cost += cost[i][j];
+        }
+    }
+
+    let unassigned_rows: Vec<usize> = (0..n_rows).filter(|&i| !matched_rows[i]).collect();
+    let unassigned_cols: Vec<usize> = (0..n_cols).filter(|&j| !matched_cols[j]).collect();
+
+    AssignmentResult {
+        matches,
+        unassigned_rows,
+        unassigned_cols,
+        total_cost,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Legacy monolithic implementation (kept under cfg(test) for equivalence
+// testing only — never compiled into release builds).
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+#[allow(clippy::needless_range_loop)]
+fn hungarian_assignment_v1(cost: &[Vec<f64>], gate: f64) -> AssignmentResult {
     let n_rows = cost.len();
     if n_rows == 0 {
         return AssignmentResult {
@@ -287,5 +603,216 @@ mod tests {
         let cost: Vec<Vec<f64>> = vec![];
         let result = hungarian_assignment(&cost, f64::INFINITY);
         assert!(result.matches.is_empty());
+    }
+
+    // ---- Phase-helper unit tests -----------------------------------------
+
+    #[test]
+    fn reduce_cost_matrix_subtracts_row_and_column_minima() {
+        let mut c = vec![
+            vec![4.0, 1.0, 3.0],
+            vec![2.0, 0.0, 5.0],
+            vec![3.0, 2.0, 2.0],
+        ];
+        reduce_cost_matrix(&mut c, 3);
+        // Row mins: 1, 0, 2 → after row reduction:
+        //   [3, 0, 2]
+        //   [2, 0, 5]
+        //   [1, 0, 0]
+        // Col mins: 1, 0, 0 → after col reduction:
+        //   [2, 0, 2]
+        //   [1, 0, 5]
+        //   [0, 0, 0]
+        assert_eq!(c[0], vec![2.0, 0.0, 2.0]);
+        assert_eq!(c[1], vec![1.0, 0.0, 5.0]);
+        assert_eq!(c[2], vec![0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn greedy_zero_assignment_matches_independent_zeros() {
+        let c = vec![
+            vec![0.0, 1.0, 2.0],
+            vec![1.0, 0.0, 2.0],
+            vec![2.0, 2.0, 0.0],
+        ];
+        let (row_assign, col_assign) = greedy_zero_assignment(&c, 3);
+        assert_eq!(row_assign, vec![Some(0), Some(1), Some(2)]);
+        assert_eq!(col_assign, vec![Some(0), Some(1), Some(2)]);
+    }
+
+    #[test]
+    fn mark_cover_identifies_minimum_vertex_cover() {
+        // All zeros in row 0; greedy claims (0,0). Rows 1 and 2 have no zeros.
+        let c = vec![
+            vec![0.0, 0.0, 0.0],
+            vec![1.0, 2.0, 3.0],
+            vec![4.0, 5.0, 6.0],
+        ];
+        let (row_assign, col_assign) = greedy_zero_assignment(&c, 3);
+        let (row_cov, col_cov) = mark_cover(&c, &row_assign, &col_assign, 3);
+        // Unassigned rows 1 and 2 are marked → uncovered. Assigned row 0 is
+        // covered. No columns are marked (no zeros in marked rows), so all
+        // columns stay uncovered.
+        assert!(row_cov[0]);
+        assert!(!row_cov[1]);
+        assert!(!row_cov[2]);
+        assert!(!col_cov.iter().any(|&c| c));
+    }
+
+    #[test]
+    fn min_uncovered_value_skips_covered_entries() {
+        let c = vec![
+            vec![1.0, 2.0, 3.0],
+            vec![4.0, 5.0, 6.0],
+            vec![7.0, 8.0, 9.0],
+        ];
+        let row_cov = vec![true, false, false];
+        let col_cov = vec![false, true, false];
+        // Uncovered entries: (1,0)=4, (1,2)=6, (2,0)=7, (2,2)=9 → min = 4
+        let m = min_uncovered_value(&c, &row_cov, &col_cov, 3);
+        assert_eq!(m, 4.0);
+    }
+
+    #[test]
+    fn update_labels_adjusts_uncovered_and_double_covered() {
+        let mut c = vec![vec![10.0, 10.0], vec![10.0, 10.0]];
+        let row_cov = vec![true, false];
+        let col_cov = vec![true, false];
+        update_labels(&mut c, &row_cov, &col_cov, 2, 2.0);
+        // (0,0) doubly covered → +2; (0,1) row covered only → unchanged;
+        // (1,0) col covered only → unchanged; (1,1) uncovered → -2.
+        assert_eq!(c[0][0], 12.0);
+        assert_eq!(c[0][1], 10.0);
+        assert_eq!(c[1][0], 10.0);
+        assert_eq!(c[1][1], 8.0);
+    }
+
+    // ---- Randomized equivalence harness ----------------------------------
+
+    /// Tiny deterministic PRNG (splitmix64) used so the comparison harness is
+    /// reproducible without pulling in an external crate.
+    struct SplitMix64 {
+        state: u64,
+    }
+
+    impl SplitMix64 {
+        fn new(seed: u64) -> Self {
+            Self { state: seed }
+        }
+
+        fn next_u64(&mut self) -> u64 {
+            self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = self.state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        }
+
+        fn next_f64(&mut self) -> f64 {
+            // 53 bits of mantissa → uniform in [0, 1).
+            (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+        }
+
+        fn next_range(&mut self, lo: usize, hi_inclusive: usize) -> usize {
+            let span = (hi_inclusive - lo + 1) as u64;
+            lo + (self.next_u64() % span) as usize
+        }
+    }
+
+    fn random_cost_matrix(rng: &mut SplitMix64, rows: usize, cols: usize) -> Vec<Vec<f64>> {
+        let mut m = Vec::with_capacity(rows);
+        for _ in 0..rows {
+            let mut row = Vec::with_capacity(cols);
+            for _ in 0..cols {
+                // Cost range [0, 100). Occasionally tie values by snapping to
+                // coarse buckets so we exercise the non-unique-optimum path.
+                let raw = rng.next_f64() * 100.0;
+                let snapped = if rng.next_u64() & 0b11 == 0 {
+                    (raw * 0.1).round() * 10.0
+                } else {
+                    raw
+                };
+                row.push(snapped);
+            }
+            m.push(row);
+        }
+        m
+    }
+
+    /// Validate that a result is a one-to-one matching, honours `gate`, and
+    /// return its accumulated cost (which must equal `result.total_cost`).
+    fn validate_and_sum(cost: &[Vec<f64>], gate: f64, result: &AssignmentResult) -> f64 {
+        let n_rows = cost.len();
+        let n_cols = if n_rows == 0 { 0 } else { cost[0].len() };
+        let mut seen_rows = vec![false; n_rows];
+        let mut seen_cols = vec![false; n_cols];
+        let mut sum = 0.0;
+        for &(r, c) in &result.matches {
+            assert!(r < n_rows, "row out of bounds");
+            assert!(c < n_cols, "col out of bounds");
+            assert!(!seen_rows[r], "row {r} used twice");
+            assert!(!seen_cols[c], "col {c} used twice");
+            assert!(cost[r][c] < gate, "matched entry must respect gate");
+            seen_rows[r] = true;
+            seen_cols[c] = true;
+            sum += cost[r][c];
+        }
+        assert!(
+            (sum - result.total_cost).abs() < 1e-9,
+            "reported total_cost {} does not match sum {}",
+            result.total_cost,
+            sum
+        );
+        sum
+    }
+
+    #[test]
+    fn compare_v1_and_v2_on_random_matrices() {
+        let mut rng = SplitMix64::new(0xC0FFEE_u64);
+        let iterations = 10_000;
+        for iter in 0..iterations {
+            let rows = rng.next_range(1, 20);
+            let cols = rng.next_range(1, 20);
+            let cost = random_cost_matrix(&mut rng, rows, cols);
+            // Exercise both gated and ungated paths.
+            let gate = if iter & 1 == 0 { f64::INFINITY } else { 50.0 };
+
+            let r_new = hungarian_assignment(&cost, gate);
+            let r_old = hungarian_assignment_v1(&cost, gate);
+
+            let sum_new = validate_and_sum(&cost, gate, &r_new);
+            let sum_old = validate_and_sum(&cost, gate, &r_old);
+
+            // Both implementations must find an optimum of the same value.
+            assert!(
+                (sum_new - sum_old).abs() < 1e-9,
+                "iter {iter}: v1 cost {sum_old} vs v2 cost {sum_new} (rows={rows}, cols={cols}, gate={gate})"
+            );
+
+            // Match counts must agree (same number of feasible pairings).
+            assert_eq!(
+                r_new.matches.len(),
+                r_old.matches.len(),
+                "iter {iter}: match count differs"
+            );
+        }
+    }
+
+    #[test]
+    fn compare_v1_and_v2_small_exhaustive_sizes() {
+        // Tight loop for the smallest sizes where pathological tie patterns
+        // are most common.
+        let mut rng = SplitMix64::new(0xDEAD_BEEF_u64);
+        for _ in 0..2_000 {
+            let rows = rng.next_range(1, 5);
+            let cols = rng.next_range(1, 5);
+            let cost = random_cost_matrix(&mut rng, rows, cols);
+            let gate = f64::INFINITY;
+            let r_new = hungarian_assignment(&cost, gate);
+            let r_old = hungarian_assignment_v1(&cost, gate);
+            let sum_new = validate_and_sum(&cost, gate, &r_new);
+            let sum_old = validate_and_sum(&cost, gate, &r_old);
+            assert!((sum_new - sum_old).abs() < 1e-9);
+        }
     }
 }
