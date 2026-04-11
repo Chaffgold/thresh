@@ -19,3 +19,11 @@ serde_json = { workspace = true }
 rand = "0.9"
 rand_distr = "0.5"
 pyo3 = { version = "0.24", optional = true }
+
+# CLI binary for computing RCS sweeps via the PyPOFacets bridge. Gated on the
+# `rcs-compute` feature so it only builds when the Python bridge deps are
+# available (matches the `RcsComputeBridge` gating in `rcs_compute.rs`).
+[[bin]]
+name = "thresh-rcs-compute"
+path = "src/bin/rcs_compute.rs"
+required-features = ["rcs-compute"]
