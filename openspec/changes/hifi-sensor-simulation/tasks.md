@@ -33,7 +33,7 @@
 - [x] 3.3 Implement monostatic RCS sweep: compute RCS at azimuth angles 0°-360° (configurable step) at fixed elevation
 - [x] 3.4 Implement full hemisphere RCS: azimuth × elevation grid
 - [x] 3.5 Export computed RCS table to JSON (compatible with the lookup table loader from 1.7)
-- [x] 3.6 Create CLI command: `thresh rcs-compute --stl <file> --freq <GHz> --step <degrees> --output <json>`
+- [ ] 3.6 Create CLI command: `thresh rcs-compute --stl <file> --freq <GHz> --step <degrees> --output <json>` (library API `compute_and_save_rcs` is available; CLI binary pending)
 - [x] 3.7 Write test: RCS of a sphere matches analytical value (πr² for PO regime)
 
 ## 4. JSBSim Trajectory Bridge (Feature-gated)

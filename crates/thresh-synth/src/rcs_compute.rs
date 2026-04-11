@@ -87,31 +87,46 @@ impl RcsSweepResult {
 /// sorted in ascending order along both axes. Missing grid cells default to
 /// the sweep's observed minimum so that bilinear lookup remains well-defined.
 ///
+/// # Panics
+///
+/// Panics if `result.samples` is empty, since an empty grid cannot satisfy
+/// the `RcsLookupTable` lookup contract (which requires at least one
+/// azimuth and one elevation entry).
+///
 /// [`RcsLookupTable`]: crate::swerling::RcsLookupTable
 pub fn sweep_to_lookup_table(result: &RcsSweepResult) -> crate::swerling::RcsLookupTable {
+    assert!(
+        !result.samples.is_empty(),
+        "sweep_to_lookup_table requires at least one sample to build a valid RcsLookupTable"
+    );
+
     // Collect unique azimuth / elevation values using an integer key for
-    // stable de-duplication of floating-point grid points.
+    // stable de-duplication of floating-point grid points. BTreeMap gives
+    // sorted-order keys and O(log n) insert/lookup per sample (O(n log n)
+    // overall, vs the previous O(n²) Vec::contains/position scan).
+    use std::collections::BTreeMap;
+
     fn key(x: f64) -> i64 {
         (x * 1_000.0).round() as i64
     }
 
-    let mut az_keys: Vec<i64> = Vec::new();
-    let mut el_keys: Vec<i64> = Vec::new();
+    let mut az_idx: BTreeMap<i64, usize> = BTreeMap::new();
+    let mut el_idx: BTreeMap<i64, usize> = BTreeMap::new();
     for s in &result.samples {
         let ak = key(s.azimuth_deg);
         let ek = key(s.elevation_deg);
-        if !az_keys.contains(&ak) {
-            az_keys.push(ak);
-        }
-        if !el_keys.contains(&ek) {
-            el_keys.push(ek);
-        }
+        let next_a = az_idx.len();
+        az_idx.entry(ak).or_insert(next_a);
+        let next_e = el_idx.len();
+        el_idx.entry(ek).or_insert(next_e);
     }
-    az_keys.sort_unstable();
-    el_keys.sort_unstable();
 
-    let azimuth_deg: Vec<f64> = az_keys.iter().map(|k| (*k as f64) / 1_000.0).collect();
-    let elevation_deg: Vec<f64> = el_keys.iter().map(|k| (*k as f64) / 1_000.0).collect();
+    // BTreeMap gives sorted key iteration; rebuild the index maps so indices
+    // match the final sorted order.
+    let azimuth_deg: Vec<f64> = az_idx.keys().map(|k| (*k as f64) / 1_000.0).collect();
+    let elevation_deg: Vec<f64> = el_idx.keys().map(|k| (*k as f64) / 1_000.0).collect();
+    let az_idx: BTreeMap<i64, usize> = az_idx.keys().enumerate().map(|(i, k)| (*k, i)).collect();
+    let el_idx: BTreeMap<i64, usize> = el_idx.keys().enumerate().map(|(i, k)| (*k, i)).collect();
 
     let fill = result
         .samples
@@ -122,14 +137,8 @@ pub fn sweep_to_lookup_table(result: &RcsSweepResult) -> crate::swerling::RcsLoo
 
     let mut rcs_dbsm: Vec<Vec<f64>> = vec![vec![fill; elevation_deg.len()]; azimuth_deg.len()];
     for s in &result.samples {
-        let ai = az_keys
-            .iter()
-            .position(|k| *k == key(s.azimuth_deg))
-            .unwrap();
-        let ei = el_keys
-            .iter()
-            .position(|k| *k == key(s.elevation_deg))
-            .unwrap();
+        let ai = az_idx[&key(s.azimuth_deg)];
+        let ei = el_idx[&key(s.elevation_deg)];
         rcs_dbsm[ai][ei] = s.rcs_dbsm;
     }
 
@@ -242,7 +251,10 @@ impl RcsComputeBridge {
     }
 }
 
-/// Convenience entry point wrapping load + sweep + JSON export.
+/// Convenience entry point wrapping geometry validation + sweep + JSON export.
+///
+/// Calls `load_geometry()` first to fail fast on an invalid or missing STL
+/// path before running the full hemisphere sweep.
 #[cfg(feature = "rcs-compute")]
 pub fn compute_and_save_rcs(
     stl_path: &str,
@@ -250,6 +262,7 @@ pub fn compute_and_save_rcs(
     output_path: &std::path::Path,
 ) -> PyResult<()> {
     let bridge = RcsComputeBridge::new(stl_path);
+    let _ = bridge.load_geometry()?;
     let result = bridge.sweep_hemisphere(config)?;
     result.write_json(output_path).map_err(|e| {
         pyo3::exceptions::PyIOError::new_err(format!("failed to write {output_path:?}: {e}"))
@@ -311,11 +324,30 @@ mod tests {
         assert!(json.contains("\"polarization\""));
 
         let dir = std::env::temp_dir();
-        let path = dir.join("thresh_rcs_compute_write_test.json");
+        let unique = format!(
+            "thresh_rcs_compute_write_test_{}_{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let path = dir.join(unique);
         result.write_json(&path).unwrap();
         let round: RcsSweepResult = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(round.samples.len(), 1);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    #[should_panic(expected = "requires at least one sample")]
+    fn sweep_to_lookup_table_panics_on_empty_samples() {
+        let empty = RcsSweepResult {
+            frequency_ghz: 10.0,
+            polarization: "VV".into(),
+            samples: vec![],
+        };
+        let _ = sweep_to_lookup_table(&empty);
     }
 
     #[test]
