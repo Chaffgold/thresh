@@ -28,13 +28,13 @@
 
 ## 3. RCS Computation Bridge (Feature-gated)
 
-- [ ] 3.1 Set up PyO3 bridge to PyPOFacets, gated behind `rcs-compute` feature
-- [ ] 3.2 Implement target geometry loader: STL file → faceted model in Python
-- [ ] 3.3 Implement monostatic RCS sweep: compute RCS at azimuth angles 0°-360° (configurable step) at fixed elevation
-- [ ] 3.4 Implement full hemisphere RCS: azimuth × elevation grid
-- [ ] 3.5 Export computed RCS table to JSON (compatible with the lookup table loader from 1.7)
-- [ ] 3.6 Create CLI command: `thresh rcs-compute --stl <file> --freq <GHz> --step <degrees> --output <json>`
-- [ ] 3.7 Write test: RCS of a sphere matches analytical value (πr² for PO regime)
+- [x] 3.1 Set up PyO3 bridge to PyPOFacets, gated behind `rcs-compute` feature
+- [x] 3.2 Implement target geometry loader: STL file → faceted model in Python
+- [x] 3.3 Implement monostatic RCS sweep: compute RCS at azimuth angles 0°-360° (configurable step) at fixed elevation
+- [x] 3.4 Implement full hemisphere RCS: azimuth × elevation grid
+- [x] 3.5 Export computed RCS table to JSON (compatible with the lookup table loader from 1.7)
+- [x] 3.6 Create CLI command: `thresh rcs-compute --stl <file> --freq <GHz> --step <degrees> --output <json>`
+- [x] 3.7 Write test: RCS of a sphere matches analytical value (πr² for PO regime)
 
 ## 4. JSBSim Trajectory Bridge (Feature-gated)
 
