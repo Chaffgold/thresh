@@ -68,14 +68,14 @@
 
 ### 8.A ECEF Tracking Variant
 
-- [ ] 8.A.1 Implement `EcefMotionModel`: 6-state CV in ECEF coordinates with proper centrifugal/Coriolis terms for Earth-fixed frame
-- [ ] 8.A.2 Implement `MultiObjectTrackerEcef`: tracker variant with ECEF state and observation models
-- [ ] 8.A.3 Implement OTHR observation matrix for ECEF state: ground_range from great-circle, azimuth from initial bearing, doppler from radial velocity
-- [ ] 8.A.4 Implement conventional radar observation matrix for ECEF state (range/azimuth/elevation from sensor ECEF position)
-- [ ] 8.A.5 Implement track output conversion: ECEF state → ENU at user-supplied reference point for visualization/eval
-- [ ] 8.A.6 Write tests: ECEF tracker maintains position accuracy on 3000 km cross-coverage transit
-- [ ] 8.A.7 Write tests: ECEF tracker correctly tracks a great-circle aircraft path over 1 hour
-- [ ] 8.A.8 Write benchmark: ECEF vs ENU tracker on long-traverse scenario, compare MOTA
+- [x] 8.A.1 Implement `EcefMotionModel`: 6-state CV in ECEF coordinates with proper centrifugal/Coriolis terms for Earth-fixed frame
+- [x] 8.A.2 Implement `MultiObjectTrackerEcef`: tracker variant with ECEF state and observation models
+- [x] 8.A.3 Implement OTHR observation matrix for ECEF state: ground_range from great-circle, azimuth from initial bearing, doppler from radial velocity
+- [x] 8.A.4 Implement conventional radar observation matrix for ECEF state (range/azimuth/elevation from sensor ECEF position)
+- [x] 8.A.5 Implement track output conversion: ECEF state → ENU at user-supplied reference point for visualization/eval
+- [x] 8.A.6 Write tests: ECEF tracker maintains position accuracy on 3000 km cross-coverage transit
+- [x] 8.A.7 Write tests: ECEF tracker correctly tracks a great-circle aircraft path over 1 hour
+- [x] 8.A.8 Write benchmark: ECEF vs ENU tracker on long-traverse scenario, compare MOTA
 
 ### 8.B Great-Circle Motion Model
 
@@ -99,14 +99,14 @@
 
 ### 8.D Local Stereographic Projection
 
-- [x] 8.D.1 Implement stereographic projection: geodetic (lat, lon) → 2D plane preserving distances from a center point
-- [x] 8.D.2 Implement inverse stereographic projection: 2D plane → geodetic
-- [x] 8.D.3 Define `MultiObjectTrackerStereographic`: tracker variant using stereographic 2D + altitude state
-- [x] 8.D.4 Implement OTHR observation matrix for stereographic state (range/azimuth direct mapping)
-- [x] 8.D.5 Implement projection center selection: place at OTHR transmitter or coverage centroid
-- [x] 8.D.6 Write tests: stereographic projection roundtrip within 1 m at OTHR coverage ranges
-- [x] 8.D.7 Write tests: stereographic tracker accurately tracks targets across full OTHR coverage area
-- [x] 8.D.8 Write benchmark: stereographic vs ENU vs ECEF on representative OTHR scenarios
+- [ ] 8.D.1 Implement stereographic projection: geodetic (lat, lon) → 2D plane preserving distances from a center point
+- [ ] 8.D.2 Implement inverse stereographic projection: 2D plane → geodetic
+- [ ] 8.D.3 Define `MultiObjectTrackerStereographic`: tracker variant using stereographic 2D + altitude state
+- [ ] 8.D.4 Implement OTHR observation matrix for stereographic state (range/azimuth direct mapping)
+- [ ] 8.D.5 Implement projection center selection: place at OTHR transmitter or coverage centroid
+- [ ] 8.D.6 Write tests: stereographic projection roundtrip within 1 m at OTHR coverage ranges
+- [ ] 8.D.7 Write tests: stereographic tracker accurately tracks targets across full OTHR coverage area
+- [ ] 8.D.8 Write benchmark: stereographic vs ENU vs ECEF on representative OTHR scenarios
 
 ### 8.E Tracker Selection and Documentation
 

@@ -1,6 +1,7 @@
 //! Track management: lifecycle state machine, M-of-N confirmation, class-specific heads.
 
 pub mod cost_matrix;
+pub mod ecef_tracker;
 pub mod great_circle_tracker;
 pub mod heads;
 pub mod lifecycle;
