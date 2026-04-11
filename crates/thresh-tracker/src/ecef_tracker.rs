@@ -165,6 +165,24 @@ impl crate::cost_matrix::LinearTrack for EcefTrack {
     fn covariance_mut(&mut self) -> &mut DMatrix<f64> {
         &mut self.covariance
     }
+    fn hits(&self) -> usize {
+        self.hits
+    }
+    fn hits_mut(&mut self) -> &mut usize {
+        &mut self.hits
+    }
+    fn misses(&self) -> usize {
+        self.misses
+    }
+    fn misses_mut(&mut self) -> &mut usize {
+        &mut self.misses
+    }
+    fn lifecycle(&self) -> TrackState {
+        self.lifecycle
+    }
+    fn set_lifecycle(&mut self, state: TrackState) {
+        self.lifecycle = state;
+    }
 }
 
 // ── Tracker ─────────────────────────────────────────────────────────────────

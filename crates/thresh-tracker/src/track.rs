@@ -92,6 +92,24 @@ impl crate::cost_matrix::LinearTrack for Track {
     fn covariance_mut(&mut self) -> &mut DMatrix<f64> {
         &mut self.covariance
     }
+    fn hits(&self) -> usize {
+        self.total_hits
+    }
+    fn hits_mut(&mut self) -> &mut usize {
+        &mut self.total_hits
+    }
+    fn misses(&self) -> usize {
+        self.coast_count
+    }
+    fn misses_mut(&mut self) -> &mut usize {
+        &mut self.coast_count
+    }
+    fn lifecycle(&self) -> TrackState {
+        self.lifecycle
+    }
+    fn set_lifecycle(&mut self, state: TrackState) {
+        self.lifecycle = state;
+    }
 }
 
 #[cfg(test)]

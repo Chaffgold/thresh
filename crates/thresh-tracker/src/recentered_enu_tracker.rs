@@ -20,7 +20,9 @@ use nalgebra::{DMatrix, DVector, Matrix3, Vector3};
 
 use thresh_association::hungarian::hungarian_assignment;
 
-use crate::cost_matrix::{LinearTrack, build_cost_matrix, predict_linear};
+use crate::cost_matrix::{
+    LinearTrack, build_cost_matrix, predict_linear, record_hit_and_promote, record_miss_and_age,
+};
 use thresh_core::geodetic::{ecef_to_enu, ecef_to_wgs84, enu_to_ecef, wgs84_to_ecef};
 use thresh_core::measurement::Measurement;
 use thresh_core::othr::{OthrSensorRegistration, othr_to_geodetic};
@@ -125,6 +127,24 @@ impl LinearTrack for RecenteredEnuTrack {
     }
     fn covariance_mut(&mut self) -> &mut DMatrix<f64> {
         &mut self.covariance
+    }
+    fn hits(&self) -> usize {
+        self.hits
+    }
+    fn hits_mut(&mut self) -> &mut usize {
+        &mut self.hits
+    }
+    fn misses(&self) -> usize {
+        self.misses
+    }
+    fn misses_mut(&mut self) -> &mut usize {
+        &mut self.misses
+    }
+    fn lifecycle(&self) -> TrackState {
+        self.lifecycle
+    }
+    fn set_lifecycle(&mut self, state: TrackState) {
+        self.lifecycle = state;
     }
 }
 
@@ -463,29 +483,13 @@ impl MultiObjectTrackerRecenteredEnu {
             kf.update(&det, &h, &r);
             self.tracks[ti].state = kf.x;
             self.tracks[ti].covariance = kf.p;
-            self.tracks[ti].hits += 1;
-            self.tracks[ti].misses = 0;
-
-            match self.tracks[ti].lifecycle {
-                TrackState::Tentative if self.tracks[ti].hits >= CONFIRM_HITS => {
-                    self.tracks[ti].lifecycle = TrackState::Confirmed;
-                }
-                TrackState::Coasting => {
-                    self.tracks[ti].lifecycle = TrackState::Confirmed;
-                }
-                _ => {}
-            }
+            record_hit_and_promote(&mut self.tracks[ti], CONFIRM_HITS);
         }
 
         // 6. Lifecycle bookkeeping for unassociated tracks.
         for (ai, &ti) in alive.iter().enumerate() {
             if !associated_tracks[ai] {
-                self.tracks[ti].misses += 1;
-                if self.tracks[ti].misses >= MAX_MISSES {
-                    self.tracks[ti].lifecycle = TrackState::Deleted;
-                } else if self.tracks[ti].lifecycle == TrackState::Confirmed {
-                    self.tracks[ti].lifecycle = TrackState::Coasting;
-                }
+                record_miss_and_age(&mut self.tracks[ti], MAX_MISSES);
             }
         }
 
@@ -638,5 +642,163 @@ mod tests {
         assert!((lat_after - lat_before).abs() < 1e-9);
         assert!((lon_after - lon_before).abs() < 1e-9);
         assert!((alt_after - alt_before).abs() < 1e-3);
+    }
+
+    fn make_othr(ground_range_m: f64, azimuth_rad: f64) -> Measurement {
+        Measurement::Othr {
+            ground_range_m,
+            azimuth_rad,
+            doppler_m_s: 0.0,
+            propagation_mode: thresh_core::measurement::PropagationMode::FLayer,
+            time: 0.0,
+            sensor_id: 0,
+        }
+    }
+
+    #[test]
+    fn step_births_track_from_othr() {
+        let reg = test_reg();
+        let mut tracker = MultiObjectTrackerRecenteredEnu::new(reg, 10_000.0);
+        let m = make_othr(500_000.0, 0.5);
+        tracker.step(&[m], 1.0);
+        assert_eq!(tracker.tracks.len(), 1);
+        assert_eq!(tracker.tracks[0].lifecycle, TrackState::Tentative);
+    }
+
+    #[test]
+    fn step_handles_empty_measurements() {
+        let reg = test_reg();
+        let mut tracker = MultiObjectTrackerRecenteredEnu::new(reg, 10_000.0);
+        tracker.step(&[], 1.0);
+        assert!(tracker.tracks.is_empty());
+    }
+
+    #[test]
+    fn step_filters_non_othr_measurements() {
+        let reg = test_reg();
+        let mut tracker = MultiObjectTrackerRecenteredEnu::new(reg, 10_000.0);
+        // Radar measurements should be ignored.
+        let radar = Measurement::Radar {
+            range: 1000.0,
+            azimuth: 0.0,
+            elevation: 0.0,
+            range_rate: None,
+            time: 0.0,
+            sensor_id: 0,
+        };
+        tracker.step(&[radar], 1.0);
+        assert!(tracker.tracks.is_empty());
+    }
+
+    #[test]
+    fn track_confirms_after_repeated_associations() {
+        let reg = test_reg();
+        let mut tracker = MultiObjectTrackerRecenteredEnu::new(reg, 10_000.0);
+        let m = make_othr(500_000.0, 0.5);
+        for _ in 0..6 {
+            tracker.step(std::slice::from_ref(&m), 1.0);
+        }
+        assert!(
+            tracker
+                .tracks
+                .iter()
+                .any(|t| t.lifecycle == TrackState::Confirmed),
+            "at least one track should be confirmed after repeated associations"
+        );
+    }
+
+    #[test]
+    fn track_deletes_after_repeated_misses() {
+        let reg = test_reg();
+        let mut tracker = MultiObjectTrackerRecenteredEnu::new(reg, 10_000.0);
+        let m = make_othr(500_000.0, 0.5);
+        // Birth a track.
+        tracker.step(&[m], 1.0);
+        let initial = tracker.tracks.len();
+        assert!(initial > 0);
+        // Coast many frames with no detections.
+        for _ in 0..20 {
+            tracker.step(&[], 1.0);
+        }
+        // Track should be deleted (retained list is empty or all coasting/deleted)
+        let alive = tracker
+            .tracks
+            .iter()
+            .filter(|t| t.lifecycle != TrackState::Deleted)
+            .count();
+        assert_eq!(
+            alive, 0,
+            "all tracks should be deleted after sustained misses"
+        );
+    }
+
+    #[test]
+    fn confirmed_then_missed_goes_coasting() {
+        let reg = test_reg();
+        let mut tracker = MultiObjectTrackerRecenteredEnu::new(reg, 10_000.0);
+        let m = make_othr(500_000.0, 0.5);
+        for _ in 0..6 {
+            tracker.step(std::slice::from_ref(&m), 1.0);
+        }
+        // Now miss exactly once.
+        tracker.step(&[], 1.0);
+        let any_coasting = tracker
+            .tracks
+            .iter()
+            .any(|t| t.lifecycle == TrackState::Coasting);
+        assert!(
+            any_coasting,
+            "confirmed track should transition to coasting"
+        );
+    }
+
+    #[test]
+    fn othr_to_local_enu_returns_some_for_valid_othr() {
+        let reg = test_reg();
+        let m = make_othr(1_000_000.0, 0.5);
+        let result = othr_to_local_enu(
+            &m,
+            &reg,
+            10_000.0,
+            reg.transmitter_lat_rad,
+            reg.transmitter_lon_rad,
+            reg.transmitter_alt_m,
+        );
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn othr_to_local_enu_returns_none_for_radar() {
+        let reg = test_reg();
+        let radar = Measurement::Radar {
+            range: 1000.0,
+            azimuth: 0.0,
+            elevation: 0.0,
+            range_rate: None,
+            time: 0.0,
+            sensor_id: 0,
+        };
+        let result = othr_to_local_enu(
+            &radar,
+            &reg,
+            10_000.0,
+            reg.transmitter_lat_rad,
+            reg.transmitter_lon_rad,
+            reg.transmitter_alt_m,
+        );
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn enu_rotation_at_origin_is_orthogonal() {
+        let r = enu_rotation(0.5, 1.0);
+        let rt = r.transpose();
+        let i = r * rt;
+        let identity = nalgebra::Matrix3::<f64>::identity();
+        for row in 0..3 {
+            for col in 0..3 {
+                assert!((i[(row, col)] - identity[(row, col)]).abs() < 1e-12);
+            }
+        }
     }
 }

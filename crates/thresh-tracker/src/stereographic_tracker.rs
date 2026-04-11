@@ -18,7 +18,10 @@
 use nalgebra::{DMatrix, DVector};
 use thresh_association::hungarian::hungarian_assignment;
 
-use crate::cost_matrix::{alive_indices, build_track_cost_matrix, predict_all};
+use crate::cost_matrix::{
+    alive_indices, build_track_cost_matrix, predict_all, record_hit_and_promote,
+    record_miss_and_age,
+};
 use thresh_core::measurement::Measurement;
 use thresh_core::othr::{OthrSensorRegistration, vincenty_direct};
 use thresh_core::track::{TargetClass, TrackId, TrackState};
@@ -213,6 +216,24 @@ impl crate::cost_matrix::LinearTrack for StereoTrack {
     fn covariance_mut(&mut self) -> &mut DMatrix<f64> {
         &mut self.covariance
     }
+    fn hits(&self) -> usize {
+        self.hits
+    }
+    fn hits_mut(&mut self) -> &mut usize {
+        &mut self.hits
+    }
+    fn misses(&self) -> usize {
+        self.misses
+    }
+    fn misses_mut(&mut self) -> &mut usize {
+        &mut self.misses
+    }
+    fn lifecycle(&self) -> TrackState {
+        self.lifecycle
+    }
+    fn set_lifecycle(&mut self, state: TrackState) {
+        self.lifecycle = state;
+    }
 }
 
 /// Multi-object tracker operating in a local stereographic projection.
@@ -317,29 +338,13 @@ impl MultiObjectTrackerStereographic {
             kf.update(&detections[dj], &h, &r);
             self.tracks[ti].state = kf.x;
             self.tracks[ti].covariance = kf.p;
-            self.tracks[ti].hits += 1;
-            self.tracks[ti].misses = 0;
-
-            match self.tracks[ti].lifecycle {
-                TrackState::Tentative if self.tracks[ti].hits >= CONFIRM_HITS => {
-                    self.tracks[ti].lifecycle = TrackState::Confirmed;
-                }
-                TrackState::Coasting => {
-                    self.tracks[ti].lifecycle = TrackState::Confirmed;
-                }
-                _ => {}
-            }
+            record_hit_and_promote(&mut self.tracks[ti], CONFIRM_HITS);
         }
 
         // 5. Lifecycle bookkeeping for unassociated tracks.
         for (ai, &ti) in alive.iter().enumerate() {
             if !associated_tracks[ai] {
-                self.tracks[ti].misses += 1;
-                if self.tracks[ti].misses >= MAX_MISSES {
-                    self.tracks[ti].lifecycle = TrackState::Deleted;
-                } else if self.tracks[ti].lifecycle == TrackState::Confirmed {
-                    self.tracks[ti].lifecycle = TrackState::Coasting;
-                }
+                record_miss_and_age(&mut self.tracks[ti], MAX_MISSES);
             }
         }
 

@@ -5,6 +5,7 @@
 
 use nalgebra::{DMatrix, DVector};
 use thresh_association::gating::mahalanobis_squared;
+use thresh_core::track::TrackState;
 
 /// Trait used by [`predict_all`] and [`build_track_cost_matrix`] so the same
 /// helpers can drive multiple tracker variants whose track types only differ
@@ -15,6 +16,50 @@ pub trait LinearTrack {
     fn state_mut(&mut self) -> &mut DVector<f64>;
     fn covariance(&self) -> &DMatrix<f64>;
     fn covariance_mut(&mut self) -> &mut DMatrix<f64>;
+
+    // Lifecycle accessors so the shared lifecycle helpers can drive any
+    // tracker variant. Default implementations panic so existing impls don't
+    // have to provide them, but trackers using `record_hit_and_promote` /
+    // `record_miss_and_age` must override these.
+    fn hits(&self) -> usize {
+        unimplemented!("LinearTrack::hits not implemented for this track type")
+    }
+    fn hits_mut(&mut self) -> &mut usize {
+        unimplemented!("LinearTrack::hits_mut not implemented for this track type")
+    }
+    fn misses(&self) -> usize {
+        unimplemented!("LinearTrack::misses not implemented for this track type")
+    }
+    fn misses_mut(&mut self) -> &mut usize {
+        unimplemented!("LinearTrack::misses_mut not implemented for this track type")
+    }
+    fn lifecycle(&self) -> TrackState {
+        unimplemented!("LinearTrack::lifecycle not implemented for this track type")
+    }
+    fn set_lifecycle(&mut self, _state: TrackState) {
+        unimplemented!("LinearTrack::set_lifecycle not implemented for this track type")
+    }
+}
+
+/// Record an association hit on a track and promote tentative/coasting
+/// tracks to confirmed when appropriate.
+pub fn record_hit_and_promote<T: LinearTrack>(track: &mut T, confirm_hits: usize) {
+    *track.hits_mut() += 1;
+    *track.misses_mut() = 0;
+    let lc = track.lifecycle();
+    if (lc == TrackState::Tentative && track.hits() >= confirm_hits) || lc == TrackState::Coasting {
+        track.set_lifecycle(TrackState::Confirmed);
+    }
+}
+
+/// Record a miss on a track and update lifecycle (coast or delete).
+pub fn record_miss_and_age<T: LinearTrack>(track: &mut T, max_misses: usize) {
+    *track.misses_mut() += 1;
+    if track.misses() >= max_misses {
+        track.set_lifecycle(TrackState::Deleted);
+    } else if track.lifecycle() == TrackState::Confirmed {
+        track.set_lifecycle(TrackState::Coasting);
+    }
 }
 
 /// Apply a linear-Gaussian predict step to every alive track in `tracks`.
