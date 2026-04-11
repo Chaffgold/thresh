@@ -9,6 +9,7 @@ license.workspace = true
 default = []
 jsbsim = ["pyo3"]
 rcs-compute = ["pyo3"]
+radar-scene = ["pyo3"]
 
 [dependencies]
 thresh-core = { path = "../thresh-core" }
