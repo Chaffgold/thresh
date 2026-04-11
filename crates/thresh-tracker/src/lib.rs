@@ -8,3 +8,4 @@ pub mod othr_integration;
 pub mod stereographic_tracker;
 pub mod track;
 pub mod tracker;
+pub mod tracker_variant;

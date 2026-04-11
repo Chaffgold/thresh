@@ -110,7 +110,7 @@
 
 ### 8.E Tracker Selection and Documentation
 
-- [ ] 8.E.1 Define `TrackerVariant` enum and factory function for selecting appropriate tracker based on scenario
-- [ ] 8.E.2 Document selection guidance: ENU for short tracks <500 km traverse, ECEF for ballistic/orbital, great-circle for aircraft >1000 km, stereographic for area surveillance
-- [ ] 8.E.3 Add scenario-driven tracker selection to benchmark runner
-- [ ] 8.E.4 Write end-to-end comparison: same OTHR scenario tracked by all 4 variants, document accuracy/runtime tradeoffs
+- [x] 8.E.1 Define `TrackerVariant` enum and factory function for selecting appropriate tracker based on scenario
+- [x] 8.E.2 Document selection guidance: ENU for short tracks <500 km traverse, ECEF for ballistic/orbital, great-circle for aircraft >1000 km, stereographic for area surveillance
+- [x] 8.E.3 Add scenario-driven tracker selection to benchmark runner
+- [x] 8.E.4 Write end-to-end comparison: same OTHR scenario tracked by all 4 variants, document accuracy/runtime tradeoffs
