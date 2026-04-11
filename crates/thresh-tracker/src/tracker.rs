@@ -1,12 +1,13 @@
 //! Main tracker loop: predict -> associate -> update -> lifecycle.
 
 use nalgebra::{DMatrix, DVector};
-use thresh_association::gating::mahalanobis_squared;
 use thresh_association::hungarian::hungarian_assignment;
 use thresh_core::track::{TargetClass, TrackState};
 use thresh_filter::kf::KalmanFilter;
 use thresh_filter::models::cv::ConstantVelocity;
 use thresh_filter::traits::{LinearModel, MotionModel};
+
+use crate::cost_matrix::{alive_indices, build_track_cost_matrix, predict_all};
 
 use crate::heads::HeadRegistry;
 use crate::lifecycle::update_lifecycle;
@@ -56,38 +57,14 @@ impl MultiObjectTracker {
         let model = ConstantVelocity::new(5.0);
         let f = model.transition_matrix(dt);
         let q = model.process_noise(dt);
+        predict_all(&mut self.tracks, &f, &q);
 
-        for track in self.tracks.iter_mut() {
-            if track.is_alive() {
-                track.state = &f * &track.state;
-                track.covariance = &f * &track.covariance * f.transpose() + &q;
-            }
-        }
-
-        // 2. Build cost matrix (Mahalanobis distance)
-        let alive: Vec<usize> = self
-            .tracks
-            .iter()
-            .enumerate()
-            .filter(|(_, t)| t.is_alive())
-            .map(|(i, _)| i)
-            .collect();
-
+        // 2. Build Mahalanobis cost matrix
+        let alive = alive_indices(&self.tracks);
         let h = &self.observation_matrix;
         let r = &self.measurement_noise;
-
-        let mut cost_matrix = vec![vec![self.gate_threshold; detections.len()]; alive.len()];
-        for (ai, &ti) in alive.iter().enumerate() {
-            let track = &self.tracks[ti];
-            let pred_z = h * &track.state;
-            let s = h * &track.covariance * h.transpose() + r;
-            for (dj, det) in detections.iter().enumerate() {
-                let d2 = mahalanobis_squared(det, &pred_z, &s);
-                if d2 < self.gate_threshold {
-                    cost_matrix[ai][dj] = d2;
-                }
-            }
-        }
+        let cost_matrix =
+            build_track_cost_matrix(&self.tracks, &alive, h, r, detections, self.gate_threshold);
 
         // 3. Hungarian assignment
         let result = hungarian_assignment(&cost_matrix, self.gate_threshold);

@@ -99,14 +99,14 @@
 
 ### 8.D Local Stereographic Projection
 
-- [ ] 8.D.1 Implement stereographic projection: geodetic (lat, lon) → 2D plane preserving distances from a center point
-- [ ] 8.D.2 Implement inverse stereographic projection: 2D plane → geodetic
-- [ ] 8.D.3 Define `MultiObjectTrackerStereographic`: tracker variant using stereographic 2D + altitude state
-- [ ] 8.D.4 Implement OTHR observation matrix for stereographic state (range/azimuth direct mapping)
-- [ ] 8.D.5 Implement projection center selection: place at OTHR transmitter or coverage centroid
-- [ ] 8.D.6 Write tests: stereographic projection roundtrip within 1 m at OTHR coverage ranges
-- [ ] 8.D.7 Write tests: stereographic tracker accurately tracks targets across full OTHR coverage area
-- [ ] 8.D.8 Write benchmark: stereographic vs ENU vs ECEF on representative OTHR scenarios
+- [x] 8.D.1 Implement stereographic projection: geodetic (lat, lon) → 2D plane preserving distances from a center point
+- [x] 8.D.2 Implement inverse stereographic projection: 2D plane → geodetic
+- [x] 8.D.3 Define `MultiObjectTrackerStereographic`: tracker variant using stereographic 2D + altitude state
+- [x] 8.D.4 Implement OTHR observation matrix for stereographic state (range/azimuth direct mapping)
+- [x] 8.D.5 Implement projection center selection: place at OTHR transmitter or coverage centroid
+- [x] 8.D.6 Write tests: stereographic projection roundtrip within 1 m at OTHR coverage ranges
+- [x] 8.D.7 Write tests: stereographic tracker accurately tracks targets across full OTHR coverage area
+- [x] 8.D.8 Write benchmark: stereographic vs ENU vs ECEF on representative OTHR scenarios
 
 ### 8.E Tracker Selection and Documentation
 
