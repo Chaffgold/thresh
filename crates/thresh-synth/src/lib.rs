@@ -9,6 +9,7 @@ pub mod orbital;
 pub mod othr_generator;
 pub mod othr_noise;
 pub mod radar_equation;
+pub mod radar_scene;
 pub mod rcs_compute;
 pub mod scenario;
 pub mod swerling;

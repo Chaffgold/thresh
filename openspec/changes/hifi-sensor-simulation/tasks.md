@@ -28,13 +28,13 @@
 
 ## 3. RCS Computation Bridge (Feature-gated)
 
-- [x] 3.1 Set up PyO3 bridge to PyPOFacets, gated behind `rcs-compute` feature
-- [x] 3.2 Implement target geometry loader: STL file → faceted model in Python
-- [x] 3.3 Implement monostatic RCS sweep: compute RCS at azimuth angles 0°-360° (configurable step) at fixed elevation
-- [x] 3.4 Implement full hemisphere RCS: azimuth × elevation grid
-- [x] 3.5 Export computed RCS table to JSON (compatible with the lookup table loader from 1.7)
-- [ ] 3.6 Create CLI command: `thresh rcs-compute --stl <file> --freq <GHz> --step <degrees> --output <json>` (library API `compute_and_save_rcs` is available; CLI binary pending)
-- [x] 3.7 Write test: RCS of a sphere matches analytical value (πr² for PO regime)
+- [ ] 3.1 Set up PyO3 bridge to PyPOFacets, gated behind `rcs-compute` feature
+- [ ] 3.2 Implement target geometry loader: STL file → faceted model in Python
+- [ ] 3.3 Implement monostatic RCS sweep: compute RCS at azimuth angles 0°-360° (configurable step) at fixed elevation
+- [ ] 3.4 Implement full hemisphere RCS: azimuth × elevation grid
+- [ ] 3.5 Export computed RCS table to JSON (compatible with the lookup table loader from 1.7)
+- [ ] 3.6 Create CLI command: `thresh rcs-compute --stl <file> --freq <GHz> --step <degrees> --output <json>`
+- [ ] 3.7 Write test: RCS of a sphere matches analytical value (πr² for PO regime)
 
 ## 4. JSBSim Trajectory Bridge (Feature-gated)
 
@@ -79,15 +79,15 @@
 
 ## 7. Radar Scene Simulation Bridge (Feature-gated)
 
-- [ ] 7.1 Set up PyO3 bridge to RadarSimPy, gated behind `radar-scene` feature
-- [ ] 7.2 Define radar scene: transmitter position/parameters, target list (position, velocity, RCS), clutter model
-- [ ] 7.3 Implement scene simulation: run RadarSimPy, extract raw detections (range, angle, Doppler, SNR)
-- [ ] 7.4 Convert RadarSimPy detections to thresh `Measurement::Radar`
-- [ ] 7.5 Implement clutter configuration: surface clutter (land/sea σ₀), volume clutter (weather)
-- [ ] 7.6 Implement CFAR threshold configuration: CA-CFAR, OS-CFAR parameters
-- [ ] 7.7 Implement multi-radar scene: multiple transmitters with different parameters observing the same targets
-- [ ] 7.8 Write test: single target in free space produces detection at correct range/angle
-- [ ] 7.9 Write test: target below noise floor is not detected (validates CFAR)
+- [x] 7.1 Set up PyO3 bridge to RadarSimPy, gated behind `radar-scene` feature
+- [x] 7.2 Define radar scene: transmitter position/parameters, target list (position, velocity, RCS), clutter model
+- [x] 7.3 Implement scene simulation: run RadarSimPy, extract raw detections (range, angle, Doppler, SNR)
+- [x] 7.4 Convert RadarSimPy detections to thresh `Measurement::Radar`
+- [x] 7.5 Implement clutter configuration: surface clutter (land/sea σ₀), volume clutter (weather)
+- [x] 7.6 Implement CFAR threshold configuration: CA-CFAR, OS-CFAR parameters
+- [x] 7.7 Implement multi-radar scene: multiple transmitters with different parameters observing the same targets
+- [x] 7.8 Write test: single target in free space produces detection at correct range/angle
+- [x] 7.9 Write test: target below noise floor is not detected (validates CFAR)
 
 ## 8. Integration
 
