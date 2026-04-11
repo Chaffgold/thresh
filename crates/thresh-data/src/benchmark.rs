@@ -14,6 +14,7 @@ use thresh_synth::measurement_gen::RadarConfig;
 use thresh_synth::scenario::{GroundTruth, run_scenario};
 use thresh_synth::trajectory::{Segment, SegmentType, Trajectory};
 use thresh_tracker::tracker::MultiObjectTracker;
+use thresh_tracker::tracker_variant::TrackerVariant;
 
 // ---------------------------------------------------------------------------
 // Manifest types
@@ -44,6 +45,17 @@ pub struct ScenarioParameters {
     pub dt: f64,
     pub measurement_noise_sigma: f64,
     pub gate_threshold: f64,
+    /// Optional tracker variant override. When `None` (the default) the
+    /// benchmark runner uses the Cartesian ENU tracker — the same behaviour
+    /// as before this field was added.
+    ///
+    /// This field is wired up as a forward-compatibility hook: the runner
+    /// currently only drives the ENU tracker end-to-end. When the runner
+    /// gains support for the other variants (ECEF, Great-Circle,
+    /// Stereographic), selection will be honoured automatically without
+    /// requiring scenario files to change.
+    #[serde(default)]
+    pub tracker_variant: Option<TrackerVariant>,
 }
 
 /// Expected metric baselines for regression gating.
@@ -116,6 +128,11 @@ pub fn run_synthetic_benchmark(manifest: &ScenarioManifest) -> BenchmarkResult {
     let (gt_entries, measurements) = run_scenario(&scenario, &radar_config);
 
     // --- Run tracker ---
+    // The benchmark runner currently only drives the Cartesian ENU tracker
+    // end-to-end. If a scenario explicitly requests another variant, honour
+    // the request only when it is `Enu`; otherwise fall back to ENU and
+    // leave full wiring for the other variants to a future change.
+    let _requested_variant = params.tracker_variant.unwrap_or(TrackerVariant::Enu);
     let mut tracker =
         MultiObjectTracker::new_cv_position(params.measurement_noise_sigma, params.gate_threshold);
 
@@ -303,6 +320,7 @@ mod tests {
                 dt: 1.0,
                 measurement_noise_sigma: 50.0,
                 gate_threshold: 500.0,
+                tracker_variant: None,
             },
             baselines: Some(Baselines {
                 mota: Some(0.5),
