@@ -55,16 +55,16 @@
 
 ## 5. nuScenes Ingestion
 
-- [ ] 5.1 Implement PyO3 bridge to nuScenes devkit (feature-gated `nuscenes`)
-- [ ] 5.2 Implement scene/sample iteration via Python bridge
-- [ ] 5.3 Parse 3D annotation boxes → `BoundingBox3D` with class mapping
-- [ ] 5.4 Extract instance-level tracks for ground truth (instance token → target ID)
-- [ ] 5.5 Parse LiDAR point clouds from binary files (x, y, z, intensity, ring)
-- [ ] 5.6 Parse radar point clouds with RCS and velocity
-- [ ] 5.7 Load sensor calibration (extrinsics + intrinsics) for multi-modal alignment
-- [ ] 5.8 Implement `NuScenesDataset` implementing `Dataset` trait
-- [ ] 5.9 Write tests: parse annotations from mini split, verify box dimensions
-- [ ] 5.10 Write integration test (requires mini split): load scene, run tracker, compute AMOTA
+- [x] 5.1 Implement PyO3 bridge to nuScenes devkit (feature-gated `nuscenes`)
+- [x] 5.2 Implement scene/sample iteration via Python bridge
+- [x] 5.3 Parse 3D annotation boxes → `BoundingBox3D` with class mapping
+- [x] 5.4 Extract instance-level tracks for ground truth (instance token → target ID)
+- [x] 5.5 Parse LiDAR point clouds from binary files (x, y, z, intensity, ring)
+- [x] 5.6 Parse radar point clouds with RCS and velocity
+- [x] 5.7 Load sensor calibration (extrinsics + intrinsics) for multi-modal alignment
+- [x] 5.8 Implement `NuScenesDataset` implementing `Dataset` trait
+- [x] 5.9 Write tests: parse annotations from mini split, verify box dimensions
+- [x] 5.10 Write integration test (requires mini split): load scene, run tracker, compute AMOTA
 
 ## 6. Dataset Abstraction and Mixing
 

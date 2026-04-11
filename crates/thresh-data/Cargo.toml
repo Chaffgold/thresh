@@ -8,7 +8,7 @@ license.workspace = true
 [features]
 adsb = ["reqwest", "csv"]
 orbital = ["sgp4"]
-nuscenes = []
+nuscenes = ["pyo3"]
 
 [dependencies]
 thresh-core = { path = "../thresh-core" }
@@ -23,6 +23,7 @@ rand = "0.9"
 reqwest = { workspace = true, optional = true }
 csv = { workspace = true, optional = true }
 sgp4 = { workspace = true, optional = true }
+pyo3 = { version = "0.24", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

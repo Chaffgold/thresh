@@ -8,6 +8,8 @@ pub mod credentials;
 pub mod dataset;
 pub mod frame;
 pub mod mixing;
+#[cfg(feature = "nuscenes")]
+pub mod nuscenes;
 #[cfg(feature = "orbital")]
 pub mod orbital;
 pub mod synthetic;
