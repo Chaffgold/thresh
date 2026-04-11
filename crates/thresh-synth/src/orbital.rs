@@ -364,26 +364,26 @@ fn total_acceleration(pos: &[f64; 3], vel: &[f64; 3], config: &PropagatorConfig)
     acc
 }
 
-/// Compute one RK4 stage given a fractional step `step` along `dt`: produces
-/// the pair `(k_r, k_v)` where `k_r` is the state velocity and `k_v` is the
-/// acceleration evaluated at the offset state.
+/// Compute one RK4 stage at time offset `time_offset_s` (in seconds) from the
+/// current state, producing the pair `(k_r, k_v)` where `k_r` is the state
+/// velocity at the offset point and `k_v` is the acceleration evaluated there.
 fn rk4_stage(
     pos: &[f64; 3],
     vel: &[f64; 3],
     prev_kr: &[f64; 3],
     prev_kv: &[f64; 3],
-    step: f64,
+    time_offset_s: f64,
     config: &PropagatorConfig,
 ) -> ([f64; 3], [f64; 3]) {
     let stage_pos = [
-        pos[0] + step * prev_kr[0],
-        pos[1] + step * prev_kr[1],
-        pos[2] + step * prev_kr[2],
+        pos[0] + time_offset_s * prev_kr[0],
+        pos[1] + time_offset_s * prev_kr[1],
+        pos[2] + time_offset_s * prev_kr[2],
     ];
     let stage_vel = [
-        vel[0] + step * prev_kv[0],
-        vel[1] + step * prev_kv[1],
-        vel[2] + step * prev_kv[2],
+        vel[0] + time_offset_s * prev_kv[0],
+        vel[1] + time_offset_s * prev_kv[1],
+        vel[2] + time_offset_s * prev_kv[2],
     ];
     let acc = total_acceleration(&stage_pos, &stage_vel, config);
     (stage_vel, acc)
