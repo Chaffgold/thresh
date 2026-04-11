@@ -671,43 +671,58 @@ impl Dataset for OrbitalDataset {
 
     fn frames(&self) -> Box<dyn Iterator<Item = Frame> + '_> {
         let measurements = orbital_to_radar_measurements(&self.enu_positions, &self.noise_config);
-        Box::new(measurements.into_iter().map(|m| {
-            let time = m.time();
-            Frame {
-                timestamp: time,
-                measurements: vec![m],
-                ground_truth: None,
-                sensor_metadata: Some(SensorInfo {
-                    sensor_id: self.noise_config.sensor_id,
-                    sensor_type: "radar".to_string(),
-                }),
-            }
-        }))
+        let sensor_id = self.noise_config.sensor_id;
+        Box::new(
+            measurements
+                .into_iter()
+                .map(move |m| build_radar_frame(m, sensor_id)),
+        )
     }
 
     fn ground_truth(&self) -> Option<Box<dyn Iterator<Item = Frame> + '_>> {
-        // Ground truth from the noise-free orbital positions
+        // Ground truth from the noise-free orbital positions (above horizon only).
+        let norad_id = self.norad_id as u64;
         let gt: Vec<Frame> = self
             .enu_positions
             .iter()
-            .filter(|p| p.up > 0.0) // Only above-horizon
-            .map(|p| Frame {
-                timestamp: p.time_since_epoch_min * 60.0,
-                measurements: Vec::new(),
-                ground_truth: Some(vec![GroundTruthEntry {
-                    target_id: self.norad_id as u64,
-                    position: [p.east, p.north, p.up],
-                    velocity: None,
-                    class: None,
-                }]),
-                sensor_metadata: None,
-            })
+            .filter(|p| p.up > 0.0)
+            .map(|p| build_ground_truth_frame(p, norad_id))
             .collect();
         if gt.is_empty() {
             None
         } else {
             Some(Box::new(gt.into_iter()))
         }
+    }
+}
+
+/// Wrap a radar measurement into a single-measurement `Frame` tagged with
+/// the given sensor id.
+fn build_radar_frame(m: Measurement, sensor_id: u32) -> Frame {
+    let time = m.time();
+    Frame {
+        timestamp: time,
+        measurements: vec![m],
+        ground_truth: None,
+        sensor_metadata: Some(SensorInfo {
+            sensor_id,
+            sensor_type: "radar".to_string(),
+        }),
+    }
+}
+
+/// Build a ground-truth `Frame` from a single ENU position.
+fn build_ground_truth_frame(p: &EnuPosition, norad_id: u64) -> Frame {
+    Frame {
+        timestamp: p.time_since_epoch_min * 60.0,
+        measurements: Vec::new(),
+        ground_truth: Some(vec![GroundTruthEntry {
+            target_id: norad_id,
+            position: [p.east, p.north, p.up],
+            velocity: None,
+            class: None,
+        }]),
+        sensor_metadata: None,
     }
 }
 

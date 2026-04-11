@@ -597,13 +597,7 @@ pub fn sbs_to_measurement(msg: &SbsMessage) -> Option<Measurement> {
 /// Groups by ICAO24, sorts by time, and interpolates to a regular 1-second
 /// grid using linear interpolation.
 pub fn extract_ground_truth(states: &[StateVector]) -> Vec<GroundTruthTrajectory> {
-    // Group by ICAO24.
-    let mut grouped: HashMap<String, Vec<&StateVector>> = HashMap::new();
-    for sv in states {
-        if sv.latitude.is_some() && sv.longitude.is_some() {
-            grouped.entry(sv.icao24.clone()).or_default().push(sv);
-        }
-    }
+    let grouped = group_states_by_icao24(states);
 
     let mut trajectories = Vec::new();
 
@@ -612,134 +606,169 @@ pub fn extract_ground_truth(states: &[StateVector]) -> Vec<GroundTruthTrajectory
         svs.sort_by(|a, b| {
             let ta = a.time_position.unwrap_or(a.last_contact);
             let tb = b.time_position.unwrap_or(b.last_contact);
-            ta.partial_cmp(&tb).unwrap_or(std::cmp::Ordering::Equal)
+            ta.total_cmp(&tb)
         });
 
         if svs.len() < 2 {
-            // Single point: just include it directly.
-            if let Some(sv) = svs.first()
-                && let (Some(lat), Some(lon)) = (sv.latitude, sv.longitude)
-            {
-                let alt = sv.baro_altitude.or(sv.geo_altitude).unwrap_or(0.0);
-                let velocity = match (sv.velocity, sv.true_track) {
-                    (Some(speed), Some(track_deg)) => {
-                        let track_rad = track_deg.to_radians();
-                        Some([
-                            speed * track_rad.sin(),
-                            speed * track_rad.cos(),
-                            sv.vertical_rate.unwrap_or(0.0),
-                        ])
-                    }
-                    _ => None,
-                };
-                let start_time = sv.time_position.unwrap_or(sv.last_contact);
-                trajectories.push(GroundTruthTrajectory {
-                    icao24,
-                    start_time,
-                    entries: vec![GroundTruthEntry {
-                        target_id: u64::from_str_radix(&sv.icao24, 16).unwrap_or(0),
-                        position: [lat, lon, alt],
-                        velocity,
-                        class: Some(thresh_core::track::TargetClass::Aircraft),
-                    }],
-                });
+            if let Some(traj) = short_trajectory_to_ground_truth(icao24, &svs) {
+                trajectories.push(traj);
             }
             continue;
         }
 
-        // Interpolate to 1-second grid.
-        let t_start = svs
-            .first()
-            .map(|s| s.time_position.unwrap_or(s.last_contact))
-            .unwrap_or(0.0);
-        let t_end = svs
-            .last()
-            .map(|s| s.time_position.unwrap_or(s.last_contact))
-            .unwrap_or(0.0);
-
-        if (t_end - t_start) < 1.0 {
-            continue;
-        }
-
-        let target_id = u64::from_str_radix(&icao24, 16).unwrap_or(0);
-        let mut entries = Vec::new();
-
-        let mut t = t_start;
-        let mut idx = 0;
-        while t <= t_end {
-            // Advance index to bracket t.
-            while idx + 1 < svs.len() {
-                let t_next = svs[idx + 1]
-                    .time_position
-                    .unwrap_or(svs[idx + 1].last_contact);
-                if t_next >= t {
-                    break;
-                }
-                idx += 1;
-            }
-
-            if idx + 1 >= svs.len() {
-                break;
-            }
-
-            let sv0 = svs[idx];
-            let sv1 = svs[idx + 1];
-            let t0 = sv0.time_position.unwrap_or(sv0.last_contact);
-            let t1 = sv1.time_position.unwrap_or(sv1.last_contact);
-
-            if (t1 - t0).abs() < 1e-9 {
-                t += 1.0;
-                continue;
-            }
-
-            let alpha = (t - t0) / (t1 - t0);
-
-            let lat = lerp_opt(sv0.latitude, sv1.latitude, alpha);
-            let lon = lerp_opt(sv0.longitude, sv1.longitude, alpha);
-            let alt = lerp_opt(
-                sv0.baro_altitude.or(sv0.geo_altitude),
-                sv1.baro_altitude.or(sv1.geo_altitude),
-                alpha,
-            );
-
-            if let (Some(lat), Some(lon)) = (lat, lon) {
-                let alt = alt.unwrap_or(0.0);
-
-                // Interpolate velocity.
-                let velocity = match (sv0.velocity, sv0.true_track, sv1.velocity, sv1.true_track) {
-                    (Some(s0), Some(t0_deg), Some(s1), Some(t1_deg)) => {
-                        let s = s0 + alpha * (s1 - s0);
-                        let tr = t0_deg.to_radians()
-                            + alpha * (t1_deg.to_radians() - t0_deg.to_radians());
-                        let vr0 = sv0.vertical_rate.unwrap_or(0.0);
-                        let vr1 = sv1.vertical_rate.unwrap_or(0.0);
-                        let vr = vr0 + alpha * (vr1 - vr0);
-                        Some([s * tr.sin(), s * tr.cos(), vr])
-                    }
-                    _ => None,
-                };
-
-                entries.push(GroundTruthEntry {
-                    target_id,
-                    position: [lat, lon, alt],
-                    velocity,
-                    class: Some(thresh_core::track::TargetClass::Aircraft),
-                });
-            }
-
-            t += 1.0;
-        }
-
-        if !entries.is_empty() {
-            trajectories.push(GroundTruthTrajectory {
-                icao24,
-                start_time: t_start,
-                entries,
-            });
+        if let Some(traj) = interpolate_trajectory_to_grid(icao24, &svs) {
+            trajectories.push(traj);
         }
     }
 
     trajectories
+}
+
+/// Group state vectors by ICAO24, keeping only those with a lat/lon fix.
+fn group_states_by_icao24(states: &[StateVector]) -> HashMap<String, Vec<&StateVector>> {
+    let mut grouped: HashMap<String, Vec<&StateVector>> = HashMap::new();
+    for sv in states {
+        if sv.latitude.is_some() && sv.longitude.is_some() {
+            grouped.entry(sv.icao24.clone()).or_default().push(sv);
+        }
+    }
+    grouped
+}
+
+/// Build a trajectory containing a single entry from a single-sample group.
+fn short_trajectory_to_ground_truth(
+    icao24: String,
+    svs: &[&StateVector],
+) -> Option<GroundTruthTrajectory> {
+    let sv = svs.first()?;
+    let (lat, lon) = match (sv.latitude, sv.longitude) {
+        (Some(lat), Some(lon)) => (lat, lon),
+        _ => return None,
+    };
+    let alt = sv.baro_altitude.or(sv.geo_altitude).unwrap_or(0.0);
+    let velocity = match (sv.velocity, sv.true_track) {
+        (Some(speed), Some(track_deg)) => {
+            let track_rad = track_deg.to_radians();
+            Some([
+                speed * track_rad.sin(),
+                speed * track_rad.cos(),
+                sv.vertical_rate.unwrap_or(0.0),
+            ])
+        }
+        _ => None,
+    };
+    let start_time = sv.time_position.unwrap_or(sv.last_contact);
+    let target_id = u64::from_str_radix(&sv.icao24, 16).unwrap_or(0);
+    Some(GroundTruthTrajectory {
+        icao24,
+        start_time,
+        entries: vec![GroundTruthEntry {
+            target_id,
+            position: [lat, lon, alt],
+            velocity,
+            class: Some(thresh_core::track::TargetClass::Aircraft),
+        }],
+    })
+}
+
+/// Build an entry by linearly interpolating between two bracketing state vectors.
+fn interpolate_entry(
+    target_id: u64,
+    sv0: &StateVector,
+    sv1: &StateVector,
+    alpha: f64,
+) -> Option<GroundTruthEntry> {
+    let lat = lerp_opt(sv0.latitude, sv1.latitude, alpha)?;
+    let lon = lerp_opt(sv0.longitude, sv1.longitude, alpha)?;
+    let alt = lerp_opt(
+        sv0.baro_altitude.or(sv0.geo_altitude),
+        sv1.baro_altitude.or(sv1.geo_altitude),
+        alpha,
+    )
+    .unwrap_or(0.0);
+
+    let velocity = match (sv0.velocity, sv0.true_track, sv1.velocity, sv1.true_track) {
+        (Some(s0), Some(t0_deg), Some(s1), Some(t1_deg)) => {
+            let s = s0 + alpha * (s1 - s0);
+            let tr = t0_deg.to_radians() + alpha * (t1_deg.to_radians() - t0_deg.to_radians());
+            let vr0 = sv0.vertical_rate.unwrap_or(0.0);
+            let vr1 = sv1.vertical_rate.unwrap_or(0.0);
+            let vr = vr0 + alpha * (vr1 - vr0);
+            Some([s * tr.sin(), s * tr.cos(), vr])
+        }
+        _ => None,
+    };
+
+    Some(GroundTruthEntry {
+        target_id,
+        position: [lat, lon, alt],
+        velocity,
+        class: Some(thresh_core::track::TargetClass::Aircraft),
+    })
+}
+
+/// Interpolate a multi-sample sorted trajectory to a 1-second grid.
+fn interpolate_trajectory_to_grid(
+    icao24: String,
+    svs: &[&StateVector],
+) -> Option<GroundTruthTrajectory> {
+    let first = svs.first()?;
+    let last = svs.last()?;
+    let t_start = first.time_position.unwrap_or(first.last_contact);
+    let t_end = last.time_position.unwrap_or(last.last_contact);
+
+    if (t_end - t_start) < 1.0 {
+        return None;
+    }
+
+    let target_id = u64::from_str_radix(&icao24, 16).unwrap_or(0);
+    let mut entries = Vec::new();
+
+    let mut t = t_start;
+    let mut idx = 0;
+    while t <= t_end {
+        // Advance index to bracket t.
+        while idx + 1 < svs.len() {
+            let t_next = svs[idx + 1]
+                .time_position
+                .unwrap_or(svs[idx + 1].last_contact);
+            if t_next >= t {
+                break;
+            }
+            idx += 1;
+        }
+
+        if idx + 1 >= svs.len() {
+            break;
+        }
+
+        let sv0 = svs[idx];
+        let sv1 = svs[idx + 1];
+        let t0 = sv0.time_position.unwrap_or(sv0.last_contact);
+        let t1 = sv1.time_position.unwrap_or(sv1.last_contact);
+
+        if (t1 - t0).abs() < 1e-9 {
+            t += 1.0;
+            continue;
+        }
+
+        let alpha = (t - t0) / (t1 - t0);
+        if let Some(entry) = interpolate_entry(target_id, sv0, sv1, alpha) {
+            entries.push(entry);
+        }
+
+        t += 1.0;
+    }
+
+    if entries.is_empty() {
+        None
+    } else {
+        Some(GroundTruthTrajectory {
+            icao24,
+            start_time: t_start,
+            entries,
+        })
+    }
 }
 
 /// Linearly interpolate between two optional values.

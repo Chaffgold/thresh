@@ -43,6 +43,55 @@ pub struct Trajectory {
 
 const GRAVITY: f64 = 9.81;
 
+/// Advance a single kinematic step of one segment type, updating `pos` and
+/// `vel` in place.
+fn advance_segment_step(
+    segment_type: &SegmentType,
+    pos: &mut Vector3<f64>,
+    vel: &mut Vector3<f64>,
+    dt: f64,
+) {
+    match segment_type {
+        SegmentType::Cv => {
+            *pos += *vel * dt;
+        }
+        SegmentType::Ca { acceleration } => {
+            let acc = Vector3::from_row_slice(acceleration);
+            *pos += *vel * dt + acc * 0.5 * dt * dt;
+            *vel += acc * dt;
+        }
+        SegmentType::Ctrv { turn_rate } => {
+            let omega = *turn_rate;
+            let speed = (vel.x * vel.x + vel.y * vel.y).sqrt();
+            let heading = vel.y.atan2(vel.x);
+            let new_heading = heading + omega * dt;
+
+            if omega.abs() < 1e-8 {
+                *pos += *vel * dt;
+            } else {
+                let r = speed / omega;
+                pos.x += r * (new_heading.sin() - heading.sin());
+                pos.y += r * (-new_heading.cos() + heading.cos());
+                pos.z += vel.z * dt;
+            }
+            vel.x = speed * new_heading.cos();
+            vel.y = speed * new_heading.sin();
+        }
+        SegmentType::Ballistic { drag_coefficient } => {
+            let drag = *drag_coefficient;
+            let speed = vel.norm();
+            let drag_force = if speed > 1e-10 {
+                *vel * (-drag * speed)
+            } else {
+                Vector3::zeros()
+            };
+            let acc = drag_force + Vector3::new(0.0, 0.0, -GRAVITY);
+            *pos += *vel * dt + acc * 0.5 * dt * dt;
+            *vel += acc * dt;
+        }
+    }
+}
+
 impl Trajectory {
     /// Generate all waypoints for this trajectory.
     pub fn generate(&self) -> Vec<Waypoint> {
@@ -58,56 +107,31 @@ impl Trajectory {
         });
 
         for seg in &self.segments {
-            let n_steps = (seg.duration / self.dt).ceil() as usize;
-            for _ in 0..n_steps {
-                match &seg.segment_type {
-                    SegmentType::Cv => {
-                        pos += vel * self.dt;
-                    }
-                    SegmentType::Ca { acceleration } => {
-                        let acc = Vector3::from_row_slice(acceleration);
-                        pos += vel * self.dt + acc * 0.5 * self.dt * self.dt;
-                        vel += acc * self.dt;
-                    }
-                    SegmentType::Ctrv { turn_rate } => {
-                        let omega = *turn_rate;
-                        let speed = (vel.x * vel.x + vel.y * vel.y).sqrt();
-                        let heading = vel.y.atan2(vel.x);
-                        let new_heading = heading + omega * self.dt;
-
-                        if omega.abs() < 1e-8 {
-                            pos += vel * self.dt;
-                        } else {
-                            let r = speed / omega;
-                            pos.x += r * ((new_heading).sin() - heading.sin());
-                            pos.y += r * (-(new_heading).cos() + heading.cos());
-                            pos.z += vel.z * self.dt;
-                        }
-                        vel.x = speed * new_heading.cos();
-                        vel.y = speed * new_heading.sin();
-                    }
-                    SegmentType::Ballistic { drag_coefficient } => {
-                        let drag = *drag_coefficient;
-                        let speed = vel.norm();
-                        let drag_force = if speed > 1e-10 {
-                            vel * (-drag * speed)
-                        } else {
-                            Vector3::zeros()
-                        };
-                        let acc = drag_force + Vector3::new(0.0, 0.0, -GRAVITY);
-                        pos += vel * self.dt + acc * 0.5 * self.dt * self.dt;
-                        vel += acc * self.dt;
-                    }
-                }
-                time += self.dt;
-                waypoints.push(Waypoint {
-                    time,
-                    position: [pos.x, pos.y, pos.z],
-                    velocity: [vel.x, vel.y, vel.z],
-                });
-            }
+            self.generate_segment(seg, &mut pos, &mut vel, &mut time, &mut waypoints);
         }
         waypoints
+    }
+
+    /// Generate waypoints for a single segment, appending them to `waypoints`
+    /// and advancing `pos`, `vel`, and `time` in place.
+    fn generate_segment(
+        &self,
+        seg: &Segment,
+        pos: &mut Vector3<f64>,
+        vel: &mut Vector3<f64>,
+        time: &mut f64,
+        waypoints: &mut Vec<Waypoint>,
+    ) {
+        let n_steps = (seg.duration / self.dt).ceil() as usize;
+        for _ in 0..n_steps {
+            advance_segment_step(&seg.segment_type, pos, vel, self.dt);
+            *time += self.dt;
+            waypoints.push(Waypoint {
+                time: *time,
+                position: [pos.x, pos.y, pos.z],
+                velocity: [vel.x, vel.y, vel.z],
+            });
+        }
     }
 }
 
