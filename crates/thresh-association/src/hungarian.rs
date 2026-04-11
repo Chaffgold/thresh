@@ -8,11 +8,13 @@
 //!    `gate`-valued dummy entries.
 //! 2. `reduce_cost_matrix` — classical row and column reduction.
 //! 3. `greedy_zero_assignment` — greedy initial matching on zero entries.
-//! 4. `mark_cover` — marking pass that yields a minimum vertex cover of the
-//!    current zero graph.
-//! 5. `min_uncovered_value` — smallest uncovered entry used for the update.
-//! 6. `update_labels` — subtract from uncovered, add to doubly covered.
-//! 7. `extract_assignment` — drop dummy / gated matches and build the
+//! 4. `augment_matching` — bipartite augmenting-path search that grows the
+//!    greedy matching to a maximum matching of the zero graph.
+//! 5. `mark_cover` — marking pass that yields a minimum vertex cover of the
+//!    current zero graph (valid because the matching is maximum, König).
+//! 6. `min_uncovered_value` — smallest uncovered entry used for the update.
+//! 7. `update_labels` — subtract from uncovered, add to doubly covered.
+//! 8. `extract_assignment` — drop dummy / gated matches and build the
 //!    [`AssignmentResult`].
 //!
 //! Correctness is validated by hand-crafted regression tests covering
@@ -148,6 +150,11 @@ fn run_munkres_loop(
     col_assign: &mut [Option<usize>],
     dim: usize,
 ) {
+    // The initial matching from greedy_zero_assignment may not be maximum
+    // (greedy can get stuck). Augment it via bipartite alternating paths
+    // so the vertex-cover / König check below is valid.
+    augment_matching(c, row_assign, col_assign, dim);
+
     loop {
         let n_assigned = row_assign.iter().filter(|a| a.is_some()).count();
         if n_assigned == dim {
@@ -157,6 +164,8 @@ fn run_munkres_loop(
         let (row_covered, col_covered) = mark_cover(c, row_assign, col_assign, dim);
         let covered_count = count_true(&row_covered) + count_true(&col_covered);
         if covered_count >= dim {
+            // König: cover size == max-matching size. If it equals dim, we
+            // already have a perfect matching (augment_matching ran above).
             return;
         }
 
@@ -166,9 +175,113 @@ fn run_munkres_loop(
         }
 
         update_labels(c, &row_covered, &col_covered, dim, min_val);
+        // After update_labels introduces new zeros, re-run greedy + augment
+        // so the matching reflects the new zero graph.
         let (new_rows, new_cols) = greedy_zero_assignment(c, dim);
         row_assign.copy_from_slice(&new_rows);
         col_assign.copy_from_slice(&new_cols);
+        augment_matching(c, row_assign, col_assign, dim);
+    }
+}
+
+/// Grow the current matching to maximum by searching for alternating
+/// augmenting paths from each unmatched row in the bipartite zero graph.
+fn augment_matching(
+    c: &[Vec<f64>],
+    row_assign: &mut [Option<usize>],
+    col_assign: &mut [Option<usize>],
+    dim: usize,
+) {
+    for start_row in 0..dim {
+        if row_assign[start_row].is_some() {
+            continue;
+        }
+        try_augment_from(start_row, c, dim, row_assign, col_assign);
+    }
+}
+
+/// Attempt to augment the matching starting from `start_row` using BFS on
+/// the zero graph. Returns whether an augmenting path was found and applied.
+fn try_augment_from(
+    start_row: usize,
+    c: &[Vec<f64>],
+    dim: usize,
+    row_assign: &mut [Option<usize>],
+    col_assign: &mut [Option<usize>],
+) -> bool {
+    let mut visited_col = vec![false; dim];
+    let mut parent_row_for_col: Vec<Option<usize>> = vec![None; dim];
+    let mut queue: Vec<usize> = vec![start_row];
+    let mut terminal_col: Option<usize> = None;
+
+    while let Some(r) = queue.pop() {
+        if let Some(tc) = find_augmenting_target(
+            r,
+            c,
+            dim,
+            col_assign,
+            &mut visited_col,
+            &mut parent_row_for_col,
+            &mut queue,
+        ) {
+            terminal_col = Some(tc);
+            break;
+        }
+    }
+
+    if let Some(mut j) = terminal_col {
+        apply_augmenting_path(j, row_assign, col_assign, &parent_row_for_col);
+        // Clippy: consume j so the compiler sees we used it post-move.
+        let _ = &mut j;
+        true
+    } else {
+        false
+    }
+}
+
+/// From row `r`, scan its zero columns. If any lead to an unmatched column,
+/// return it as a terminal (end of augmenting path). Otherwise push the next
+/// row (via the current matching of each zero col) onto the BFS queue.
+fn find_augmenting_target(
+    r: usize,
+    c: &[Vec<f64>],
+    dim: usize,
+    col_assign: &[Option<usize>],
+    visited_col: &mut [bool],
+    parent_row_for_col: &mut [Option<usize>],
+    queue: &mut Vec<usize>,
+) -> Option<usize> {
+    for j in 0..dim {
+        if visited_col[j] || c[r][j].abs() >= ZERO_EPS {
+            continue;
+        }
+        visited_col[j] = true;
+        parent_row_for_col[j] = Some(r);
+        match col_assign[j] {
+            None => return Some(j),
+            Some(next_row) => queue.push(next_row),
+        }
+    }
+    None
+}
+
+/// Flip the edges along the augmenting path, turning previously unmatched
+/// edges into matched edges and vice versa.
+fn apply_augmenting_path(
+    mut j: usize,
+    row_assign: &mut [Option<usize>],
+    col_assign: &mut [Option<usize>],
+    parent_row_for_col: &[Option<usize>],
+) {
+    loop {
+        let r = parent_row_for_col[j].expect("augmenting path parent must be set");
+        let prev_col = row_assign[r];
+        col_assign[j] = Some(r);
+        row_assign[r] = Some(j);
+        match prev_col {
+            None => return,
+            Some(pc) => j = pc,
+        }
     }
 }
 
@@ -383,6 +496,31 @@ mod tests {
         let result = hungarian_assignment(&cost, 50.0);
         assert_eq!(result.matches.len(), 2);
         assert_eq!(result.total_cost, 3.0);
+    }
+
+    #[test]
+    fn perfect_matching_requires_augmentation() {
+        // Regression for CodeRabbit-flagged case: greedy assignment picks
+        // (0,0) and (2,1), leaving row 1 unassigned. But a perfect matching
+        // exists: (0,1), (1,0), (2,2) all zero. The algorithm must find
+        // the perfect matching, not stop at the greedy partial result.
+        let cost = vec![
+            vec![0.0, 0.0, 1.0],
+            vec![0.0, 1.0, 1.0],
+            vec![1.0, 0.0, 0.0],
+        ];
+        let result = hungarian_assignment(&cost, 100.0);
+        assert_eq!(
+            result.matches.len(),
+            3,
+            "must find 3 matches, got {:?}",
+            result.matches
+        );
+        assert!(
+            result.total_cost < 1e-9,
+            "perfect zero matching exists, got cost {}",
+            result.total_cost
+        );
     }
 
     #[test]
