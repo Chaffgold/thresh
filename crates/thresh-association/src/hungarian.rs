@@ -4,19 +4,19 @@
 //! phase helpers so its cognitive complexity stays well under 15. Each helper
 //! implements one logically distinct phase of the Kuhn-Munkres iteration:
 //!
-//! 1. [`build_square_cost`] — pad a rectangular cost matrix to a square with
+//! 1. `build_square_cost` — pad a rectangular cost matrix to a square with
 //!    `gate`-valued dummy entries.
-//! 2. [`reduce_cost_matrix`] — classical row and column reduction.
-//! 3. [`greedy_zero_assignment`] — greedy initial matching on zero entries.
-//! 4. [`mark_cover`] — marking pass that yields a minimum vertex cover of the
+//! 2. `reduce_cost_matrix` — classical row and column reduction.
+//! 3. `greedy_zero_assignment` — greedy initial matching on zero entries.
+//! 4. `mark_cover` — marking pass that yields a minimum vertex cover of the
 //!    current zero graph.
-//! 5. [`min_uncovered_value`] — smallest uncovered entry used for the update.
-//! 6. [`update_labels`] — subtract from uncovered, add to doubly covered.
-//! 7. [`extract_assignment`] — drop dummy / gated matches and build the
+//! 5. `min_uncovered_value` — smallest uncovered entry used for the update.
+//! 6. `update_labels` — subtract from uncovered, add to doubly covered.
+//! 7. `extract_assignment` — drop dummy / gated matches and build the
 //!    [`AssignmentResult`].
 //!
 //! The original monolithic implementation is kept under `#[cfg(test)]` as
-//! [`hungarian_assignment_v1`] and is exercised by a randomized comparison
+//! `hungarian_assignment_v1` and is exercised by a randomized comparison
 //! harness (`compare_v1_and_v2_on_random_matrices`) that runs 10 000+ random
 //! cases to confirm the new decomposition preserves optimal cost.
 
@@ -510,33 +510,11 @@ fn hungarian_assignment_v1(cost: &[Vec<f64>], gate: f64) -> AssignmentResult {
         }
     }
 
-    // Extract real assignments, filtering dummy and gated
-    let mut matches = vec![];
-    let mut matched_rows = vec![false; n_rows];
-    let mut matched_cols = vec![false; n_cols];
-    let mut total_cost = 0.0;
-
-    for i in 0..n_rows {
-        if let Some(j) = row_assign[i]
-            && j < n_cols
-            && cost[i][j] < gate
-        {
-            matches.push((i, j));
-            matched_rows[i] = true;
-            matched_cols[j] = true;
-            total_cost += cost[i][j];
-        }
-    }
-
-    let unassigned_rows: Vec<usize> = (0..n_rows).filter(|&i| !matched_rows[i]).collect();
-    let unassigned_cols: Vec<usize> = (0..n_cols).filter(|&j| !matched_cols[j]).collect();
-
-    AssignmentResult {
-        matches,
-        unassigned_rows,
-        unassigned_cols,
-        total_cost,
-    }
+    // Extract real assignments, filtering dummy and gated entries.
+    // Delegate to the shared `extract_assignment` helper — both
+    // implementations share this tail so the comparison harness is only
+    // validating the algorithmic core (row/col reduction, cover, updates).
+    extract_assignment(cost, gate, &row_assign, n_rows, n_cols)
 }
 
 #[cfg(test)]
