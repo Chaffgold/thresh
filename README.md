@@ -1,5 +1,13 @@
 # thresh
 
+[![CI](https://github.com/Chaffgold/thresh/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/Chaffgold/thresh/actions/workflows/ci.yml)
+[![Benchmarks](https://github.com/Chaffgold/thresh/actions/workflows/benchmarks.yml/badge.svg?branch=develop)](https://github.com/Chaffgold/thresh/actions/workflows/benchmarks.yml)
+[![codecov](https://codecov.io/gh/Chaffgold/thresh/branch/develop/graph/badge.svg)](https://codecov.io/gh/Chaffgold/thresh)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=Chaffgold_thresh&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=Chaffgold_thresh)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=Chaffgold_thresh&metric=coverage)](https://sonarcloud.io/summary/new_code?id=Chaffgold_thresh)
+[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=Chaffgold_thresh&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=Chaffgold_thresh)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
 Multi-sensor fusion multi-object tracking framework in Rust.
 
 Hybrid architecture: transformer-based detection (via ONNX Runtime) + classical Bayesian state estimation (Kalman filter family). Designed for heterogeneous aerospace targets spanning UAVs through ballistic missiles.

@@ -24,8 +24,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Generate coverage
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+      - name: Generate coverage (LCOV with absolute paths)
+        run: |
+          cargo llvm-cov --workspace --lcov --output-path lcov.info
+          # Ensure LCOV SF: entries are absolute so SonarCloud can match them
+          # back to the crates/ source tree.
+          echo "--- LCOV head ---"
+          head -20 lcov.info
       - name: Run clippy for SonarCloud
         run: cargo clippy --workspace --all-targets --quiet --message-format=json > clippy-report.json
       - name: SonarCloud Scan
@@ -39,5 +44,6 @@ jobs:
             -Dsonar.test.inclusions=**/*test*/**,**/tests/**
             -Dsonar.exclusions=**/target/**
             -Dsonar.coverage.exclusions=**/tests/**,**/test*/**
+            -Dsonar.coverageReportPaths=lcov.info
             -Dsonar.community.rust.lcov.reportPaths=lcov.info
             -Dsonar.community.rust.clippy.reportPaths=clippy-report.json
