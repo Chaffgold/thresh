@@ -174,6 +174,107 @@ fn stereographic_tracker_tracks_across_othr_coverage() {
 
 // ── Task 8.D.8 — Benchmark stereographic vs ENU ───────────────────────────
 
+/// Build a stereographic detection for a waypoint (or empty if no detection).
+fn stereo_detections_for_wp(
+    wp: &Waypoint,
+    cfg: &OthrConfig,
+    reg: &OthrSensorRegistration,
+    center: (f64, f64),
+    rng: &mut StdRng,
+) -> Vec<DVector<f64>> {
+    let mut dets = Vec::new();
+    if let Some(m) = generate_othr(wp, cfg, 12.0, rng)
+        && let Some(det) = othr_to_stereographic(&m, reg, wp.position[2], center.0, center.1)
+    {
+        dets.push(det);
+    }
+    dets
+}
+
+/// Build an ENU detection for a waypoint (or empty if no detection).
+fn enu_detections_for_wp(
+    wp: &Waypoint,
+    cfg: &OthrConfig,
+    reg: &OthrSensorRegistration,
+    rng: &mut StdRng,
+) -> Vec<DVector<f64>> {
+    let mut dets = Vec::new();
+    if let Some(m) = generate_othr(wp, cfg, 12.0, rng)
+        && let Some(det) = othr_to_cartesian(
+            &m,
+            reg,
+            wp.position[2],
+            reg.transmitter_lat_rad,
+            reg.transmitter_lon_rad,
+            reg.transmitter_alt_m,
+        )
+    {
+        dets.push(det);
+    }
+    dets
+}
+
+/// Compute the truth position in stereographic (tx, ty) and ENU (ex, ey)
+/// frames for a given waypoint.
+fn truth_positions(
+    wp: &Waypoint,
+    reg: &OthrSensorRegistration,
+    center: (f64, f64),
+) -> ((f64, f64), (f64, f64)) {
+    let truth_range = (wp.position[0].powi(2) + wp.position[1].powi(2)).sqrt();
+    let truth_az = wp.position[0].atan2(wp.position[1]);
+    let (truth_lat, truth_lon) = vincenty_direct(
+        reg.transmitter_lat_rad,
+        reg.transmitter_lon_rad,
+        truth_az,
+        truth_range,
+    );
+    let (tx, ty) = stereographic_project(truth_lat, truth_lon, center.0, center.1);
+
+    let ecef = thresh_core::geodetic::wgs84_to_ecef(truth_lat, truth_lon, wp.position[2]);
+    let enu = thresh_core::geodetic::ecef_to_enu(
+        &ecef,
+        reg.transmitter_lat_rad,
+        reg.transmitter_lon_rad,
+        reg.transmitter_alt_m,
+    );
+
+    ((tx, ty), (enu.x, enu.y))
+}
+
+/// Minimum positional error between any alive stereographic track and truth.
+fn min_stereo_error(
+    tracker: &MultiObjectTrackerStereographic,
+    truth_xy: (f64, f64),
+) -> Option<f64> {
+    tracker
+        .tracks
+        .iter()
+        .filter(|t| t.lifecycle != thresh_core::track::TrackState::Deleted)
+        .map(|t| ((t.state[0] - truth_xy.0).powi(2) + (t.state[2] - truth_xy.1).powi(2)).sqrt())
+        .fold(None::<f64>, |acc, e| {
+            Some(acc.map_or(e, |a| if e.total_cmp(&a).is_lt() { e } else { a }))
+        })
+}
+
+/// Minimum positional error between any alive ENU track and truth.
+fn min_enu_error(tracker: &MultiObjectTracker, truth_xy: (f64, f64)) -> Option<f64> {
+    tracker
+        .tracks
+        .iter()
+        .filter(|t| t.is_alive())
+        .map(|t| ((t.state[0] - truth_xy.0).powi(2) + (t.state[2] - truth_xy.1).powi(2)).sqrt())
+        .fold(None::<f64>, |acc, e| {
+            Some(acc.map_or(e, |a| if e.total_cmp(&a).is_lt() { e } else { a }))
+        })
+}
+
+/// Mean of the last `tail` elements of `errors`.
+fn tail_mean(errors: &[f64], tail: usize) -> f64 {
+    let n = errors.len();
+    errors[n - tail..].iter().sum::<f64>() / tail as f64
+}
+
 #[test]
 fn stereographic_matches_or_beats_enu_at_long_range() {
     // Run the same scenario through the stereographic tracker and the
@@ -187,91 +288,38 @@ fn stereographic_matches_or_beats_enu_at_long_range() {
     let center = recommended_center(&[(reg.transmitter_lat_rad, reg.transmitter_lon_rad)]);
     let waypoints = radial_waypoints(250.0, 1.0, 1_500_000.0, 3_000_000.0);
 
-    // ── Stereographic run ─────────────────────────────────────────────
     let mut stereo = MultiObjectTrackerStereographic::new(center.0, center.1, 5.0, 100.0);
     let mut rng_a = StdRng::seed_from_u64(2026);
     let mut stereo_errors: Vec<f64> = Vec::new();
 
-    // ── ENU run (existing tracker from tracker.rs) ────────────────────
     let mut enu_tracker = MultiObjectTracker::new_cv_position(20_000.0, 100.0);
     let mut rng_b = StdRng::seed_from_u64(2026);
     let mut enu_errors: Vec<f64> = Vec::new();
 
     for wp in &waypoints {
-        // Stereographic detection
-        let mut stereo_dets: Vec<DVector<f64>> = Vec::new();
-        if let Some(m) = generate_othr(wp, &cfg, 12.0, &mut rng_a)
-            && let Some(det) = othr_to_stereographic(&m, &reg, wp.position[2], center.0, center.1)
-        {
-            stereo_dets.push(det);
-        }
+        let stereo_dets = stereo_detections_for_wp(wp, &cfg, &reg, center, &mut rng_a);
         stereo.step(&stereo_dets, 1.0);
 
-        let truth_range = (wp.position[0].powi(2) + wp.position[1].powi(2)).sqrt();
-        let truth_az = wp.position[0].atan2(wp.position[1]);
-        let (truth_lat, truth_lon) = vincenty_direct(
-            reg.transmitter_lat_rad,
-            reg.transmitter_lon_rad,
-            truth_az,
-            truth_range,
-        );
-        let (tx, ty) = stereographic_project(truth_lat, truth_lon, center.0, center.1);
-
-        if let Some(err) = stereo
-            .tracks
-            .iter()
-            .filter(|t| t.lifecycle != thresh_core::track::TrackState::Deleted)
-            .map(|t| ((t.state[0] - tx).powi(2) + (t.state[2] - ty).powi(2)).sqrt())
-            .fold(None::<f64>, |acc, e| {
-                Some(acc.map_or(e, |a| if e.total_cmp(&a).is_lt() { e } else { a }))
-            })
-        {
-            stereo_errors.push(err);
-        }
-
-        // ENU detection (cartesian around the transmitter)
-        let mut enu_dets: Vec<DVector<f64>> = Vec::new();
-        if let Some(m) = generate_othr(wp, &cfg, 12.0, &mut rng_b)
-            && let Some(det) = othr_to_cartesian(
-                &m,
-                &reg,
-                wp.position[2],
-                reg.transmitter_lat_rad,
-                reg.transmitter_lon_rad,
-                reg.transmitter_alt_m,
-            )
-        {
-            enu_dets.push(det);
-        }
+        let enu_dets = enu_detections_for_wp(wp, &cfg, &reg, &mut rng_b);
         enu_tracker.step(&enu_dets, 1.0);
 
-        // ENU truth: Vincenty-propagate then convert via ECEF/ENU.
-        let ecef = thresh_core::geodetic::wgs84_to_ecef(truth_lat, truth_lon, wp.position[2]);
-        let enu = thresh_core::geodetic::ecef_to_enu(
-            &ecef,
-            reg.transmitter_lat_rad,
-            reg.transmitter_lon_rad,
-            reg.transmitter_alt_m,
-        );
-        if let Some(err) = enu_tracker
-            .tracks
-            .iter()
-            .filter(|t| t.is_alive())
-            .map(|t| ((t.state[0] - enu.x).powi(2) + (t.state[2] - enu.y).powi(2)).sqrt())
-            .fold(None::<f64>, |acc, e| {
-                Some(acc.map_or(e, |a| if e.total_cmp(&a).is_lt() { e } else { a }))
-            })
-        {
+        let (truth_stereo, truth_enu) = truth_positions(wp, &reg, center);
+
+        if let Some(err) = min_stereo_error(&stereo, truth_stereo) {
+            stereo_errors.push(err);
+        }
+        if let Some(err) = min_enu_error(&enu_tracker, truth_enu) {
             enu_errors.push(err);
         }
     }
 
     let tail = 20usize;
-    let ns = stereo_errors.len();
-    let ne = enu_errors.len();
-    assert!(ns >= tail && ne >= tail, "need converged tails");
-    let stereo_tail: f64 = stereo_errors[ns - tail..].iter().sum::<f64>() / tail as f64;
-    let enu_tail: f64 = enu_errors[ne - tail..].iter().sum::<f64>() / tail as f64;
+    assert!(
+        stereo_errors.len() >= tail && enu_errors.len() >= tail,
+        "need converged tails"
+    );
+    let stereo_tail = tail_mean(&stereo_errors, tail);
+    let enu_tail = tail_mean(&enu_errors, tail);
 
     println!("stereo tail mean = {stereo_tail:.1} m, enu tail mean = {enu_tail:.1} m");
 

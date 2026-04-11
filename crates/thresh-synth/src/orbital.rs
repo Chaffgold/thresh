@@ -364,6 +364,31 @@ fn total_acceleration(pos: &[f64; 3], vel: &[f64; 3], config: &PropagatorConfig)
     acc
 }
 
+/// Compute one RK4 stage at time offset `time_offset_s` (in seconds) from the
+/// current state, producing the pair `(k_r, k_v)` where `k_r` is the state
+/// velocity at the offset point and `k_v` is the acceleration evaluated there.
+fn rk4_stage(
+    pos: &[f64; 3],
+    vel: &[f64; 3],
+    prev_kr: &[f64; 3],
+    prev_kv: &[f64; 3],
+    time_offset_s: f64,
+    config: &PropagatorConfig,
+) -> ([f64; 3], [f64; 3]) {
+    let stage_pos = [
+        pos[0] + time_offset_s * prev_kr[0],
+        pos[1] + time_offset_s * prev_kr[1],
+        pos[2] + time_offset_s * prev_kr[2],
+    ];
+    let stage_vel = [
+        vel[0] + time_offset_s * prev_kv[0],
+        vel[1] + time_offset_s * prev_kv[1],
+        vel[2] + time_offset_s * prev_kv[2],
+    ];
+    let acc = total_acceleration(&stage_pos, &stage_vel, config);
+    (stage_vel, acc)
+}
+
 /// Take one RK4 step.
 fn rk4_step(
     pos: &[f64; 3],
@@ -371,55 +396,15 @@ fn rk4_step(
     dt: f64,
     config: &PropagatorConfig,
 ) -> ([f64; 3], [f64; 3]) {
-    // k1
-    let a1 = total_acceleration(pos, vel, config);
-    let k1v = a1;
-    let k1r = *vel;
-
-    // k2
-    let pos2 = [
-        pos[0] + 0.5 * dt * k1r[0],
-        pos[1] + 0.5 * dt * k1r[1],
-        pos[2] + 0.5 * dt * k1r[2],
-    ];
-    let vel2 = [
-        vel[0] + 0.5 * dt * k1v[0],
-        vel[1] + 0.5 * dt * k1v[1],
-        vel[2] + 0.5 * dt * k1v[2],
-    ];
-    let a2 = total_acceleration(&pos2, &vel2, config);
-    let k2v = a2;
-    let k2r = vel2;
-
-    // k3
-    let pos3 = [
-        pos[0] + 0.5 * dt * k2r[0],
-        pos[1] + 0.5 * dt * k2r[1],
-        pos[2] + 0.5 * dt * k2r[2],
-    ];
-    let vel3 = [
-        vel[0] + 0.5 * dt * k2v[0],
-        vel[1] + 0.5 * dt * k2v[1],
-        vel[2] + 0.5 * dt * k2v[2],
-    ];
-    let a3 = total_acceleration(&pos3, &vel3, config);
-    let k3v = a3;
-    let k3r = vel3;
-
-    // k4
-    let pos4 = [
-        pos[0] + dt * k3r[0],
-        pos[1] + dt * k3r[1],
-        pos[2] + dt * k3r[2],
-    ];
-    let vel4 = [
-        vel[0] + dt * k3v[0],
-        vel[1] + dt * k3v[1],
-        vel[2] + dt * k3v[2],
-    ];
-    let a4 = total_acceleration(&pos4, &vel4, config);
-    let k4v = a4;
-    let k4r = vel4;
+    let zero = [0.0, 0.0, 0.0];
+    // k1: evaluated at the current state (step = 0).
+    let (k1r, k1v) = rk4_stage(pos, vel, &zero, &zero, 0.0, config);
+    // k2: half step using k1.
+    let (k2r, k2v) = rk4_stage(pos, vel, &k1r, &k1v, 0.5 * dt, config);
+    // k3: half step using k2.
+    let (k3r, k3v) = rk4_stage(pos, vel, &k2r, &k2v, 0.5 * dt, config);
+    // k4: full step using k3.
+    let (k4r, k4v) = rk4_stage(pos, vel, &k3r, &k3v, dt, config);
 
     let new_pos = [
         pos[0] + dt / 6.0 * (k1r[0] + 2.0 * k2r[0] + 2.0 * k3r[0] + k4r[0]),
