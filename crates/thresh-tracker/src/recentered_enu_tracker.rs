@@ -20,9 +20,7 @@ use nalgebra::{DMatrix, DVector, Matrix3, Vector3};
 
 use thresh_association::hungarian::hungarian_assignment;
 
-use crate::cost_matrix::{
-    LinearTrack, build_cost_matrix, predict_linear, record_hit_and_promote, record_miss_and_age,
-};
+use crate::cost_matrix::{LinearTrack, build_cost_matrix, predict_linear, record_hit, record_miss};
 use thresh_core::geodetic::{ecef_to_enu, ecef_to_wgs84, enu_to_ecef, wgs84_to_ecef};
 use thresh_core::measurement::Measurement;
 use thresh_core::othr::{OthrSensorRegistration, othr_to_geodetic};
@@ -127,24 +125,6 @@ impl LinearTrack for RecenteredEnuTrack {
     }
     fn covariance_mut(&mut self) -> &mut DMatrix<f64> {
         &mut self.covariance
-    }
-    fn hits(&self) -> usize {
-        self.hits
-    }
-    fn hits_mut(&mut self) -> &mut usize {
-        &mut self.hits
-    }
-    fn misses(&self) -> usize {
-        self.misses
-    }
-    fn misses_mut(&mut self) -> &mut usize {
-        &mut self.misses
-    }
-    fn lifecycle(&self) -> TrackState {
-        self.lifecycle
-    }
-    fn set_lifecycle(&mut self, state: TrackState) {
-        self.lifecycle = state;
     }
 }
 
@@ -481,15 +461,17 @@ impl MultiObjectTrackerRecenteredEnu {
                 self.tracks[ti].covariance.clone(),
             );
             kf.update(&det, &h, &r);
-            self.tracks[ti].state = kf.x;
-            self.tracks[ti].covariance = kf.p;
-            record_hit_and_promote(&mut self.tracks[ti], CONFIRM_HITS);
+            let t = &mut self.tracks[ti];
+            t.state = kf.x;
+            t.covariance = kf.p;
+            record_hit(&mut t.hits, &mut t.misses, &mut t.lifecycle, CONFIRM_HITS);
         }
 
         // 6. Lifecycle bookkeeping for unassociated tracks.
         for (ai, &ti) in alive.iter().enumerate() {
             if !associated_tracks[ai] {
-                record_miss_and_age(&mut self.tracks[ti], MAX_MISSES);
+                let t = &mut self.tracks[ti];
+                record_miss(&mut t.misses, &mut t.lifecycle, MAX_MISSES);
             }
         }
 

@@ -16,49 +16,34 @@ pub trait LinearTrack {
     fn state_mut(&mut self) -> &mut DVector<f64>;
     fn covariance(&self) -> &DMatrix<f64>;
     fn covariance_mut(&mut self) -> &mut DMatrix<f64>;
+}
 
-    // Lifecycle accessors so the shared lifecycle helpers can drive any
-    // tracker variant. Default implementations panic so existing impls don't
-    // have to provide them, but trackers using `record_hit_and_promote` /
-    // `record_miss_and_age` must override these.
-    fn hits(&self) -> usize {
-        unimplemented!("LinearTrack::hits not implemented for this track type")
-    }
-    fn hits_mut(&mut self) -> &mut usize {
-        unimplemented!("LinearTrack::hits_mut not implemented for this track type")
-    }
-    fn misses(&self) -> usize {
-        unimplemented!("LinearTrack::misses not implemented for this track type")
-    }
-    fn misses_mut(&mut self) -> &mut usize {
-        unimplemented!("LinearTrack::misses_mut not implemented for this track type")
-    }
-    fn lifecycle(&self) -> TrackState {
-        unimplemented!("LinearTrack::lifecycle not implemented for this track type")
-    }
-    fn set_lifecycle(&mut self, _state: TrackState) {
-        unimplemented!("LinearTrack::set_lifecycle not implemented for this track type")
+/// Record an association hit and promote tentative/coasting → confirmed.
+///
+/// Free function so each tracker can pass `&mut` references to its hits,
+/// misses, and lifecycle fields directly without needing trait boilerplate.
+pub fn record_hit(
+    hits: &mut usize,
+    misses: &mut usize,
+    lifecycle: &mut TrackState,
+    confirm_hits: usize,
+) {
+    *hits += 1;
+    *misses = 0;
+    if (*lifecycle == TrackState::Tentative && *hits >= confirm_hits)
+        || *lifecycle == TrackState::Coasting
+    {
+        *lifecycle = TrackState::Confirmed;
     }
 }
 
-/// Record an association hit on a track and promote tentative/coasting
-/// tracks to confirmed when appropriate.
-pub fn record_hit_and_promote<T: LinearTrack>(track: &mut T, confirm_hits: usize) {
-    *track.hits_mut() += 1;
-    *track.misses_mut() = 0;
-    let lc = track.lifecycle();
-    if (lc == TrackState::Tentative && track.hits() >= confirm_hits) || lc == TrackState::Coasting {
-        track.set_lifecycle(TrackState::Confirmed);
-    }
-}
-
-/// Record a miss on a track and update lifecycle (coast or delete).
-pub fn record_miss_and_age<T: LinearTrack>(track: &mut T, max_misses: usize) {
-    *track.misses_mut() += 1;
-    if track.misses() >= max_misses {
-        track.set_lifecycle(TrackState::Deleted);
-    } else if track.lifecycle() == TrackState::Confirmed {
-        track.set_lifecycle(TrackState::Coasting);
+/// Record a miss and update lifecycle (coast or delete).
+pub fn record_miss(misses: &mut usize, lifecycle: &mut TrackState, max_misses: usize) {
+    *misses += 1;
+    if *misses >= max_misses {
+        *lifecycle = TrackState::Deleted;
+    } else if *lifecycle == TrackState::Confirmed {
+        *lifecycle = TrackState::Coasting;
     }
 }
 
@@ -139,4 +124,50 @@ pub fn predict_linear(
     let new_state = f * state;
     let new_cov = f * covariance * f.transpose() + q;
     (new_state, new_cov)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_hit_promotes_tentative_after_threshold() {
+        let mut hits = 0;
+        let mut misses = 5;
+        let mut lc = TrackState::Tentative;
+        for _ in 0..3 {
+            record_hit(&mut hits, &mut misses, &mut lc, 3);
+        }
+        assert_eq!(hits, 3);
+        assert_eq!(misses, 0);
+        assert_eq!(lc, TrackState::Confirmed);
+    }
+
+    #[test]
+    fn record_hit_revives_coasting_track() {
+        let mut hits = 5;
+        let mut misses = 2;
+        let mut lc = TrackState::Coasting;
+        record_hit(&mut hits, &mut misses, &mut lc, 3);
+        assert_eq!(lc, TrackState::Confirmed);
+        assert_eq!(misses, 0);
+    }
+
+    #[test]
+    fn record_miss_transitions_confirmed_to_coasting() {
+        let mut misses = 0;
+        let mut lc = TrackState::Confirmed;
+        record_miss(&mut misses, &mut lc, 5);
+        assert_eq!(misses, 1);
+        assert_eq!(lc, TrackState::Coasting);
+    }
+
+    #[test]
+    fn record_miss_deletes_after_max() {
+        let mut misses = 4;
+        let mut lc = TrackState::Coasting;
+        record_miss(&mut misses, &mut lc, 5);
+        assert_eq!(misses, 5);
+        assert_eq!(lc, TrackState::Deleted);
+    }
 }
