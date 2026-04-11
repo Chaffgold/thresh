@@ -20,12 +20,14 @@ use nalgebra::{DMatrix, DVector, Matrix3, Vector3};
 
 use thresh_association::hungarian::hungarian_assignment;
 
-use crate::cost_matrix::{LinearTrack, build_cost_matrix, predict_linear, record_hit, record_miss};
+use crate::cost_matrix::{
+    LinearTrack, build_cost_matrix, default_birth_covariance_6, kf_update, predict_linear,
+    record_hit, record_miss,
+};
 use thresh_core::geodetic::{ecef_to_enu, ecef_to_wgs84, enu_to_ecef, wgs84_to_ecef};
 use thresh_core::measurement::Measurement;
 use thresh_core::othr::{OthrSensorRegistration, othr_to_geodetic};
 use thresh_core::track::{TargetClass, TrackId, TrackState};
-use thresh_filter::kf::KalmanFilter;
 use thresh_filter::models::cv::ConstantVelocity;
 use thresh_filter::traits::{LinearModel, MotionModel};
 
@@ -455,15 +457,17 @@ impl MultiObjectTrackerRecenteredEnu {
             associated_dets[dj] = true;
 
             let ti = alive[ai];
-            let det = per_track_dets[ai][dj].clone();
-            let mut kf = KalmanFilter::new(
-                self.tracks[ti].state.clone(),
-                self.tracks[ti].covariance.clone(),
+            let det = &per_track_dets[ai][dj];
+            let (new_state, new_cov) = kf_update(
+                &self.tracks[ti].state,
+                &self.tracks[ti].covariance,
+                det,
+                &h,
+                &r,
             );
-            kf.update(&det, &h, &r);
             let t = &mut self.tracks[ti];
-            t.state = kf.x;
-            t.covariance = kf.p;
+            t.state = new_state;
+            t.covariance = new_cov;
             record_hit(&mut t.hits, &mut t.misses, &mut t.lifecycle, CONFIRM_HITS);
         }
 
@@ -515,14 +519,7 @@ impl MultiObjectTrackerRecenteredEnu {
         state[0] = detection[0];
         state[2] = detection[1];
         state[4] = detection[2];
-        let cov = DMatrix::from_diagonal(&DVector::from_column_slice(&[
-            1.0e8, // x position (10 km std)
-            1.0e4, // vx
-            1.0e8, // y position
-            1.0e4, // vy
-            1.0e6, // z/alt (1 km std)
-            1.0e2, // vz
-        ]));
+        let cov = default_birth_covariance_6();
         self.tracks.push(RecenteredEnuTrack::new(
             state,
             cov,

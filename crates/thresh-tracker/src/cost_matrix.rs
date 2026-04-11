@@ -126,6 +126,39 @@ pub fn predict_linear(
     (new_state, new_cov)
 }
 
+/// Run a single Kalman filter update on the given prior state and covariance.
+///
+/// This is a thin wrapper around [`thresh_filter::kf::KalmanFilter`] that
+/// avoids per-call clone-and-discard boilerplate at tracker callsites.
+pub fn kf_update(
+    state: &DVector<f64>,
+    covariance: &DMatrix<f64>,
+    detection: &DVector<f64>,
+    h: &DMatrix<f64>,
+    r: &DMatrix<f64>,
+) -> (DVector<f64>, DMatrix<f64>) {
+    let mut kf = thresh_filter::kf::KalmanFilter::new(state.clone(), covariance.clone());
+    kf.update(detection, h, r);
+    (kf.x, kf.p)
+}
+
+/// Default initial covariance for a 6-state interleaved [pos, vel] track
+/// (`[x, vx, y, vy, z/alt, vz/valt]`) born from a position-only detection.
+///
+/// Used by tracker variants that don't have measured velocity at birth time:
+/// 10 km position std on the horizontal axes, 1 km on altitude, plus
+/// generously wide velocity priors.
+pub fn default_birth_covariance_6() -> DMatrix<f64> {
+    DMatrix::from_diagonal(&DVector::from_column_slice(&[
+        1.0e8, // x position (10 km std)
+        1.0e4, // vx
+        1.0e8, // y position
+        1.0e4, // vy
+        1.0e6, // z/alt (1 km std)
+        1.0e2, // vz/valt
+    ]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

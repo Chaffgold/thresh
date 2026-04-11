@@ -19,12 +19,12 @@ use nalgebra::{DMatrix, DVector};
 use thresh_association::hungarian::hungarian_assignment;
 
 use crate::cost_matrix::{
-    alive_indices, build_track_cost_matrix, predict_all, record_hit, record_miss,
+    alive_indices, build_track_cost_matrix, default_birth_covariance_6, kf_update, predict_all,
+    record_hit, record_miss,
 };
 use thresh_core::measurement::Measurement;
 use thresh_core::othr::{OthrSensorRegistration, vincenty_direct};
 use thresh_core::track::{TargetClass, TrackId, TrackState};
-use thresh_filter::kf::KalmanFilter;
 use thresh_filter::models::cv::ConstantVelocity;
 use thresh_filter::traits::{LinearModel, MotionModel};
 
@@ -312,14 +312,16 @@ impl MultiObjectTrackerStereographic {
             associated_dets[dj] = true;
             let ti = alive[ai];
 
-            let mut kf = KalmanFilter::new(
-                self.tracks[ti].state.clone(),
-                self.tracks[ti].covariance.clone(),
+            let (new_state, new_cov) = kf_update(
+                &self.tracks[ti].state,
+                &self.tracks[ti].covariance,
+                &detections[dj],
+                &h,
+                &r,
             );
-            kf.update(&detections[dj], &h, &r);
             let t = &mut self.tracks[ti];
-            t.state = kf.x;
-            t.covariance = kf.p;
+            t.state = new_state;
+            t.covariance = new_cov;
             record_hit(&mut t.hits, &mut t.misses, &mut t.lifecycle, CONFIRM_HITS);
         }
 
@@ -347,15 +349,7 @@ impl MultiObjectTrackerStereographic {
         state[0] = detection[0]; // x
         state[2] = detection[1]; // y
         state[4] = detection[2]; // alt
-        // Velocities default to zero; give them a wide initial covariance.
-        let cov = DMatrix::from_diagonal(&DVector::from_column_slice(&[
-            1.0e8, // x position (10 km)
-            1.0e4, // vx
-            1.0e8, // y position
-            1.0e4, // vy
-            1.0e6, // alt (1 km)
-            1.0e2, // valt
-        ]));
+        let cov = default_birth_covariance_6();
         self.tracks.push(StereoTrack {
             id: TrackId::new(),
             state,
