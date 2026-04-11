@@ -90,12 +90,12 @@
 
 ### 8.C Recentered ENU Tracker
 
-- [ ] 8.C.1 Implement per-track ENU origin tracking: each track stores its own ENU reference point
-- [ ] 8.C.2 Implement origin recentering policy: when track centroid drifts more than threshold (e.g., 200 km), recenter ENU at current centroid
-- [ ] 8.C.3 Implement state transformation across recentering: rotate state vector and covariance into new ENU frame
-- [ ] 8.C.4 Implement measurement transformation per track: convert measurement to track's local ENU before update
-- [ ] 8.C.5 Write tests: recentering preserves filter state continuity (no jumps in track output)
-- [ ] 8.C.6 Write tests: recentered ENU tracker matches ECEF tracker accuracy on long-traverse scenario
+- [x] 8.C.1 Implement per-track ENU origin tracking: each track stores its own ENU reference point
+- [x] 8.C.2 Implement origin recentering policy: when track centroid drifts more than threshold (e.g., 200 km), recenter ENU at current centroid
+- [x] 8.C.3 Implement state transformation across recentering: rotate state vector and covariance into new ENU frame
+- [x] 8.C.4 Implement measurement transformation per track: convert measurement to track's local ENU before update
+- [x] 8.C.5 Write tests: recentering preserves filter state continuity (no jumps in track output)
+- [x] 8.C.6 Write tests: recentered ENU tracker matches ECEF tracker accuracy on long-traverse scenario
 
 ### 8.D Local Stereographic Projection
 

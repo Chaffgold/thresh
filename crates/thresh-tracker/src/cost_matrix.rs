@@ -5,6 +5,7 @@
 
 use nalgebra::{DMatrix, DVector};
 use thresh_association::gating::mahalanobis_squared;
+use thresh_core::track::TrackState;
 
 /// Trait used by [`predict_all`] and [`build_track_cost_matrix`] so the same
 /// helpers can drive multiple tracker variants whose track types only differ
@@ -15,6 +16,35 @@ pub trait LinearTrack {
     fn state_mut(&mut self) -> &mut DVector<f64>;
     fn covariance(&self) -> &DMatrix<f64>;
     fn covariance_mut(&mut self) -> &mut DMatrix<f64>;
+}
+
+/// Record an association hit and promote tentative/coasting → confirmed.
+///
+/// Free function so each tracker can pass `&mut` references to its hits,
+/// misses, and lifecycle fields directly without needing trait boilerplate.
+pub fn record_hit(
+    hits: &mut usize,
+    misses: &mut usize,
+    lifecycle: &mut TrackState,
+    confirm_hits: usize,
+) {
+    *hits += 1;
+    *misses = 0;
+    if (*lifecycle == TrackState::Tentative && *hits >= confirm_hits)
+        || *lifecycle == TrackState::Coasting
+    {
+        *lifecycle = TrackState::Confirmed;
+    }
+}
+
+/// Record a miss and update lifecycle (coast or delete).
+pub fn record_miss(misses: &mut usize, lifecycle: &mut TrackState, max_misses: usize) {
+    *misses += 1;
+    if *misses >= max_misses {
+        *lifecycle = TrackState::Deleted;
+    } else if *lifecycle == TrackState::Confirmed {
+        *lifecycle = TrackState::Coasting;
+    }
 }
 
 /// Apply a linear-Gaussian predict step to every alive track in `tracks`.
@@ -94,4 +124,83 @@ pub fn predict_linear(
     let new_state = f * state;
     let new_cov = f * covariance * f.transpose() + q;
     (new_state, new_cov)
+}
+
+/// Run a single Kalman filter update on the given prior state and covariance.
+///
+/// This is a thin wrapper around [`thresh_filter::kf::KalmanFilter`] that
+/// avoids per-call clone-and-discard boilerplate at tracker callsites.
+pub fn kf_update(
+    state: &DVector<f64>,
+    covariance: &DMatrix<f64>,
+    detection: &DVector<f64>,
+    h: &DMatrix<f64>,
+    r: &DMatrix<f64>,
+) -> (DVector<f64>, DMatrix<f64>) {
+    let mut kf = thresh_filter::kf::KalmanFilter::new(state.clone(), covariance.clone());
+    kf.update(detection, h, r);
+    (kf.x, kf.p)
+}
+
+/// Default initial covariance for a 6-state interleaved [pos, vel] track
+/// (`[x, vx, y, vy, z/alt, vz/valt]`) born from a position-only detection.
+///
+/// Used by tracker variants that don't have measured velocity at birth time:
+/// 10 km position std on the horizontal axes, 1 km on altitude, plus
+/// generously wide velocity priors.
+pub fn default_birth_covariance_6() -> DMatrix<f64> {
+    DMatrix::from_diagonal(&DVector::from_column_slice(&[
+        1.0e8, // x position (10 km std)
+        1.0e4, // vx
+        1.0e8, // y position
+        1.0e4, // vy
+        1.0e6, // z/alt (1 km std)
+        1.0e2, // vz/valt
+    ]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_hit_promotes_tentative_after_threshold() {
+        let mut hits = 0;
+        let mut misses = 5;
+        let mut lc = TrackState::Tentative;
+        for _ in 0..3 {
+            record_hit(&mut hits, &mut misses, &mut lc, 3);
+        }
+        assert_eq!(hits, 3);
+        assert_eq!(misses, 0);
+        assert_eq!(lc, TrackState::Confirmed);
+    }
+
+    #[test]
+    fn record_hit_revives_coasting_track() {
+        let mut hits = 5;
+        let mut misses = 2;
+        let mut lc = TrackState::Coasting;
+        record_hit(&mut hits, &mut misses, &mut lc, 3);
+        assert_eq!(lc, TrackState::Confirmed);
+        assert_eq!(misses, 0);
+    }
+
+    #[test]
+    fn record_miss_transitions_confirmed_to_coasting() {
+        let mut misses = 0;
+        let mut lc = TrackState::Confirmed;
+        record_miss(&mut misses, &mut lc, 5);
+        assert_eq!(misses, 1);
+        assert_eq!(lc, TrackState::Coasting);
+    }
+
+    #[test]
+    fn record_miss_deletes_after_max() {
+        let mut misses = 4;
+        let mut lc = TrackState::Coasting;
+        record_miss(&mut misses, &mut lc, 5);
+        assert_eq!(misses, 5);
+        assert_eq!(lc, TrackState::Deleted);
+    }
 }

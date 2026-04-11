@@ -18,11 +18,13 @@
 use nalgebra::{DMatrix, DVector};
 use thresh_association::hungarian::hungarian_assignment;
 
-use crate::cost_matrix::{alive_indices, build_track_cost_matrix, predict_all};
+use crate::cost_matrix::{
+    alive_indices, build_track_cost_matrix, default_birth_covariance_6, kf_update, predict_all,
+    record_hit, record_miss,
+};
 use thresh_core::measurement::Measurement;
 use thresh_core::othr::{OthrSensorRegistration, vincenty_direct};
 use thresh_core::track::{TargetClass, TrackId, TrackState};
-use thresh_filter::kf::KalmanFilter;
 use thresh_filter::models::cv::ConstantVelocity;
 use thresh_filter::traits::{LinearModel, MotionModel};
 
@@ -310,36 +312,24 @@ impl MultiObjectTrackerStereographic {
             associated_dets[dj] = true;
             let ti = alive[ai];
 
-            let mut kf = KalmanFilter::new(
-                self.tracks[ti].state.clone(),
-                self.tracks[ti].covariance.clone(),
+            let (new_state, new_cov) = kf_update(
+                &self.tracks[ti].state,
+                &self.tracks[ti].covariance,
+                &detections[dj],
+                &h,
+                &r,
             );
-            kf.update(&detections[dj], &h, &r);
-            self.tracks[ti].state = kf.x;
-            self.tracks[ti].covariance = kf.p;
-            self.tracks[ti].hits += 1;
-            self.tracks[ti].misses = 0;
-
-            match self.tracks[ti].lifecycle {
-                TrackState::Tentative if self.tracks[ti].hits >= CONFIRM_HITS => {
-                    self.tracks[ti].lifecycle = TrackState::Confirmed;
-                }
-                TrackState::Coasting => {
-                    self.tracks[ti].lifecycle = TrackState::Confirmed;
-                }
-                _ => {}
-            }
+            let t = &mut self.tracks[ti];
+            t.state = new_state;
+            t.covariance = new_cov;
+            record_hit(&mut t.hits, &mut t.misses, &mut t.lifecycle, CONFIRM_HITS);
         }
 
         // 5. Lifecycle bookkeeping for unassociated tracks.
         for (ai, &ti) in alive.iter().enumerate() {
             if !associated_tracks[ai] {
-                self.tracks[ti].misses += 1;
-                if self.tracks[ti].misses >= MAX_MISSES {
-                    self.tracks[ti].lifecycle = TrackState::Deleted;
-                } else if self.tracks[ti].lifecycle == TrackState::Confirmed {
-                    self.tracks[ti].lifecycle = TrackState::Coasting;
-                }
+                let t = &mut self.tracks[ti];
+                record_miss(&mut t.misses, &mut t.lifecycle, MAX_MISSES);
             }
         }
 
@@ -359,15 +349,7 @@ impl MultiObjectTrackerStereographic {
         state[0] = detection[0]; // x
         state[2] = detection[1]; // y
         state[4] = detection[2]; // alt
-        // Velocities default to zero; give them a wide initial covariance.
-        let cov = DMatrix::from_diagonal(&DVector::from_column_slice(&[
-            1.0e8, // x position (10 km)
-            1.0e4, // vx
-            1.0e8, // y position
-            1.0e4, // vy
-            1.0e6, // alt (1 km)
-            1.0e2, // valt
-        ]));
+        let cov = default_birth_covariance_6();
         self.tracks.push(StereoTrack {
             id: TrackId::new(),
             state,
