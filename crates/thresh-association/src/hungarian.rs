@@ -21,6 +21,17 @@
 //! square, rectangular (more rows than cols and vice versa), gated, and
 //! edge-case inputs, plus per-helper unit tests that exercise each phase
 //! in isolation.
+//!
+//! # Why `Vec<Vec<f64>>` instead of `nalgebra::DMatrix<f64>`
+//!
+//! The workspace guideline is to prefer `nalgebra` for linear-algebra-heavy
+//! code, but this module deliberately keeps the row-major `Vec<Vec<f64>>`
+//! representation that matches the public `cost.rs` API boundary. The
+//! Hungarian helpers do element-wise reduction, marking, and min-search
+//! rather than BLAS-style matrix ops, so `DMatrix` would not buy vectorised
+//! kernels here — it would only add a copy at every call site that currently
+//! builds cost matrices as `Vec<Vec<f64>>`. Revisit if we ever need to hand
+//! larger matrices to a SIMD-accelerated solver.
 
 /// Result of running the Hungarian algorithm.
 #[derive(Debug, Clone)]
@@ -289,8 +300,16 @@ fn count_true(flags: &[bool]) -> usize {
     flags.iter().filter(|&&f| f).count()
 }
 
-/// Compute the minimum vertex cover of the zero graph via the classical
+/// Compute a minimum vertex cover of the zero graph via the classical
 /// marking procedure. Returns `(row_covered, col_covered)` boolean vectors.
+///
+/// Precondition: `row_assign` / `col_assign` MUST represent a **maximum**
+/// matching on the current zero graph. König's theorem only guarantees that
+/// the marking procedure yields a minimum vertex cover when the matching is
+/// maximum; with a merely greedy (non-maximum) matching, the returned cover
+/// can be smaller than the matching and `run_munkres_loop` would terminate on
+/// a non-optimal assignment. `run_munkres_loop` enforces this precondition by
+/// calling `augment_matching` before every `mark_cover` invocation.
 fn mark_cover(
     c: &[Vec<f64>],
     row_assign: &[Option<usize>],
