@@ -6,11 +6,11 @@ Enforce that six specific functions flagged by SonarCloud (rule `rust:S3776`) re
 ## ADDED Requirements
 
 ### Requirement: Hungarian algorithm cognitive complexity
-The Hungarian assignment implementation in `crates/thresh-association/src/hungarian.rs` SHALL have a top-level function cognitive complexity of at most 15 as measured by SonarCloud rule `rust:S3776`, decomposed into named phase helpers (cost-matrix reduction, augmenting-path search, label/slack update). The system MUST support this.
+The `hungarian_assignment` function in `crates/thresh-association/src/hungarian.rs` SHALL have a cognitive complexity of at most 15 as measured by SonarCloud rule `rust:S3776`, decomposed into named phase helpers (cost-matrix reduction, augmenting-path search, label/slack update). The system MUST support this.
 
 #### Scenario: Hungarian assignment below complexity threshold
 - **WHEN** SonarCloud analyzes the refactored `hungarian.rs` and the existing association tests are run
-- **THEN** the top-level Hungarian function SHALL report cognitive complexity ≤ 15, AND all existing `thresh-association` tests SHALL pass unchanged, AND a randomized comparison harness SHALL confirm the new implementation produces identical assignments to the previous implementation over at least 10,000 random cost matrices
+- **THEN** the `hungarian_assignment` function SHALL report cognitive complexity ≤ 15, AND all existing `thresh-association` tests SHALL pass unchanged, AND a randomized comparison harness SHALL confirm the new implementation produces a valid one-to-one assignment with the same minimal total cost as the previous implementation over at least 10,000 random cost matrices, requiring identical assignment vectors only when the optimum is unique or when deterministic tie-breaking is explicitly specified
 
 ### Requirement: ADS-B `extract_ground_truth` cognitive complexity
 The `extract_ground_truth` function in `crates/thresh-data/src/adsb.rs` SHALL have a cognitive complexity of at most 15 as measured by SonarCloud rule `rust:S3776`, with per-ICAO24 grouping, 1-second grid interpolation, and short-trajectory handling extracted into helpers. The system MUST support this.
@@ -27,11 +27,11 @@ The long-traverse integration test in `crates/thresh-tracker/tests/stereographic
 - **THEN** the long-traverse test function SHALL report cognitive complexity ≤ 15, AND the test SHALL exercise the same measurements and assertions as before the refactor, AND the test SHALL pass
 
 ### Requirement: Orbital dataset frame generation cognitive complexity
-The frame-generation function in `crates/thresh-data/src/orbital.rs` SHALL have a cognitive complexity of at most 15 as measured by SonarCloud rule `rust:S3776`, with per-frame construction and ground-truth entry construction extracted into helpers. The system MUST support this.
+The `OrbitalDataset::frames` function in `crates/thresh-data/src/orbital.rs` SHALL have a cognitive complexity of at most 15 as measured by SonarCloud rule `rust:S3776`, with per-frame construction and ground-truth entry construction extracted into helpers. The system MUST support this.
 
 #### Scenario: Orbital dataset frame generation below complexity threshold
 - **WHEN** SonarCloud analyzes the refactored `orbital.rs` and the existing orbital dataset tests are run
-- **THEN** the frame-generation function SHALL report cognitive complexity ≤ 15, AND all existing `thresh-data` orbital tests SHALL pass unchanged, AND the refactored function SHALL produce identical frame output to the previous implementation on the existing test fixtures
+- **THEN** `OrbitalDataset::frames` SHALL report cognitive complexity ≤ 15, AND all existing `thresh-data` orbital tests SHALL pass unchanged, AND the refactored function SHALL produce identical frame output to the previous implementation on the existing test fixtures
 
 ### Requirement: `Trajectory::generate` cognitive complexity
 The `Trajectory::generate` function in `crates/thresh-synth/src/trajectory.rs` SHALL have a cognitive complexity of at most 15 as measured by SonarCloud rule `rust:S3776`, with per-segment waypoint generation extracted into a helper. The system MUST support this.

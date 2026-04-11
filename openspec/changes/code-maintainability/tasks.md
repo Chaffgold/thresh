@@ -6,7 +6,7 @@
 - [ ] 1.4 Extract label/slack update step into `update_labels()` with its own unit tests
 - [ ] 1.5 Add `#[cfg(test)]` comparison harness that runs old and new implementations against ≥10,000 random cost matrices and asserts identical assignments
 - [ ] 1.6 Retire the old implementation once the comparison harness has established equivalence
-- [ ] 1.7 Verify SonarCloud reports cognitive complexity ≤ 15 for the top-level `hungarian` function
+- [ ] 1.7 Verify SonarCloud reports cognitive complexity ≤ 15 for the top-level `hungarian_assignment` function
 - [ ] 1.8 Verify all existing `thresh-association` tests still pass
 
 ## 2. ADS-B `extract_ground_truth` (complexity 40 → 15)
@@ -29,11 +29,11 @@
 
 ## 4. Orbital Dataset Frame Generation (complexity 18 → 15)
 
-- [ ] 4.1 Read `crates/thresh-data/src/orbital.rs` around line 528 and identify phases in the frame-generation loop
-- [ ] 4.2 Extract frame-building helper per propagated position
+- [ ] 4.1 Read `crates/thresh-data/src/orbital.rs` around `OrbitalDataset::frames` / `ground_truth` (≈ line 672+) and identify phases in frame construction
+- [ ] 4.2 Extract a frame-building helper for each propagated position
 - [ ] 4.3 Extract ground-truth entry construction into its own helper
 - [ ] 4.4 Verify all orbital dataset tests still pass
-- [ ] 4.5 Verify SonarCloud reports cognitive complexity ≤ 15
+- [ ] 4.5 Verify SonarCloud reports cognitive complexity ≤ 15 for the targeted frame-construction function(s)
 
 ## 5. `Trajectory::generate` (complexity 16 → 15)
 
@@ -44,7 +44,7 @@
 
 ## 6. Orbital RK4 Propagator Step (complexity 16 → 15)
 
-- [ ] 6.1 Read `crates/thresh-synth/src/orbital.rs` around line 179 and identify the four RK4 stages
+- [ ] 6.1 Read `crates/thresh-synth/src/orbital.rs` and identify the four RK4 stages in `rk4_step(...)` (≈ line 368)
 - [ ] 6.2 Extract RK4 stage computation helper (k1/k2/k3/k4 share structure)
 - [ ] 6.3 Verify all orbital propagation tests still pass
 - [ ] 6.4 Verify SonarCloud reports cognitive complexity ≤ 15
