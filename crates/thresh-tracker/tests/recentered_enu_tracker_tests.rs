@@ -136,17 +136,22 @@ fn recentering_preserves_state_continuity() {
 
 // ── 8.C.6 — Long traverse: recentered ENU vs static ENU ───────────────────
 
+/// Count recenter events by comparing pre/post track origins keyed by TrackId.
+/// A recenter event is a track whose id existed before `step` and whose origin
+/// changed. New tracks (no prior entry) are NOT counted as recenters.
 fn count_recenter_events(
-    pre_origins: &[(f64, f64, f64)],
+    pre_origins: &std::collections::HashMap<thresh_core::track::TrackId, (f64, f64, f64)>,
     tracker: &MultiObjectTrackerRecenteredEnu,
 ) -> usize {
     let mut events = 0;
     for t in &tracker.tracks {
-        let matched = pre_origins.iter().any(|&(la, lo, _)| {
-            (la - t.origin_lat_rad).abs() < 1e-15 && (lo - t.origin_lon_rad).abs() < 1e-15
-        });
-        if !matched {
-            events += 1;
+        if let Some(&(pla, plo, pal)) = pre_origins.get(&t.id) {
+            let changed = (pla - t.origin_lat_rad).abs() > 1e-15
+                || (plo - t.origin_lon_rad).abs() > 1e-15
+                || (pal - t.origin_alt_m).abs() > 1e-9;
+            if changed {
+                events += 1;
+            }
         }
     }
     events
@@ -235,11 +240,12 @@ fn recentered_enu_tracks_long_traverse() {
             2.0,
             &mut rng_re,
         );
-        let pre_origins: Vec<(f64, f64, f64)> = re_tracker
-            .tracks
-            .iter()
-            .map(|t| (t.origin_lat_rad, t.origin_lon_rad, t.origin_alt_m))
-            .collect();
+        let pre_origins: std::collections::HashMap<thresh_core::track::TrackId, (f64, f64, f64)> =
+            re_tracker
+                .tracks
+                .iter()
+                .map(|t| (t.id, (t.origin_lat_rad, t.origin_lon_rad, t.origin_alt_m)))
+                .collect();
         re_tracker.step(&[m_re], dt);
         recentered_count += count_recenter_events(&pre_origins, &re_tracker);
 

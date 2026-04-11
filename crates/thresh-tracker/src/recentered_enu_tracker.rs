@@ -24,9 +24,9 @@ use crate::cost_matrix::{
     LinearTrack, build_cost_matrix, default_birth_covariance_6, kf_update, predict_linear,
     record_hit, record_miss,
 };
-use thresh_core::geodetic::{ecef_to_enu, ecef_to_wgs84, enu_to_ecef, wgs84_to_ecef};
+use thresh_core::geodetic::{ecef_to_enu, ecef_to_wgs84, enu_to_ecef};
 use thresh_core::measurement::Measurement;
-use thresh_core::othr::{OthrSensorRegistration, othr_to_geodetic};
+use thresh_core::othr::OthrSensorRegistration;
 use thresh_core::track::{TargetClass, TrackId, TrackState};
 use thresh_filter::models::cv::ConstantVelocity;
 use thresh_filter::traits::{LinearModel, MotionModel};
@@ -284,9 +284,15 @@ pub fn othr_to_local_enu(
             azimuth_rad,
             ..
         } => {
-            let (lat, lon) = othr_to_geodetic(registration, *ground_range_m, *azimuth_rad);
-            let ecef = wgs84_to_ecef(lat, lon, assumed_alt_m);
-            let enu = ecef_to_enu(&ecef, origin_lat_rad, origin_lon_rad, origin_alt_m);
+            let enu = thresh_core::othr::othr_to_enu(
+                registration,
+                *ground_range_m,
+                *azimuth_rad,
+                assumed_alt_m,
+                origin_lat_rad,
+                origin_lon_rad,
+                origin_alt_m,
+            );
             Some(DVector::from_column_slice(&[enu.x, enu.y, enu.z]))
         }
         _ => None,
