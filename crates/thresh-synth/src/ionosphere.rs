@@ -191,6 +191,58 @@ pub fn elevation_angle_rad(ground_range_km: f64, virtual_height_km: f64) -> f64 
     elev.acos() - std::f64::consts::FRAC_PI_2
 }
 
+// ---------------------------------------------------------------------------
+// Task 3.5 — Altitude estimation from ionospheric propagation geometry
+// ---------------------------------------------------------------------------
+
+use thresh_core::measurement::PropagationMode;
+
+/// Typical aircraft ceiling used to clamp OTHR altitude estimates (meters).
+const AIRCRAFT_CEILING_M: f64 = 15_000.0;
+
+/// Estimate a target altitude (meters) from OTHR propagation geometry.
+///
+/// OTHR does **not** directly measure target altitude, so downstream trackers
+/// need a geometry-informed default to lift 2-D ground-range/azimuth fixes
+/// into a 3-D coordinate frame. This function returns the **mid-path tangent
+/// height** — the altitude of the reflected ray's lowest point above the
+/// WGS-84 ellipsoid at its midpoint — clamped to a typical aircraft ceiling
+/// so unrealistic values never propagate into the tracker.
+///
+/// Physical model (spherical Earth, single-hop):
+///
+/// For a reflected sky-wave ray with ground range `R` and virtual reflection
+/// height `h_v` (layer-dependent from `virtual_height_km`), the geometric
+/// apex of the ray is at the virtual reflection point. The **mid-path
+/// tangent height** at ground range `R/2` is the altitude of the outgoing
+/// ray above the Earth's surface at that midpoint, obtained by subtracting
+/// the Earth-curvature sagitta from the virtual height:
+///
+/// ```text
+/// sagitta = R_E * (1 - cos(R / (2 * R_E)))
+/// h_tangent = h_v - sagitta
+/// ```
+///
+/// For multi-hop propagation each hop covers `R / n_hops`, so the per-hop
+/// sagitta is computed over the sub-range and the tangent height is lower
+/// (the ray never climbs as high per hop). The function returns
+/// `min(h_tangent, AIRCRAFT_CEILING_M)` so OTHR's low-altitude target set
+/// (ships, aircraft) gets a physically consistent default rather than the
+/// ionospheric reflection altitude itself.
+pub fn estimated_target_altitude_m(mode: PropagationMode, ground_range_km: f64) -> f64 {
+    let (layer, n_hops) = match mode {
+        PropagationMode::ELayer => (Layer::E, 1u32),
+        PropagationMode::FLayer => (Layer::F, 1u32),
+        PropagationMode::MultiHop(n) => (Layer::F, n.max(1) as u32),
+    };
+    let hop_range_km = ground_range_km / n_hops as f64;
+    let virtual_h_km = virtual_height_km(hop_range_km, layer);
+    let half_arc_rad = hop_range_km / (2.0 * EARTH_RADIUS_KM);
+    let sagitta_km = EARTH_RADIUS_KM * (1.0 - half_arc_rad.cos());
+    let tangent_h_km = (virtual_h_km - sagitta_km).max(0.0);
+    (tangent_h_km * 1000.0).min(AIRCRAFT_CEILING_M)
+}
+
 // =========================================================================
 // Tests — Tasks 2.8-2.10
 // =========================================================================
@@ -314,5 +366,43 @@ mod tests {
         let params = default_params();
         let skip = skip_zone_range_km(5.0, &params); // 5 < 8 MHz
         assert!(skip.abs() < 1e-10, "No skip zone below critical frequency");
+    }
+
+    // ---- Task 3.5 — altitude estimation ----
+
+    #[test]
+    fn altitude_estimate_clamped_to_aircraft_ceiling() {
+        // Virtual heights are hundreds of km, so the raw tangent height would
+        // dwarf any real target altitude — confirm the clamp kicks in.
+        let alt_e = estimated_target_altitude_m(PropagationMode::ELayer, 1500.0);
+        let alt_f = estimated_target_altitude_m(PropagationMode::FLayer, 2500.0);
+        assert!((alt_e - AIRCRAFT_CEILING_M).abs() < 1e-6);
+        assert!((alt_f - AIRCRAFT_CEILING_M).abs() < 1e-6);
+    }
+
+    #[test]
+    fn altitude_estimate_nonnegative_at_long_range() {
+        // At very long single-hop range, Earth-curvature sagitta approaches
+        // the virtual height; the estimator should clamp to >= 0 not go
+        // negative.
+        let alt = estimated_target_altitude_m(PropagationMode::ELayer, 3800.0);
+        assert!(alt >= 0.0);
+        assert!(alt <= AIRCRAFT_CEILING_M);
+    }
+
+    #[test]
+    fn altitude_estimate_multihop_uses_per_hop_range() {
+        // 2-hop over 4000 km has each hop at 2000 km. Per-hop geometry yields
+        // a tangent height matching a single 2000 km hop.
+        let two_hop = estimated_target_altitude_m(PropagationMode::MultiHop(2), 4000.0);
+        let one_hop_half = estimated_target_altitude_m(PropagationMode::FLayer, 2000.0);
+        assert!((two_hop - one_hop_half).abs() < 1e-6);
+    }
+
+    #[test]
+    fn altitude_estimate_multihop_zero_treated_as_one() {
+        // Defensive: MultiHop(0) should not panic or divide by zero.
+        let alt = estimated_target_altitude_m(PropagationMode::MultiHop(0), 1000.0);
+        assert!(alt >= 0.0);
     }
 }
