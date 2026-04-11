@@ -51,6 +51,6 @@
 
 ## 7. CI Guardrail and Documentation
 
-- [ ] 7.1 Confirm the SonarCloud quality gate enforces the ≤ 15 cognitive complexity threshold going forward so new violations are caught at PR time
-- [ ] 7.2 Document the phase-helper decomposition pattern in `CLAUDE.md` or a short style guide so new contributors apply it consistently
-- [ ] 7.3 Run `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace` and confirm both are clean before closing the change
+- [x] 7.1 Confirmed: the default SonarCloud `rust:S3776` rule (threshold 15) is active in the Sonar Way quality profile on `Chaffgold_thresh`; PRs #32 and #33 both cleared Quality Gate with 0 new issues after their refactors, demonstrating the threshold is enforced at PR time.
+- [x] 7.2 Added a "Style Guide: Phase-Helper Decomposition" section to `CLAUDE.md` with a worked-example reference to `hungarian.rs`, `adsb.rs::extract_ground_truth`, and `rk4_stage`.
+- [x] 7.3 Ran `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`; both clean on this branch.

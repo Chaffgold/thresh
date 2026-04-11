@@ -24,7 +24,7 @@
 - [ ] 3.2 Implement Vincenty's inverse formula: given (lat1, lon1, lat2, lon2) → (distance, azimuth)
 - [ ] 3.3 Implement OTHR ground-range/azimuth → geodetic (lat, lon) using Vincenty direct from transmitter position
 - [ ] 3.4 Implement OTHR ground-range/azimuth → ENU using geodetic→ECEF→ENU chain
-- [ ] 3.5 Implement altitude estimation from ionospheric model: assign target altitude based on propagation geometry (mid-path tangent height)
+- [x] 3.5 Implemented `estimated_target_altitude_m(PropagationMode, ground_range_km)` in `crates/thresh-synth/src/ionosphere.rs`: computes the mid-path tangent height from the virtual reflection height minus the spherical-Earth sagitta, handles multi-hop by dividing range into per-hop segments, and clamps to a 15 km aircraft ceiling so the value is usable as a tracker altitude default. Unit tests cover the clamp, long-range non-negativity, multi-hop per-hop geometry, and the `MultiHop(0)` defensive case.
 - [ ] 3.6 Write tests: Vincenty roundtrip (direct → inverse) within 1 cm at multiple ranges
 - [ ] 3.7 Write tests: OTHR registration at 2000 km matches known great-circle endpoint
 
