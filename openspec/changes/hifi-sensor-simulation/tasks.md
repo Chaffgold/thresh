@@ -28,13 +28,13 @@
 
 ## 3. RCS Computation Bridge (Feature-gated)
 
-- [ ] 3.1 Set up PyO3 bridge to PyPOFacets, gated behind `rcs-compute` feature
-- [ ] 3.2 Implement target geometry loader: STL file → faceted model in Python
-- [ ] 3.3 Implement monostatic RCS sweep: compute RCS at azimuth angles 0°-360° (configurable step) at fixed elevation
-- [ ] 3.4 Implement full hemisphere RCS: azimuth × elevation grid
-- [ ] 3.5 Export computed RCS table to JSON (compatible with the lookup table loader from 1.7)
-- [ ] 3.6 Create CLI command: `thresh rcs-compute --stl <file> --freq <GHz> --step <degrees> --output <json>`
-- [ ] 3.7 Write test: RCS of a sphere matches analytical value (πr² for PO regime)
+- [x] 3.1 `RcsComputeBridge` in `crates/thresh-synth/src/rcs_compute.rs` under `#[cfg(feature = "rcs-compute")]` wraps PyPOFacets via pyo3 0.24.
+- [x] 3.2 `RcsComputeBridge::load_geometry()` calls `pofacets.load_stl()` and returns the facet count.
+- [x] 3.3 `RcsComputeBridge::sweep_azimuth()` produces a full azimuth sweep at a fixed elevation.
+- [x] 3.4 `RcsComputeBridge::sweep_hemisphere()` produces an azimuth × elevation grid.
+- [x] 3.5 `RcsSweepResult::{to_json, write_json}` and `compute_and_save_rcs()` export sweep data as JSON compatible with `RcsLookupTable` (via the non-gated `sweep_to_lookup_table` helper).
+- [x] 3.6 `thresh-rcs-compute` binary at `crates/thresh-synth/src/bin/rcs_compute.rs` exposes `--stl / --freq / --step / --output` (plus `--az-start / --az-end / --el / --polarization`). Gated by `required-features = ["rcs-compute"]`. Arg parser lives in `rcs_compute::cli` with 11 unit tests covering help, required-flag errors, polarization validation, az range checks, sample counting, and hemisphere configs — all runnable without a Python runtime.
+- [x] 3.7 `sphere_rcs_matches_analytical` test in `rcs_compute.rs` checks the σ = πr² result against PyPOFacets output within 2 dB. Marked `#[ignore]` because it requires a Python environment and a `sphere.stl` fixture — not a gap in the test itself.
 
 ## 4. JSBSim Trajectory Bridge (Feature-gated)
 
