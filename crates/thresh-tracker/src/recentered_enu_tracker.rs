@@ -360,7 +360,49 @@ impl MultiObjectTrackerRecenteredEnu {
 
     /// Run one predict → associate → update → recenter → lifecycle cycle.
     pub fn step(&mut self, measurements: &[Measurement], dt: f64) {
-        // 1. Predict each alive track in its own ENU frame.
+        self.predict_phase(dt);
+
+        let alive: Vec<usize> = self
+            .tracks
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.is_alive())
+            .map(|(i, _)| i)
+            .collect();
+
+        let othr_indices: Vec<usize> = measurements
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| matches!(m, Measurement::Othr { .. }))
+            .map(|(i, _)| i)
+            .collect();
+
+        let h = Self::observation_matrix();
+        let r = self.measurement_noise();
+
+        let per_track_dets = self.build_per_track_detections(&alive, measurements, &othr_indices);
+        let cost_matrix =
+            self.build_cost_matrix_phase(&alive, &per_track_dets, &h, &r, othr_indices.len());
+
+        let result = hungarian_assignment(&cost_matrix, self.gate_threshold);
+        let (associated_tracks, associated_dets) = self.update_matched(
+            &alive,
+            &per_track_dets,
+            &cost_matrix,
+            &result,
+            &h,
+            &r,
+            othr_indices.len(),
+        );
+
+        self.update_miss_lifecycle(&alive, &associated_tracks);
+        self.recenter_drifted_tracks();
+        self.birth_new_tracks(measurements, &othr_indices, &associated_dets);
+
+        self.tracks.retain(|t| t.lifecycle != TrackState::Deleted);
+    }
+
+    fn predict_phase(&mut self, dt: f64) {
         let cv = ConstantVelocity::new(self.process_noise_sigma);
         let f = cv.transition_matrix(dt);
         let q = cv.process_noise(dt);
@@ -372,77 +414,68 @@ impl MultiObjectTrackerRecenteredEnu {
             track.state = s;
             track.covariance = c;
         }
+    }
 
-        // 2. Collect alive track indices.
-        let alive: Vec<usize> = self
-            .tracks
-            .iter()
-            .enumerate()
-            .filter(|(_, t)| t.is_alive())
-            .map(|(i, _)| i)
-            .collect();
-
-        let h = Self::observation_matrix();
-        let r = self.measurement_noise();
-
-        // 3. For each alive track, transform every OTHR measurement into that
-        // track's local ENU frame. This yields a per-track detection vector
-        // (so measurement indices align across tracks, with `None` placeholders
-        // for non-OTHR measurements).
-        let mut per_track_dets: Vec<Vec<DVector<f64>>> = Vec::with_capacity(alive.len());
-        let mut meas_is_othr = vec![false; measurements.len()];
-        for (mi, m) in measurements.iter().enumerate() {
-            if matches!(m, Measurement::Othr { .. }) {
-                meas_is_othr[mi] = true;
-            }
-        }
-        let othr_indices: Vec<usize> = (0..measurements.len())
-            .filter(|&i| meas_is_othr[i])
-            .collect();
-
-        for &ti in &alive {
+    fn build_per_track_detections(
+        &self,
+        alive: &[usize],
+        measurements: &[Measurement],
+        othr_indices: &[usize],
+    ) -> Vec<Vec<DVector<f64>>> {
+        let mut per_track_dets = Vec::with_capacity(alive.len());
+        for &ti in alive {
             let track = &self.tracks[ti];
             let mut dets = Vec::with_capacity(othr_indices.len());
-            for &mi in &othr_indices {
-                if let Some(det) = othr_to_local_enu(
+            for &mi in othr_indices {
+                let det = othr_to_local_enu(
                     &measurements[mi],
                     &self.registration,
                     self.assumed_alt_m,
                     track.origin_lat_rad,
                     track.origin_lon_rad,
                     track.origin_alt_m,
-                ) {
-                    dets.push(det);
-                } else {
-                    // Shouldn't happen because we prefiltered, but keep the
-                    // shape consistent.
-                    dets.push(DVector::zeros(3));
-                }
+                )
+                .unwrap_or_else(|| DVector::zeros(3));
+                dets.push(det);
             }
             per_track_dets.push(dets);
         }
+        per_track_dets
+    }
 
-        // 4. Build a per-track cost matrix row by row. Because every track has
-        // its own local detection vector, we cannot use the shared
-        // `build_track_cost_matrix` helper; instead we build one row at a time
-        // against a single-track predicted-observation / innovation-cov pair
-        // via `build_cost_matrix`, then stitch the rows back together.
-        let n_alive = alive.len();
-        let n_det = othr_indices.len();
-        let mut cost_matrix: Vec<Vec<f64>> = vec![vec![self.gate_threshold; n_det]; n_alive];
+    fn build_cost_matrix_phase(
+        &self,
+        alive: &[usize],
+        per_track_dets: &[Vec<DVector<f64>>],
+        h: &DMatrix<f64>,
+        r: &DMatrix<f64>,
+        n_det: usize,
+    ) -> Vec<Vec<f64>> {
+        let mut cost_matrix: Vec<Vec<f64>> = vec![vec![self.gate_threshold; n_det]; alive.len()];
         for (ai, &ti) in alive.iter().enumerate() {
             let track = &self.tracks[ti];
-            let z_hat = vec![&h * &track.state];
-            let s = vec![&h * &track.covariance * h.transpose() + &r];
+            let z_hat = vec![h * &track.state];
+            let s = vec![h * &track.covariance * h.transpose() + r];
             let row = build_cost_matrix(&z_hat, &s, &per_track_dets[ai], self.gate_threshold);
             if let Some(first) = row.into_iter().next() {
                 cost_matrix[ai] = first;
             }
         }
+        cost_matrix
+    }
 
-        // 5. Hungarian assignment.
-        let result = hungarian_assignment(&cost_matrix, self.gate_threshold);
-
+    #[allow(clippy::too_many_arguments)]
+    fn update_matched(
+        &mut self,
+        alive: &[usize],
+        per_track_dets: &[Vec<DVector<f64>>],
+        cost_matrix: &[Vec<f64>],
+        result: &thresh_association::hungarian::AssignmentResult,
+        h: &DMatrix<f64>,
+        r: &DMatrix<f64>,
+        n_det: usize,
+    ) -> (Vec<bool>, Vec<bool>) {
+        let n_alive = alive.len();
         let mut associated_tracks = vec![false; n_alive];
         let mut associated_dets = vec![false; n_det];
 
@@ -462,8 +495,8 @@ impl MultiObjectTrackerRecenteredEnu {
                 &self.tracks[ti].state,
                 &self.tracks[ti].covariance,
                 det,
-                &h,
-                &r,
+                h,
+                r,
             );
             let t = &mut self.tracks[ti];
             t.state = new_state;
@@ -471,15 +504,19 @@ impl MultiObjectTrackerRecenteredEnu {
             record_hit(&mut t.hits, &mut t.misses, &mut t.lifecycle, CONFIRM_HITS);
         }
 
-        // 6. Lifecycle bookkeeping for unassociated tracks.
+        (associated_tracks, associated_dets)
+    }
+
+    fn update_miss_lifecycle(&mut self, alive: &[usize], associated_tracks: &[bool]) {
         for (ai, &ti) in alive.iter().enumerate() {
             if !associated_tracks[ai] {
                 let t = &mut self.tracks[ti];
                 record_miss(&mut t.misses, &mut t.lifecycle, MAX_MISSES);
             }
         }
+    }
 
-        // 7. Recenter any track that has drifted beyond the policy threshold.
+    fn recenter_drifted_tracks(&mut self) {
         for track in self.tracks.iter_mut() {
             if !track.is_alive() {
                 continue;
@@ -489,11 +526,14 @@ impl MultiObjectTrackerRecenteredEnu {
                 recenter_track(track, lat, lon, alt);
             }
         }
+    }
 
-        // 8. Birth new tracks from unassociated OTHR detections. A newborn
-        // track uses the transmitter as its initial ENU origin, so the
-        // associated local position is simply the ECEF→ENU of the Vincenty
-        // ground-truth at the transmitter.
+    fn birth_new_tracks(
+        &mut self,
+        measurements: &[Measurement],
+        othr_indices: &[usize],
+        associated_dets: &[bool],
+    ) {
         for (dj, &mi) in othr_indices.iter().enumerate() {
             if associated_dets[dj] {
                 continue;
@@ -509,9 +549,6 @@ impl MultiObjectTrackerRecenteredEnu {
                 self.birth_track(&det);
             }
         }
-
-        // 9. Drop deleted tracks.
-        self.tracks.retain(|t| t.lifecycle != TrackState::Deleted);
     }
 
     fn birth_track(&mut self, detection: &DVector<f64>) {

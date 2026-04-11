@@ -136,6 +136,46 @@ fn recentering_preserves_state_continuity() {
 
 // ── 8.C.6 — Long traverse: recentered ENU vs static ENU ───────────────────
 
+fn count_recenter_events(
+    pre_origins: &[(f64, f64, f64)],
+    tracker: &MultiObjectTrackerRecenteredEnu,
+) -> usize {
+    let mut events = 0;
+    for t in &tracker.tracks {
+        let matched = pre_origins.iter().any(|&(la, lo, _)| {
+            (la - t.origin_lat_rad).abs() < 1e-15 && (lo - t.origin_lon_rad).abs() < 1e-15
+        });
+        if !matched {
+            events += 1;
+        }
+    }
+    events
+}
+
+fn best_re_error(tracker: &MultiObjectTrackerRecenteredEnu, lat: f64, lon: f64) -> f64 {
+    tracker
+        .tracks
+        .iter()
+        .map(|t| {
+            let (la, lo, _) = t.geodetic_position();
+            vincenty_inverse(la, lo, lat, lon).0
+        })
+        .min_by(|a, b| a.total_cmp(b))
+        .unwrap_or(f64::NAN)
+}
+
+fn best_gc_error(tracker: &MultiObjectTrackerGreatCircle, lat: f64, lon: f64) -> f64 {
+    tracker
+        .tracks
+        .iter()
+        .map(|t| {
+            let s = GreatCircleState::from_vector(&t.state);
+            vincenty_inverse(s.lat_rad, s.lon_rad, lat, lon).0
+        })
+        .min_by(|a, b| a.total_cmp(b))
+        .unwrap_or(f64::NAN)
+}
+
 #[test]
 fn recentered_enu_tracks_long_traverse() {
     // Aircraft flies 2000+ km due east at high latitude. A static ENU anchored
@@ -149,7 +189,6 @@ fn recentered_enu_tracks_long_traverse() {
         operating_freq_mhz: 15.0,
     };
 
-    // Start 1500 km north of the transmitter.
     let (start_lat, start_lon) = vincenty_direct(
         reg.transmitter_lat_rad,
         reg.transmitter_lon_rad,
@@ -158,9 +197,9 @@ fn recentered_enu_tracks_long_traverse() {
     );
 
     let speed = 250.0_f64;
-    let heading = std::f64::consts::FRAC_PI_2; // east
+    let heading = std::f64::consts::FRAC_PI_2;
     let dt = 10.0_f64;
-    let n_steps: usize = 900; // 9000 s = 2.5 h => ~2250 km traverse
+    let n_steps: usize = 900;
 
     let mut re_tracker = MultiObjectTrackerRecenteredEnu::new(reg.clone(), 10_000.0);
     re_tracker.gate_threshold = 50.0;
@@ -170,14 +209,11 @@ fn recentered_enu_tracks_long_traverse() {
     };
 
     let mut gc_tracker = MultiObjectTrackerGreatCircle::new(reg.clone(), default_gc_r(), 30.0);
-
     let mut rng_re = StdRng::seed_from_u64(9001);
     let mut rng_gc = StdRng::seed_from_u64(9001);
 
     let (mut lat, mut lon) = (start_lat, start_lon);
     let mut recentered_count = 0usize;
-    let mut final_re_err_m = f64::NAN;
-    let mut final_gc_err_m = f64::NAN;
 
     for k in 0..n_steps {
         let (nl, nlo) = vincenty_direct(lat, lon, heading, speed * dt);
@@ -185,6 +221,7 @@ fn recentered_enu_tracks_long_traverse() {
         lon = nlo;
         let v_east = speed * heading.sin();
         let v_north = speed * heading.cos();
+        let time = k as f64 * dt;
 
         let m_re = othr_from_truth(
             &reg,
@@ -192,7 +229,7 @@ fn recentered_enu_tracks_long_traverse() {
             lon,
             v_east,
             v_north,
-            k as f64 * dt,
+            time,
             15_000.0,
             0.01,
             2.0,
@@ -204,16 +241,7 @@ fn recentered_enu_tracks_long_traverse() {
             .map(|t| (t.origin_lat_rad, t.origin_lon_rad, t.origin_alt_m))
             .collect();
         re_tracker.step(&[m_re], dt);
-        // Count recenters by comparing origins track-by-track where IDs overlap.
-        for t in &re_tracker.tracks {
-            if let Some(pre) = pre_origins.iter().find(|&&(la, lo, _al)| {
-                (la - t.origin_lat_rad).abs() < 1e-15 && (lo - t.origin_lon_rad).abs() < 1e-15
-            }) {
-                let _ = pre;
-            } else {
-                recentered_count += 1;
-            }
-        }
+        recentered_count += count_recenter_events(&pre_origins, &re_tracker);
 
         let m_gc = othr_from_truth(
             &reg,
@@ -221,41 +249,17 @@ fn recentered_enu_tracks_long_traverse() {
             lon,
             v_east,
             v_north,
-            k as f64 * dt,
+            time,
             15_000.0,
             0.01,
             2.0,
             &mut rng_gc,
         );
         gc_tracker.step(&[m_gc], dt);
-
-        if k + 1 == n_steps {
-            if let Some(best) = re_tracker
-                .tracks
-                .iter()
-                .map(|t| {
-                    let (la, lo, _al) = t.geodetic_position();
-                    let (d, _) = vincenty_inverse(la, lo, lat, lon);
-                    d
-                })
-                .min_by(|a, b| a.total_cmp(b))
-            {
-                final_re_err_m = best;
-            }
-            if let Some(best) = gc_tracker
-                .tracks
-                .iter()
-                .map(|t| {
-                    let s = GreatCircleState::from_vector(&t.state);
-                    let (d, _) = vincenty_inverse(s.lat_rad, s.lon_rad, lat, lon);
-                    d
-                })
-                .min_by(|a, b| a.total_cmp(b))
-            {
-                final_gc_err_m = best;
-            }
-        }
     }
+
+    let final_re_err_m = best_re_error(&re_tracker, lat, lon);
+    let final_gc_err_m = best_gc_error(&gc_tracker, lat, lon);
 
     println!("recentered ENU final error (m): {final_re_err_m}");
     println!("great-circle  final error (m): {final_gc_err_m}");
@@ -273,7 +277,6 @@ fn recentered_enu_tracks_long_traverse() {
         final_re_err_m.is_finite() && final_re_err_m < 250_000.0,
         "recentered ENU final error too large: {final_re_err_m} m"
     );
-    // We expect at least one recentering over a ~2250 km traverse.
     assert!(
         recentered_count >= 1,
         "expected at least one recenter over the long traverse, got {recentered_count}"
