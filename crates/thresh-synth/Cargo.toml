@@ -5,6 +5,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+jsbsim = ["pyo3"]
+
 [dependencies]
 thresh-core = { path = "../thresh-core" }
 nalgebra = { workspace = true }
@@ -12,3 +16,4 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 rand = "0.9"
 rand_distr = "0.5"
+pyo3 = { version = "0.24", optional = true }

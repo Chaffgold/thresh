@@ -38,15 +38,15 @@
 
 ## 4. JSBSim Trajectory Bridge (Feature-gated)
 
-- [ ] 4.1 Set up PyO3 bridge to JSBSim, gated behind `jsbsim` feature
-- [ ] 4.2 Implement aircraft initialization: select model (F-16, 737, C172), set initial conditions (position, altitude, speed, heading)
-- [ ] 4.3 Implement waypoint-based autopilot: heading/altitude/speed commands at specified times
-- [ ] 4.4 Implement simulation runner: advance JSBSim in fixed timesteps, extract state (position, velocity, attitude, acceleration)
-- [ ] 4.5 Convert JSBSim geodetic output (lat/lon/alt) to thresh ENU coordinates
-- [ ] 4.6 Implement maneuver library: level turn at specified g-load, climb/descend at specified rate, acceleration/deceleration
-- [ ] 4.7 Export trajectory as thresh `Trajectory` with `Waypoint` structs
-- [ ] 4.8 Write test: F-16 level turn produces correct bank angle and turn radius for 4g turn
-- [ ] 4.9 Write test: 737 climb performance matches published specs within 10%
+- [x] 4.1 Set up PyO3 bridge to JSBSim, gated behind `jsbsim` feature
+- [x] 4.2 Implement aircraft initialization: select model (F-16, 737, C172), set initial conditions (position, altitude, speed, heading)
+- [x] 4.3 Implement waypoint-based autopilot: heading/altitude/speed commands at specified times
+- [x] 4.4 Implement simulation runner: advance JSBSim in fixed timesteps, extract state (position, velocity, attitude, acceleration)
+- [x] 4.5 Convert JSBSim geodetic output (lat/lon/alt) to thresh ENU coordinates
+- [x] 4.6 Implement maneuver library: level turn at specified g-load, climb/descend at specified rate, acceleration/deceleration
+- [x] 4.7 Export trajectory as thresh `Trajectory` with `Waypoint` structs
+- [x] 4.8 Write test: F-16 level turn produces correct bank angle and turn radius for 4g turn
+- [x] 4.9 Write test: 737 climb performance matches published specs within 10%
 
 ## 5. High-Fidelity Orbital Propagation
 
