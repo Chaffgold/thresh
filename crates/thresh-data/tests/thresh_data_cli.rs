@@ -138,7 +138,11 @@ fn list_walks_directory() {
         .arg(dir.path())
         .output()
         .expect("spawn thresh-data");
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("test-synth"));
     assert!(stdout.contains("test-adsb"));
@@ -212,7 +216,11 @@ fn run_synthetic_prints_metrics_and_regression_ok() {
         .arg(&path)
         .output()
         .expect("spawn thresh-data");
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("scenario:"));
     assert!(stdout.contains("MOTA:"));
