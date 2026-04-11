@@ -283,16 +283,27 @@ pub mod cli {
     }
 
     fn parse_f64(flag: &str, value: &str) -> Result<f64, String> {
-        value
+        let parsed: f64 = value
             .parse::<f64>()
-            .map_err(|e| format!("flag `{flag}` expected a number, got `{value}`: {e}"))
+            .map_err(|e| format!("flag `{flag}` expected a number, got `{value}`: {e}"))?;
+        if !parsed.is_finite() {
+            // `parse::<f64>()` happily accepts `NaN`, `inf`, `-inf`; reject
+            // them here so they don't slip past the `> 0.0` guard (NaN
+            // comparisons are always false) and reach the PyPOFacets bridge.
+            return Err(format!(
+                "flag `{flag}` expected a finite number, got `{value}`"
+            ));
+        }
+        Ok(parsed)
     }
 
     /// Return the expected number of RCS samples for a given sweep config.
-    /// Used by the CLI to print a summary after a successful run.
+    /// Used by the CLI to print a summary after a successful run. Counts the
+    /// azimuth samples as `floor(span / step) + 1`, matching a sweep that
+    /// iterates `az = start, start+step, …` while `az <= end`.
     pub fn config_sample_count(config: &RcsSweepConfig) -> usize {
         let span = config.az_end_deg - config.az_start_deg;
-        let n_az = (span / config.az_step_deg).ceil() as usize + 1;
+        let n_az = (span / config.az_step_deg).floor() as usize + 1;
         let n_el = config.el_angles_deg.len().max(1);
         n_az * n_el
     }
@@ -451,6 +462,35 @@ pub mod cli {
         }
 
         #[test]
+        fn nan_numeric_rejected() {
+            // `parse::<f64>()` accepts "NaN"; the parser must reject it
+            // before the `> 0.0` guard (which is always false for NaN).
+            let err = parse_args(&args(&[
+                "--stl", "x.stl", "--freq", "NaN", "--step", "5", "--output", "o.json",
+            ]))
+            .unwrap_err();
+            assert!(err.contains("finite"), "got: {err}");
+        }
+
+        #[test]
+        fn infinity_numeric_rejected() {
+            let err = parse_args(&args(&[
+                "--stl", "x.stl", "--freq", "inf", "--step", "5", "--output", "o.json",
+            ]))
+            .unwrap_err();
+            assert!(err.contains("finite"), "got: {err}");
+        }
+
+        #[test]
+        fn negative_infinity_rejected_on_step() {
+            let err = parse_args(&args(&[
+                "--stl", "x.stl", "--freq", "10", "--step", "-inf", "--output", "o.json",
+            ]))
+            .unwrap_err();
+            assert!(err.contains("finite"), "got: {err}");
+        }
+
+        #[test]
         fn sample_count_azimuth_only() {
             let c = RcsSweepConfig {
                 frequency_ghz: 10.0,
@@ -476,6 +516,22 @@ pub mod cli {
             };
             // 37 azimuths × 3 elevations = 111
             assert_eq!(config_sample_count(&c), 111);
+        }
+
+        #[test]
+        fn sample_count_non_divisible_span() {
+            // Regression: start=0, end=350, step=100 iterates
+            // [0, 100, 200, 300] — 4 samples, not 5. The old
+            // `ceil(span/step) + 1` formula would have returned 5.
+            let c = RcsSweepConfig {
+                frequency_ghz: 10.0,
+                az_start_deg: 0.0,
+                az_end_deg: 350.0,
+                az_step_deg: 100.0,
+                el_angles_deg: vec![0.0],
+                polarization: "VV".into(),
+            };
+            assert_eq!(config_sample_count(&c), 4);
         }
     }
 }
