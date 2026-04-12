@@ -136,6 +136,7 @@ fn describe_source(src: &ScenarioSource) -> String {
         ScenarioSource::Orbital { norad_ids, .. } => {
             format!("Orbital({} satellites)", norad_ids.len())
         }
+        ScenarioSource::NuScenes { version, .. } => format!("NuScenes({version})"),
     }
 }
 
@@ -170,6 +171,7 @@ fn run_manifest(manifest: &ScenarioManifest, manifest_dir: &std::path::Path) -> 
         ScenarioSource::Orbital { norad_ids, .. } => {
             run_orbital_dispatch(manifest, manifest_dir, norad_ids)
         }
+        ScenarioSource::NuScenes { .. } => run_nuscenes_dispatch(manifest, manifest_dir),
     }
 }
 
@@ -219,6 +221,31 @@ fn run_adsb_dispatch(
 ) -> Result<(), String> {
     Err("ADS-B scenarios require the `adsb` feature. \
          Rebuild with `cargo build -p thresh-data --features adsb --bin thresh-data`."
+        .to_string())
+}
+
+/// Dispatch a nuScenes scenario to `run_nuscenes_benchmark` when the
+/// `nuscenes` feature is enabled; otherwise surface a "feature required"
+/// error.
+#[cfg(feature = "nuscenes")]
+fn run_nuscenes_dispatch(
+    manifest: &ScenarioManifest,
+    manifest_dir: &std::path::Path,
+) -> Result<(), String> {
+    let result = thresh_data::benchmark::run_nuscenes_benchmark(manifest, manifest_dir)?;
+    print_result(&result);
+    check_and_report_regression(manifest, &result)
+}
+
+#[cfg(not(feature = "nuscenes"))]
+fn run_nuscenes_dispatch(
+    _manifest: &ScenarioManifest,
+    _manifest_dir: &std::path::Path,
+) -> Result<(), String> {
+    Err("nuScenes scenarios require the `nuscenes` feature. \
+         Rebuild with `cargo build -p thresh-data --features nuscenes --bin thresh-data`. \
+         A Python environment with `nuscenes-devkit` installed plus a local nuScenes \
+         dataset (NUSCENES_DATA_ROOT) is also required at runtime."
         .to_string())
 }
 
@@ -285,6 +312,14 @@ mod tests {
                 time_step_s: None,
             }),
             "Orbital(2 satellites)"
+        );
+        assert_eq!(
+            describe_source(&ScenarioSource::NuScenes {
+                version: "v1.0-mini".into(),
+                dataroot: None,
+                scene_token: None,
+            }),
+            "NuScenes(v1.0-mini)"
         );
     }
 
