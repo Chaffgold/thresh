@@ -1,0 +1,13 @@
+name = "synth-maneuvering"
+description = "4 maneuvering targets with CV/CTRV/CA segments. Tests tracker robustness to motion model mismatch."
+source = "Synthetic"
+
+[parameters]
+scenario_type = "maneuvering"
+duration_s = 30.0
+dt = 1.0
+measurement_noise_sigma = 50.0
+gate_threshold = 500.0
+
+[baselines]
+mota = 0.3
