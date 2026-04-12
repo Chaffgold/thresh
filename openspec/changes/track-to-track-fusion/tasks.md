@@ -25,7 +25,7 @@
 - [x] 4.2 Implement `FederatedFusionManager::fuse()` orchestrating associate -> fuse -> birth for all sites
 - [x] 4.3 Implement naive fusion mode: information filter sum `P_fused^{-1} = P1^{-1} + P2^{-1}` as `fuse_naive`
 - [x] 4.4 Implement `fuse_covariance_intersection` reusing existing CI module for pairwise T2T fusion
-- [ ] 4.5 ~~Implement optimal fusion with cross-covariance bookkeeping (opt-in mode)~~ **Deferred** — requires bookkeeping infrastructure not yet in place
+- [x] 4.5 Implement optimal fusion with cross-covariance bookkeeping (opt-in mode)
 
 ## 5. Lifecycle and output
 

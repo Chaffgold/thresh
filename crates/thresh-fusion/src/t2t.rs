@@ -384,10 +384,9 @@ impl FederatedFusionManager {
                         fuse_covariance_intersection(&fused[fi], &incoming[ii])
                     }
                     FusionMode::OptimalWithCrossCovariance => {
-                        if let Some(p12) = self.get_cross_covariance(
-                            fused[fi].track_id,
-                            incoming[ii].track_id,
-                        ) {
+                        if let Some(p12) =
+                            self.get_cross_covariance(fused[fi].track_id, incoming[ii].track_id)
+                        {
                             let p12 = p12.clone();
                             fuse_optimal(&fused[fi], &incoming[ii], &p12).unwrap_or_else(|| {
                                 fuse_covariance_intersection(&fused[fi], &incoming[ii])
@@ -1069,8 +1068,7 @@ mod tests {
 
     #[test]
     fn test_manager_optimal_mode_with_cross_cov() {
-        let mut mgr_opt =
-            FederatedFusionManager::with_mode(FusionMode::OptimalWithCrossCovariance);
+        let mut mgr_opt = FederatedFusionManager::with_mode(FusionMode::OptimalWithCrossCovariance);
         let mut mgr_ci = FederatedFusionManager::with_mode(FusionMode::CovarianceIntersection);
 
         let tracks_a = vec![make_track(1, 1, &[10.0, 20.0], &[4.0, 9.0])];
