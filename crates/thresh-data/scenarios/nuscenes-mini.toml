@@ -1,0 +1,29 @@
+name = "nuscenes-mini"
+description = "Single-scene nuScenes mini-split benchmark. Exercises the nuScenes PyO3 bridge, the Dataset-trait adapter, the 3-D annotation → ground-truth extraction, and the tracker's multi-target association on real autonomous-driving data. Requires `--features nuscenes` plus a local nuScenes v1.0-mini download; dataroot is read from the NUSCENES_DATA_ROOT environment variable so the manifest stays portable across developer machines."
+
+[source.NuScenes]
+version = "v1.0-mini"
+# `dataroot` and `scene_token` are intentionally omitted — `dataroot`
+# comes from NUSCENES_DATA_ROOT and the runner picks the first scene in
+# the split by default.
+
+[parameters]
+# nuScenes keyframes are ~0.5 s apart; the runner uses the actual
+# inter-sample delta rather than this field, but we still set it as a
+# reasonable fallback for the very first step.
+duration_s = 20.0
+dt = 0.5
+# Annotation centroids are in metres in the global frame, so noise sigma
+# is also in metres.
+measurement_noise_sigma = 1.0
+gate_threshold = 50.0
+
+[baselines]
+# Permissive floor — the point of this scenario is to catch regressions
+# in the nuScenes PyO3 bridge, the annotation → ground-truth extraction,
+# and the multi-target association path. The CV Kalman with 1 m noise
+# handles nuScenes scenes reasonably but the M-of-N confirmation window
+# and the short scene lengths mean MOTA is unpredictable scene-to-scene;
+# a tight floor would flake on which scene happens to be first in the
+# split.
+mota = -2.0
