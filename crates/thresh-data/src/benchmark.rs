@@ -1042,6 +1042,34 @@ mod tests {
 
     #[cfg(feature = "adsb")]
     #[test]
+    fn run_adsb_benchmark_runs_committed_single_flight_fixture() {
+        // Runs the real `adsb-single-flight.json` fixture through the
+        // library-level runner (not just the CLI subprocess test) so
+        // coverage of the long tracker-step loop, `extract_ground_truth`
+        // interpolation, and the per-step bin / filter / collect paths
+        // is attributed directly to `benchmark.rs` rather than to the
+        // `tests/thresh_data_cli.rs` integration harness.
+        let scenarios = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scenarios");
+        let manifest_path = scenarios.join("adsb-single-flight.toml");
+        assert!(manifest_path.exists(), "fixture missing");
+        let manifest = load_scenario(&manifest_path).expect("load manifest");
+        let result = run_adsb_benchmark(&manifest, &scenarios).expect("run_adsb_benchmark");
+        assert_eq!(result.scenario, "adsb-single-flight");
+    }
+
+    #[cfg(feature = "adsb")]
+    #[test]
+    fn run_adsb_benchmark_runs_committed_tracon_fixture() {
+        let scenarios = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scenarios");
+        let manifest_path = scenarios.join("adsb-tracon.toml");
+        assert!(manifest_path.exists(), "fixture missing");
+        let manifest = load_scenario(&manifest_path).expect("load manifest");
+        let result = run_adsb_benchmark(&manifest, &scenarios).expect("run_adsb_benchmark");
+        assert_eq!(result.scenario, "adsb-tracon");
+    }
+
+    #[cfg(feature = "adsb")]
+    #[test]
     fn run_adsb_benchmark_runs_on_valid_fixture() {
         // Minimal valid fixture: 3 samples of 1 aircraft descending
         // into JFK over 3 seconds. Just enough to exercise the happy
