@@ -66,3 +66,34 @@ jobs:
       - run: openspec validate --all --strict --no-interactive
         env:
           OPENSPEC_TELEMETRY: '0'
+
+  synth-benchmark-gate:
+    # Runs every synthetic benchmark scenario through `thresh-data run` and
+    # fails the build if any scenario's regression check (MOTA / HOTA / IDF1
+    # baselines) does not pass. This is the cheap in-repo equivalent of the
+    # full benchmarks workflow — no network, no long-running integration
+    # tests, just the baseline regression gate for the scenarios checked
+    # into `crates/thresh-data/scenarios/`.
+    name: Synthetic benchmark gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build thresh-data CLI
+        run: cargo build -p thresh-data --bin thresh-data
+      - name: Run all synthetic scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          any=0
+          for toml in crates/thresh-data/scenarios/synth-*.toml; do
+            any=1
+            echo "=== $toml ==="
+            ./target/debug/thresh-data run "$toml"
+          done
+          if [ "$any" -eq 0 ]; then
+            echo "no synth-*.toml scenarios found under crates/thresh-data/scenarios/" >&2
+            exit 1
+          fi
