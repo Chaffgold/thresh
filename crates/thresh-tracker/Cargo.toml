@@ -7,6 +7,7 @@ license.workspace = true
 
 [features]
 parallel = ["rayon"]
+streaming = ["tokio"]
 
 [dependencies]
 thresh-core = { path = "../thresh-core" }
@@ -16,6 +17,7 @@ thresh-fusion = { path = "../thresh-fusion" }
 nalgebra = { workspace = true }
 serde = { workspace = true }
 rayon = { version = "1.10", optional = true }
+tokio = { version = "1", features = ["sync", "time", "rt"], optional = true }
 
 [dev-dependencies]
 thresh-synth = { path = "../thresh-synth" }
@@ -25,6 +27,7 @@ nalgebra = { workspace = true }
 rand = "0.9"
 rand_distr = "0.5"
 serde_json = { workspace = true }
+tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
 
 [[bench]]
 name = "tracker_step"
