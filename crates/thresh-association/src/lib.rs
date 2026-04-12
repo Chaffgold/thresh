@@ -4,3 +4,5 @@ pub mod cost;
 pub mod gating;
 pub mod hungarian;
 pub mod iou;
+pub mod jpda;
+pub mod mht;
