@@ -6,7 +6,10 @@
 //! - [`t2t_association`] — augmented-state Mahalanobis + Hungarian matching
 //! - [`fuse_naive`] — inverse-covariance-weighted average (assumes independence)
 //! - [`fuse_covariance_intersection`] — CI fusion (safe when cross-covariances unknown)
+//! - [`fuse_optimal`] — optimal fusion with known cross-covariance P₁₂
 //! - [`FederatedFusionManager`] — multi-site fusion orchestrator
+
+use std::collections::HashMap;
 
 use nalgebra::{DMatrix, DVector};
 use thresh_association::hungarian::{AssignmentResult, hungarian_assignment};
@@ -22,6 +25,11 @@ pub enum FusionMode {
     Naive,
     /// Covariance Intersection (safe when cross-covariances are unknown).
     CovarianceIntersection,
+    /// Optimal fusion using explicit cross-covariance P₁₂.
+    ///
+    /// Falls back to CI when cross-covariance is not available for a pair
+    /// or when the innovation matrix S is singular.
+    OptimalWithCrossCovariance,
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +229,39 @@ pub fn fuse_naive(a: &TrackExchange, b: &TrackExchange) -> TrackExchange {
     }
 }
 
+/// Optimal fusion of two track estimates using a known cross-covariance P₁₂.
+///
+/// Uses the Bar-Shalom distributed fusion formula:
+/// ```text
+/// S   = P₁ + P₂ - P₁₂ - P₁₂ᵀ
+/// K   = (P₁ - P₁₂) S⁻¹
+/// x_f = x₁ + K (x₂ - x₁)
+/// P_f = P₁ - K (P₁ - P₁₂)ᵀ
+/// ```
+///
+/// Returns `None` if S is singular, in which case the caller should fall back
+/// to covariance intersection.
+pub fn fuse_optimal(
+    a: &TrackExchange,
+    b: &TrackExchange,
+    p12: &DMatrix<f64>,
+) -> Option<TrackExchange> {
+    let s = &a.covariance + &b.covariance - p12 - p12.transpose();
+    let s_inv = s.try_inverse()?;
+    let p1_minus_p12 = &a.covariance - p12;
+    let k = &p1_minus_p12 * &s_inv;
+    let x_fused = &a.state + &k * (&b.state - &a.state);
+    let p_fused = &a.covariance - &k * p1_minus_p12.transpose();
+
+    Some(TrackExchange {
+        track_id: a.track_id,
+        state: x_fused,
+        covariance: p_fused,
+        timestamp: a.timestamp.max(b.timestamp),
+        source_id: 0,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Federated fusion manager
 // ---------------------------------------------------------------------------
@@ -239,6 +280,9 @@ pub struct FederatedFusionManager {
     /// Optional timeout (seconds): fused tracks older than
     /// `latest_time - timeout` are pruned after each `fuse()` call.
     pub fused_track_timeout_s: Option<f64>,
+    /// Known cross-covariances between track pairs, keyed by
+    /// `(track_a_id, track_b_id)` where `track_a_id < track_b_id`.
+    cross_covariances: HashMap<(u64, u64), DMatrix<f64>>,
 }
 
 impl FederatedFusionManager {
@@ -249,6 +293,7 @@ impl FederatedFusionManager {
             mode: FusionMode::CovarianceIntersection,
             fused_tracks: Vec::new(),
             fused_track_timeout_s: None,
+            cross_covariances: HashMap::new(),
         }
     }
 
@@ -259,7 +304,29 @@ impl FederatedFusionManager {
             mode,
             fused_tracks: Vec::new(),
             fused_track_timeout_s: None,
+            cross_covariances: HashMap::new(),
         }
+    }
+
+    /// Store a cross-covariance matrix between two tracks identified by
+    /// their track IDs. The key is stored with the smaller ID first.
+    pub fn set_cross_covariance(&mut self, track_a_id: u64, track_b_id: u64, p12: DMatrix<f64>) {
+        let key = if track_a_id <= track_b_id {
+            (track_a_id, track_b_id)
+        } else {
+            (track_b_id, track_a_id)
+        };
+        self.cross_covariances.insert(key, p12);
+    }
+
+    /// Look up a stored cross-covariance between two track IDs.
+    fn get_cross_covariance(&self, id_a: u64, id_b: u64) -> Option<&DMatrix<f64>> {
+        let key = if id_a <= id_b {
+            (id_a, id_b)
+        } else {
+            (id_b, id_a)
+        };
+        self.cross_covariances.get(&key)
     }
 
     /// Return a reference to the persistent fused track state.
@@ -315,6 +382,18 @@ impl FederatedFusionManager {
                     FusionMode::Naive => fuse_naive(&fused[fi], &incoming[ii]),
                     FusionMode::CovarianceIntersection => {
                         fuse_covariance_intersection(&fused[fi], &incoming[ii])
+                    }
+                    FusionMode::OptimalWithCrossCovariance => {
+                        if let Some(p12) =
+                            self.get_cross_covariance(fused[fi].track_id, incoming[ii].track_id)
+                        {
+                            let p12 = p12.clone();
+                            fuse_optimal(&fused[fi], &incoming[ii], &p12).unwrap_or_else(|| {
+                                fuse_covariance_intersection(&fused[fi], &incoming[ii])
+                            })
+                        } else {
+                            fuse_covariance_intersection(&fused[fi], &incoming[ii])
+                        }
                     }
                 };
                 new_fused.push(fused_pair);
@@ -935,5 +1014,94 @@ mod tests {
                 fused[0].timestamp
             );
         }
+    }
+
+    // -- Task 4.5: optimal fusion with cross-covariance -------------------------
+
+    #[test]
+    fn test_fuse_optimal_known_cross_cov() {
+        let a = make_track(1, 1, &[10.0, 20.0], &[4.0, 9.0]);
+        let b = make_track(2, 2, &[12.0, 18.0], &[5.0, 8.0]);
+
+        // Moderate positive cross-covariance (correlated errors)
+        let p12 = DMatrix::from_diagonal(&DVector::from_column_slice(&[1.5, 2.0]));
+
+        let fused_opt = fuse_optimal(&a, &b, &p12).expect("S should be invertible");
+
+        // Fused state should lie between the two inputs (component-wise)
+        for i in 0..2 {
+            let lo = a.state[i].min(b.state[i]);
+            let hi = a.state[i].max(b.state[i]);
+            assert!(
+                fused_opt.state[i] >= lo - 1e-6 && fused_opt.state[i] <= hi + 1e-6,
+                "fused state[{i}] = {} not between {} and {}",
+                fused_opt.state[i],
+                lo,
+                hi,
+            );
+        }
+
+        // Fused covariance should be tighter than CI
+        let fused_ci = fuse_covariance_intersection(&a, &b);
+        let tr_opt = fused_opt.covariance.trace();
+        let tr_ci = fused_ci.covariance.trace();
+        assert!(
+            tr_opt < tr_ci + 1e-6,
+            "optimal trace {tr_opt} should be <= CI trace {tr_ci}"
+        );
+    }
+
+    #[test]
+    fn test_fuse_optimal_falls_back_to_ci() {
+        let a = make_track(1, 1, &[10.0, 20.0], &[4.0, 4.0]);
+        let b = make_track(2, 2, &[12.0, 18.0], &[4.0, 4.0]);
+
+        // P12 = (P1 + P2) / 2 makes S = P1 + P2 - P12 - P12' = 0 (singular)
+        let p12 = (&a.covariance + &b.covariance) / 2.0;
+
+        let result = fuse_optimal(&a, &b, &p12);
+        assert!(result.is_none(), "should return None when S is singular");
+
+        // Verify CI still works as fallback (no panic)
+        let _ci = fuse_covariance_intersection(&a, &b);
+    }
+
+    #[test]
+    fn test_manager_optimal_mode_with_cross_cov() {
+        let mut mgr_opt = FederatedFusionManager::with_mode(FusionMode::OptimalWithCrossCovariance);
+        let mut mgr_ci = FederatedFusionManager::with_mode(FusionMode::CovarianceIntersection);
+
+        let tracks_a = vec![make_track(1, 1, &[10.0, 20.0], &[4.0, 9.0])];
+        let tracks_b = vec![make_track(10, 2, &[12.0, 18.0], &[5.0, 8.0])];
+
+        // Set cross-covariance for the optimal manager
+        let p12 = DMatrix::from_diagonal(&DVector::from_column_slice(&[1.5, 2.0]));
+        mgr_opt.set_cross_covariance(1, 10, p12);
+
+        mgr_opt.submit_tracks(1, tracks_a.clone());
+        mgr_opt.submit_tracks(2, tracks_b.clone());
+        mgr_ci.submit_tracks(1, tracks_a);
+        mgr_ci.submit_tracks(2, tracks_b);
+
+        let fused_opt = mgr_opt.fuse(50.0);
+        let fused_ci = mgr_ci.fuse(50.0);
+
+        assert_eq!(fused_opt.len(), 1);
+        assert_eq!(fused_ci.len(), 1);
+
+        // Optimal fusion with known cross-covariance should be tighter than CI
+        let tr_opt = fused_opt[0].covariance.trace();
+        let tr_ci = fused_ci[0].covariance.trace();
+        assert!(
+            tr_opt < tr_ci + 1e-6,
+            "optimal trace {tr_opt} should be <= CI trace {tr_ci}"
+        );
+
+        // Results should differ (optimal uses the cross-covariance info)
+        let state_diff = (&fused_opt[0].state - &fused_ci[0].state).norm();
+        assert!(
+            state_diff > 1e-8 || (tr_opt - tr_ci).abs() > 1e-8,
+            "optimal and CI should produce different results"
+        );
     }
 }
