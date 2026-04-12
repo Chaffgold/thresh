@@ -200,6 +200,57 @@ pub struct BenchmarkResult {
 }
 
 // ---------------------------------------------------------------------------
+// Shared runner helpers (§7.3 / §7.5 / §7.7)
+// ---------------------------------------------------------------------------
+
+/// Collect the current confirmed-track positions out of a
+/// `MultiObjectTracker` in the `(id, [x, y, z])` shape expected by
+/// `FrameData`. Factoring this out lets every feature-gated runner
+/// share the same filter / project / collect logic without each one
+/// open-coding it.
+pub(crate) fn collect_confirmed_track_positions(
+    tracker: &MultiObjectTracker,
+) -> Vec<(u64, [f64; 3])> {
+    tracker
+        .tracks
+        .iter()
+        .filter(|t| t.lifecycle == thresh_core::track::TrackState::Confirmed)
+        .map(|t| (t.id.0, [t.state[0], t.state[2], t.state[4]]))
+        .collect()
+}
+
+/// Compute the final MOT metric set from a collected `FrameData`
+/// sequence and package everything into a [`BenchmarkResult`]. All
+/// benchmark runners (synthetic / ADS-B / orbital / nuScenes) converge
+/// on this path once their step loops finish — it centralises the
+/// MOTA / MOTP / IDF1 / HOTA calls, the `duration_ms` stopwatch
+/// reading, and the `BenchmarkResult` assembly.
+///
+/// `dist_threshold` is the matcher distance threshold in metres.
+/// Callers pick a value appropriate for their scenario regime
+/// (nuScenes uses metres at ~1 m noise, orbital uses kilometres at
+/// ~1 km noise, and so on).
+pub(crate) fn build_benchmark_result(
+    scenario_name: &str,
+    frame_data_vec: &[FrameData],
+    dist_threshold: f64,
+    start: Instant,
+) -> BenchmarkResult {
+    let (mota, motp, id_switches) = compute_mot_metrics(frame_data_vec, dist_threshold);
+    let idf1 = compute_idf1(frame_data_vec, dist_threshold);
+    let (hota, _, _) = compute_hota_at_threshold(frame_data_vec, dist_threshold);
+    BenchmarkResult {
+        scenario: scenario_name.to_string(),
+        mota,
+        motp,
+        idf1,
+        hota,
+        id_switches,
+        duration_ms: start.elapsed().as_millis() as u64,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Runner
 // ---------------------------------------------------------------------------
 
@@ -280,39 +331,18 @@ pub fn run_synthetic_benchmark(manifest: &ScenarioManifest) -> BenchmarkResult {
             })
             .unwrap_or_default();
 
-        let track_positions: Vec<(u64, [f64; 3])> = tracker
-            .tracks
-            .iter()
-            .filter(|t| t.lifecycle == thresh_core::track::TrackState::Confirmed)
-            .map(|t| {
-                let pos = [t.state[0], t.state[2], t.state[4]];
-                (t.id.0, pos)
-            })
-            .collect();
-
         frame_data_vec.push(FrameData {
             gt: gt_positions,
-            tracks: track_positions,
+            tracks: collect_confirmed_track_positions(&tracker),
         });
     }
 
-    // --- Compute metrics ---
-    let dist_threshold = params.measurement_noise_sigma * 5.0;
-    let (mota, motp, id_switches) = compute_mot_metrics(&frame_data_vec, dist_threshold);
-    let idf1 = compute_idf1(&frame_data_vec, dist_threshold);
-    let (hota, _, _) = compute_hota_at_threshold(&frame_data_vec, dist_threshold);
-
-    let duration_ms = start.elapsed().as_millis() as u64;
-
-    BenchmarkResult {
-        scenario: manifest.name.clone(),
-        mota,
-        motp,
-        idf1,
-        hota,
-        id_switches,
-        duration_ms,
-    }
+    build_benchmark_result(
+        &manifest.name,
+        &frame_data_vec,
+        params.measurement_noise_sigma * 5.0,
+        start,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -604,16 +634,9 @@ pub fn run_orbital_benchmark(
 
         tracker.step(&detections, step_s);
 
-        let track_positions: Vec<(u64, [f64; 3])> = tracker
-            .tracks
-            .iter()
-            .filter(|t| t.lifecycle == thresh_core::track::TrackState::Confirmed)
-            .map(|t| (t.id.0, [t.state[0], t.state[2], t.state[4]]))
-            .collect();
-
         frame_data_vec.push(FrameData {
             gt: gt_positions,
-            tracks: track_positions,
+            tracks: collect_confirmed_track_positions(&tracker),
         });
     }
 
@@ -629,19 +652,12 @@ pub fn run_orbital_benchmark(
         total_gt,
         total_tracks,
     );
-    let (mota, motp, id_switches) = compute_mot_metrics(&frame_data_vec, dist_threshold);
-    let idf1 = compute_idf1(&frame_data_vec, dist_threshold);
-    let (hota, _, _) = compute_hota_at_threshold(&frame_data_vec, dist_threshold);
-
-    Ok(BenchmarkResult {
-        scenario: manifest.name.clone(),
-        mota,
-        motp,
-        idf1,
-        hota,
-        id_switches,
-        duration_ms: start.elapsed().as_millis() as u64,
-    })
+    Ok(build_benchmark_result(
+        &manifest.name,
+        &frame_data_vec,
+        dist_threshold,
+        start,
+    ))
 }
 
 /// Fetch TLEs for the given NORAD IDs via HTTP, trying CelesTrak first
@@ -847,16 +863,9 @@ pub fn run_adsb_benchmark(
         tracker.step(&dets, params.dt);
 
         let gt_positions: Vec<(u64, [f64; 3])> = gt_by_step.remove(&step).unwrap_or_default();
-        let track_positions: Vec<(u64, [f64; 3])> = tracker
-            .tracks
-            .iter()
-            .filter(|t| t.lifecycle == thresh_core::track::TrackState::Confirmed)
-            .map(|t| (t.id.0, [t.state[0], t.state[2], t.state[4]]))
-            .collect();
-
         frame_data_vec.push(FrameData {
             gt: gt_positions,
-            tracks: track_positions,
+            tracks: collect_confirmed_track_positions(&tracker),
         });
     }
 
@@ -870,20 +879,12 @@ pub fn run_adsb_benchmark(
         total_tracks,
     );
 
-    let dist_threshold = (params.measurement_noise_sigma * 10.0).max(500.0);
-    let (mota, motp, id_switches) = compute_mot_metrics(&frame_data_vec, dist_threshold);
-    let idf1 = compute_idf1(&frame_data_vec, dist_threshold);
-    let (hota, _, _) = compute_hota_at_threshold(&frame_data_vec, dist_threshold);
-
-    Ok(BenchmarkResult {
-        scenario: manifest.name.clone(),
-        mota,
-        motp,
-        idf1,
-        hota,
-        id_switches,
-        duration_ms: start.elapsed().as_millis() as u64,
-    })
+    Ok(build_benchmark_result(
+        &manifest.name,
+        &frame_data_vec,
+        (params.measurement_noise_sigma * 10.0).max(500.0),
+        start,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -1028,18 +1029,13 @@ pub fn run_nuscenes_benchmark(
 
         tracker.step(&detections, dt);
 
-        let tracks: Vec<(u64, [f64; 3])> = tracker
-            .tracks
-            .iter()
-            .filter(|t| t.lifecycle == thresh_core::track::TrackState::Confirmed)
-            .map(|t| (t.id.0, [t.state[0], t.state[2], t.state[4]]))
-            .collect();
-
-        frame_data_vec.push(FrameData { gt, tracks });
+        frame_data_vec.push(FrameData {
+            gt,
+            tracks: collect_confirmed_track_positions(&tracker),
+        });
     }
 
     // ---- 3. Metrics ----
-    let dist_threshold = (params.measurement_noise_sigma * 10.0).max(5.0);
     let total_gt: usize = frame_data_vec.iter().map(|f| f.gt.len()).sum();
     let total_tracks: usize = frame_data_vec.iter().map(|f| f.tracks.len()).sum();
     eprintln!(
@@ -1049,19 +1045,12 @@ pub fn run_nuscenes_benchmark(
         total_tracks,
     );
 
-    let (mota, motp, id_switches) = compute_mot_metrics(&frame_data_vec, dist_threshold);
-    let idf1 = compute_idf1(&frame_data_vec, dist_threshold);
-    let (hota, _, _) = compute_hota_at_threshold(&frame_data_vec, dist_threshold);
-
-    Ok(BenchmarkResult {
-        scenario: manifest.name.clone(),
-        mota,
-        motp,
-        idf1,
-        hota,
-        id_switches,
-        duration_ms: start.elapsed().as_millis() as u64,
-    })
+    Ok(build_benchmark_result(
+        &manifest.name,
+        &frame_data_vec,
+        (params.measurement_noise_sigma * 10.0).max(5.0),
+        start,
+    ))
 }
 
 #[cfg(test)]
@@ -1371,6 +1360,78 @@ mod tests {
     }
 
     // ---- nuScenes runner (§7.7) ----
+
+    // ---- Shared runner helpers ----
+
+    #[test]
+    fn collect_confirmed_track_positions_empty_when_no_confirmed() {
+        // A fresh tracker has no tracks at all — the helper should
+        // return an empty vec without panicking.
+        let tracker = MultiObjectTracker::new_cv_position(10.0, 100.0);
+        let positions = collect_confirmed_track_positions(&tracker);
+        assert!(positions.is_empty());
+    }
+
+    #[test]
+    fn collect_confirmed_track_positions_matches_confirmed_tracks() {
+        // Step the tracker enough times with a single consistent
+        // detection to confirm a track, then assert the helper returns
+        // exactly one entry at roughly the detection position. This
+        // exercises the filter + project + collect path end-to-end
+        // without touching any feature-gated runner.
+        let mut tracker = MultiObjectTracker::new_cv_position(10.0, 500.0);
+        for _ in 0..6 {
+            let det = DVector::from_column_slice(&[100.0, 200.0, 50.0]);
+            tracker.step(&[det], 1.0);
+        }
+        let positions = collect_confirmed_track_positions(&tracker);
+        assert!(
+            !positions.is_empty(),
+            "tracker should have confirmed at least one track after 6 consistent detections"
+        );
+        let (_, pos) = positions[0];
+        assert!((pos[0] - 100.0).abs() < 50.0);
+        assert!((pos[1] - 200.0).abs() < 50.0);
+        assert!((pos[2] - 50.0).abs() < 50.0);
+    }
+
+    #[test]
+    fn build_benchmark_result_wraps_metrics() {
+        // Empty frame vec: all MOT metrics default to 0 / 0 / etc.
+        // The helper must still produce a well-formed BenchmarkResult
+        // with the supplied scenario name and a non-negative duration.
+        let start = Instant::now();
+        let frames: Vec<FrameData> = Vec::new();
+        let result = build_benchmark_result("unit-test", &frames, 1.0, start);
+        assert_eq!(result.scenario, "unit-test");
+        assert_eq!(result.id_switches, 0);
+    }
+
+    #[test]
+    fn build_benchmark_result_populates_metrics_on_nonempty_frames() {
+        // Hand-build a two-frame scenario where the tracker matches GT
+        // exactly, so MOTA = 1. Exercises the compute_mot_metrics +
+        // compute_idf1 + compute_hota_at_threshold branches inside
+        // build_benchmark_result without needing a full runner.
+        let frames = vec![
+            FrameData {
+                gt: vec![(1, [0.0, 0.0, 0.0])],
+                tracks: vec![(1, [0.1, 0.0, 0.0])],
+            },
+            FrameData {
+                gt: vec![(1, [1.0, 0.0, 0.0])],
+                tracks: vec![(1, [1.05, 0.0, 0.0])],
+            },
+        ];
+        let start = Instant::now();
+        let result = build_benchmark_result("perfect-match", &frames, 2.0, start);
+        assert_eq!(result.scenario, "perfect-match");
+        assert!(
+            result.mota > 0.99,
+            "expected near-perfect MOTA, got {}",
+            result.mota
+        );
+    }
 
     #[test]
     fn nuscenes_source_defaults_fill_in_version() {
