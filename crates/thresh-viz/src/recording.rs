@@ -109,7 +109,91 @@ impl Recording {
     }
 }
 
+/// Summary metrics for a recording, useful for analysis without replaying.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RecordingSummary {
+    /// Total number of frames.
+    pub frame_count: usize,
+    /// Duration in seconds.
+    pub duration: f64,
+    /// Maximum number of simultaneous tracks.
+    pub max_track_count: usize,
+    /// Total unique track IDs seen across all frames.
+    pub unique_track_ids: usize,
+    /// Total detections across all frames.
+    pub total_detections: usize,
+}
+
+impl Recording {
+    /// Compute a summary of this recording.
+    pub fn summary(&self) -> RecordingSummary {
+        let mut unique_ids = std::collections::HashSet::new();
+        let mut max_tracks = 0usize;
+        let mut total_dets = 0usize;
+
+        for frame in &self.frames {
+            max_tracks = max_tracks.max(frame.tracks.len());
+            total_dets += frame.detections.len();
+            for t in &frame.tracks {
+                unique_ids.insert(t.id);
+            }
+        }
+
+        RecordingSummary {
+            frame_count: self.frames.len(),
+            duration: self.duration(),
+            max_track_count: max_tracks,
+            unique_track_ids: unique_ids.len(),
+            total_detections: total_dets,
+        }
+    }
+
+    /// Get a sub-range of frames by index (clamped to bounds).
+    pub fn slice(&self, start: usize, end: usize) -> Vec<&VizFrame> {
+        let start = start.min(self.frames.len());
+        let end = end.min(self.frames.len());
+        self.frames[start..end].iter().collect()
+    }
+
+    /// Find the frame closest to the given timestamp.
+    pub fn frame_at_time(&self, timestamp: f64) -> Option<&VizFrame> {
+        self.frames.iter().min_by(|a, b| {
+            (a.timestamp - timestamp)
+                .abs()
+                .partial_cmp(&(b.timestamp - timestamp).abs())
+                .unwrap()
+        })
+    }
+}
+
 impl VizFrame {
+    /// Create a frame from raw data without a tracker reference.
+    ///
+    /// Useful for building frames from external data sources or for testing.
+    pub fn from_raw(
+        timestamp: f64,
+        tracks: Vec<VizTrack>,
+        detections: Vec<VizDetection>,
+        ground_truth: Vec<VizGroundTruth>,
+    ) -> Self {
+        Self {
+            timestamp,
+            tracks,
+            detections,
+            ground_truth,
+        }
+    }
+
+    /// Number of confirmed tracks in this frame.
+    pub fn confirmed_track_count(&self) -> usize {
+        self.tracks.iter().filter(|t| t.is_confirmed).count()
+    }
+
+    /// Number of tentative (unconfirmed) tracks in this frame.
+    pub fn tentative_track_count(&self) -> usize {
+        self.tracks.iter().filter(|t| !t.is_confirmed).count()
+    }
+
     /// Build a [`VizFrame`] from the current tracker state.
     ///
     /// `detections` are the raw measurement vectors (3D position each).
@@ -291,6 +375,198 @@ mod tests {
         let t = &frame.tracks[0];
         assert!((t.position[0] - 100.0).abs() < 50.0);
         assert!((t.position[1] - 200.0).abs() < 50.0);
+    }
+
+    #[test]
+    fn test_viz_frame_from_raw() {
+        let frame = VizFrame::from_raw(
+            1.5,
+            vec![VizTrack {
+                id: 1,
+                position: [1.0, 2.0, 3.0],
+                velocity: [0.0; 3],
+                covariance_diag: [1.0; 6],
+                is_confirmed: true,
+                class_label: None,
+            }],
+            vec![VizDetection {
+                position: [1.0, 2.0, 3.0],
+                sensor_id: 0,
+            }],
+            Vec::new(),
+        );
+        assert_eq!(frame.timestamp, 1.5);
+        assert_eq!(frame.tracks.len(), 1);
+        assert_eq!(frame.detections.len(), 1);
+        assert!(frame.ground_truth.is_empty());
+    }
+
+    #[test]
+    fn test_viz_frame_track_counts() {
+        let frame = VizFrame::from_raw(
+            0.0,
+            vec![
+                VizTrack {
+                    id: 1,
+                    position: [0.0; 3],
+                    velocity: [0.0; 3],
+                    covariance_diag: [1.0; 6],
+                    is_confirmed: true,
+                    class_label: None,
+                },
+                VizTrack {
+                    id: 2,
+                    position: [0.0; 3],
+                    velocity: [0.0; 3],
+                    covariance_diag: [1.0; 6],
+                    is_confirmed: false,
+                    class_label: None,
+                },
+                VizTrack {
+                    id: 3,
+                    position: [0.0; 3],
+                    velocity: [0.0; 3],
+                    covariance_diag: [1.0; 6],
+                    is_confirmed: true,
+                    class_label: None,
+                },
+            ],
+            Vec::new(),
+            Vec::new(),
+        );
+        assert_eq!(frame.confirmed_track_count(), 2);
+        assert_eq!(frame.tentative_track_count(), 1);
+    }
+
+    #[test]
+    fn test_recording_summary() {
+        let mut rec = Recording::new("summary-test");
+        // Frame 0: 2 tracks, 3 detections
+        rec.push_frame(VizFrame::from_raw(
+            0.0,
+            vec![
+                VizTrack {
+                    id: 1,
+                    position: [0.0; 3],
+                    velocity: [0.0; 3],
+                    covariance_diag: [1.0; 6],
+                    is_confirmed: true,
+                    class_label: None,
+                },
+                VizTrack {
+                    id: 2,
+                    position: [0.0; 3],
+                    velocity: [0.0; 3],
+                    covariance_diag: [1.0; 6],
+                    is_confirmed: true,
+                    class_label: None,
+                },
+            ],
+            vec![
+                VizDetection {
+                    position: [0.0; 3],
+                    sensor_id: 0,
+                },
+                VizDetection {
+                    position: [1.0; 3],
+                    sensor_id: 0,
+                },
+                VizDetection {
+                    position: [2.0; 3],
+                    sensor_id: 0,
+                },
+            ],
+            Vec::new(),
+        ));
+        // Frame 1: 3 tracks (one new), 1 detection
+        rec.push_frame(VizFrame::from_raw(
+            1.0,
+            vec![
+                VizTrack {
+                    id: 1,
+                    position: [0.0; 3],
+                    velocity: [0.0; 3],
+                    covariance_diag: [1.0; 6],
+                    is_confirmed: true,
+                    class_label: None,
+                },
+                VizTrack {
+                    id: 2,
+                    position: [0.0; 3],
+                    velocity: [0.0; 3],
+                    covariance_diag: [1.0; 6],
+                    is_confirmed: true,
+                    class_label: None,
+                },
+                VizTrack {
+                    id: 3,
+                    position: [0.0; 3],
+                    velocity: [0.0; 3],
+                    covariance_diag: [1.0; 6],
+                    is_confirmed: true,
+                    class_label: None,
+                },
+            ],
+            vec![VizDetection {
+                position: [0.0; 3],
+                sensor_id: 0,
+            }],
+            Vec::new(),
+        ));
+
+        let summary = rec.summary();
+        assert_eq!(summary.frame_count, 2);
+        assert!((summary.duration - 1.0).abs() < 1e-10);
+        assert_eq!(summary.max_track_count, 3);
+        assert_eq!(summary.unique_track_ids, 3);
+        assert_eq!(summary.total_detections, 4);
+    }
+
+    #[test]
+    fn test_recording_slice() {
+        let mut rec = Recording::new("slice-test");
+        for i in 0..10 {
+            rec.push_frame(make_frame(i as f64));
+        }
+        let slice = rec.slice(2, 5);
+        assert_eq!(slice.len(), 3);
+        assert!((slice[0].timestamp - 2.0).abs() < 1e-10);
+        assert!((slice[2].timestamp - 4.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_recording_slice_clamped() {
+        let mut rec = Recording::new("slice-clamp");
+        for i in 0..5 {
+            rec.push_frame(make_frame(i as f64));
+        }
+        let slice = rec.slice(3, 100);
+        assert_eq!(slice.len(), 2);
+    }
+
+    #[test]
+    fn test_recording_frame_at_time() {
+        let mut rec = Recording::new("frame-at-time");
+        for i in 0..5 {
+            rec.push_frame(make_frame(i as f64 * 0.5));
+        }
+        let frame = rec.frame_at_time(0.7).unwrap();
+        // Closest to 0.7 is 0.5 (distance 0.2) vs 1.0 (distance 0.3)
+        assert!((frame.timestamp - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_recording_summary_serialization() {
+        let summary = RecordingSummary {
+            frame_count: 100,
+            duration: 10.0,
+            max_track_count: 5,
+            unique_track_ids: 8,
+            total_detections: 300,
+        };
+        let json = serde_json::to_string(&summary).unwrap();
+        let loaded: RecordingSummary = serde_json::from_str(&json).unwrap();
+        assert_eq!(summary, loaded);
     }
 
     #[test]

@@ -1,11 +1,11 @@
 ## 1. Weight Metadata Types (thresh-core)
 
-- [ ] 1.1 Add `crates/thresh-core/src/weights.rs` module with `TensorShape(Vec<usize>)` newtype, `TensorDtype` enum (`F32`, `F16`, `BF16`), and `TensorMeta { shape: TensorShape, dtype: TensorDtype }`.
-- [ ] 1.2 Define `WeightManifest` struct: `HashMap<String, TensorMeta>` with serde Serialize/Deserialize for JSON round-tripping.
-- [ ] 1.3 Implement `WeightManifest::from_json(path)` and `WeightManifest::to_json(path)` for file I/O.
-- [ ] 1.4 Add validation methods: `WeightManifest::validate_tensor(name, shape, dtype) -> Result<(), WeightError>` that checks a tensor against its expected entry.
-- [ ] 1.5 Define `WeightError` enum with variants: `TensorNotFound`, `ShapeMismatch { expected, actual }`, `DtypeMismatch`, `FileNotFound`, `ParseError`, `IoError`.
-- [ ] 1.6 Re-export `weights` module from `thresh-core/src/lib.rs`. Add unit tests for manifest JSON round-trip and validation.
+- [x] 1.1 Add `crates/thresh-core/src/weights.rs` module with `TensorShape(Vec<usize>)` newtype, `TensorDtype` enum (`F32`, `F16`, `BF16`), and `TensorMeta { shape: TensorShape, dtype: TensorDtype }`.
+- [x] 1.2 Define `WeightManifest` struct: `HashMap<String, TensorMeta>` with serde Serialize/Deserialize for JSON round-tripping.
+- [x] 1.3 Implement `WeightManifest::from_json(path)` and `WeightManifest::to_json(path)` for file I/O.
+- [x] 1.4 Add validation methods: `WeightManifest::validate_tensor(name, shape, dtype) -> Result<(), WeightError>` that checks a tensor against its expected entry.
+- [x] 1.5 Define `WeightError` enum with variants: `TensorNotFound`, `ShapeMismatch { expected, actual }`, `DtypeMismatch`, `FileNotFound`, `ParseError`, `IoError`.
+- [x] 1.6 Re-export `weights` module from `thresh-core/src/lib.rs`. Add unit tests for manifest JSON round-trip and validation.
 
 ## 2. WeightLoader Trait (thresh-inference)
 
@@ -30,8 +30,8 @@
 
 ## 5. Tests
 
-- [ ] 5.1 Unit test: `WeightManifest` JSON serialization round-trip (serialize, deserialize, compare).
-- [ ] 5.2 Unit test: `WeightManifest::validate_tensor` rejects shape mismatches and unknown tensor names.
+- [x] 5.1 Unit test: `WeightManifest` JSON serialization round-trip (serialize, deserialize, compare).
+- [x] 5.2 Unit test: `WeightManifest::validate_tensor` rejects shape mismatches and unknown tensor names.
 - [x] 5.3 Create a small test .safetensors file (3 tensors, known shapes) using the safetensors Python library at `test-data/models/test_weights.safetensors`.
 - [x] 5.4 Unit test: `SafeTensorsLoader` loads known tensors from the test file with correct shapes and names.
 - [x] 5.5 Unit test: `WeightSet::validate_shapes` succeeds with a matching manifest and fails with a mismatched manifest.

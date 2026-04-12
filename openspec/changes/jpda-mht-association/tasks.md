@@ -13,9 +13,9 @@
 
 - [x] 2.1 Implement merged innovation computation: `jpda_combined_innovation()` computes `v = sum_j(beta_j * v_j)`.
 - [x] 2.2 Implement spread-of-innovations matrix: `jpda_covariance_correction()` computes `Pv = sum_j(beta_j * v_j * v_j^T) - v * v^T`.
-- [ ] 2.3 Implement JPDA state update: `x+ = x- + K * v` using the standard Kalman gain and merged innovation.
-- [ ] 2.4 Implement JPDA covariance update with spread term: `P+ = beta_0 * P- + (1 - beta_0) * P_KF + K * Pv * K^T` where `P_KF` is the single-detection Kalman covariance.
-- [ ] 2.5 Expose `JpdaAssociator::associate_and_update(tracks, detections, h, r) -> Vec<JpdaResult>` as the public API, returning updated state/covariance per track.
+- [x] 2.3 Implement JPDA state update: `x+ = x- + K * v` using the standard Kalman gain and merged innovation.
+- [x] 2.4 Implement JPDA covariance update with spread term: `P+ = beta_0 * P- + (1 - beta_0) * P_KF + K * Pv * K^T` where `P_KF` is the single-detection Kalman covariance.
+- [x] 2.5 Expose `JpdaAssociator::associate_and_update(tracks, detections, h, r) -> Vec<JpdaResult>` as the public API, returning updated state/covariance per track.
 
 ## 3. MHT Hypothesis Tree (thresh-association)
 
@@ -28,15 +28,15 @@
 ## 4. MHT Pruning (thresh-association)
 
 - [x] 4.1 Implement k-best pruning via `HypothesisTree::prune_k_best()`: sort by score descending, retain top k.
-- [ ] 4.2 Implement N-scan pruning: walk back N scans from each leaf. For scan `t - N`, identify assignments that all surviving hypotheses agree on. Collapse those agreed-upon assignments, freeing the corresponding tree nodes.
-- [ ] 4.3 Implement memory reclamation: after pruning, remove orphaned (unreachable) hypothesis nodes from the tree vector and compact indices.
-- [ ] 4.4 Add hypothesis count monitoring: log a warning if the hypothesis count exceeds 2 * k_best after expansion (indicates pruning may be insufficient).
+- [x] 4.2 Implement N-scan pruning: walk back N scans from each leaf. For scan `t - N`, identify assignments that all surviving hypotheses agree on. Collapse those agreed-upon assignments, freeing the corresponding tree nodes.
+- [x] 4.3 Implement memory reclamation: after pruning, remove orphaned (unreachable) hypothesis nodes from the tree vector and compact indices.
+- [x] 4.4 Add hypothesis count monitoring: log a warning if the hypothesis count exceeds 2 * k_best after expansion (indicates pruning may be insufficient).
 
 ## 5. MHT Track Extraction (thresh-association)
 
 - [x] 5.1 Implement `HypothesisTree::best_hypothesis() -> Option<&Hypothesis>` returning the highest-scoring leaf.
 - [x] 5.2 Implement `HypothesisTree::marginal_probabilities()` returning per-pair association probabilities across all hypotheses.
-- [ ] 5.3 Implement track ID consistency: when extracting tracks, ensure IDs are consistent across timesteps by tracing the best hypothesis's association history.
+- [x] 5.3 Implement track ID consistency: when extracting tracks, ensure IDs are consistent across timesteps by tracing the best hypothesis's association history.
 
 ## 6. Tracker Integration (thresh-tracker)
 
@@ -55,6 +55,6 @@
 - [x] 7.4 Unit test: JPDA spread-of-innovations covariance correction is PSD (`test_jpda_covariance_correction_positive_semidefinite`).
 - [x] 7.5 Unit test: MHT hypothesis expansion produces the correct number of child hypotheses for a small example (`test_mht_expand_generates_hypotheses`).
 - [x] 7.6 Unit test: k-best pruning retains exactly k hypotheses and discards the lowest-scoring ones (`test_mht_prune_k_best`).
-- [ ] 7.7 Unit test: N-scan pruning collapses agreed-upon old assignments.
+- [x] 7.7 Unit test: N-scan pruning collapses agreed-upon old assignments.
 - [ ] 7.8 Integration test: JPDA on a crossing-tracks scenario (two targets cross paths) produces better MOTA than Hungarian.
 - [ ] 7.9 Integration test: MHT on a dense clutter scenario (high false alarm rate) maintains track continuity better than Hungarian.

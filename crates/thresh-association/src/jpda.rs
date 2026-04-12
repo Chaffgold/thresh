@@ -167,6 +167,111 @@ pub fn jpda_covariance_correction(
     spread
 }
 
+/// Result of JPDA state and covariance update for a single track.
+#[derive(Debug, Clone)]
+pub struct JpdaUpdateResult {
+    /// Updated state estimate.
+    pub state: DVector<f64>,
+    /// Updated covariance estimate.
+    pub covariance: DMatrix<f64>,
+    /// Missed-detection probability (beta_0).
+    pub miss_probability: f64,
+}
+
+/// Perform the full JPDA state update for a single track.
+///
+/// Computes `x+ = x- + K * v_combined` where `K` is the standard Kalman gain
+/// and `v_combined` is the merged innovation.
+///
+/// # Arguments
+///
+/// * `state` — prior state estimate `x-`.
+/// * `covariance` — prior covariance `P-`.
+/// * `track` — predicted measurement and innovation covariance.
+/// * `detections` — measurement vectors.
+/// * `betas` — association probabilities (length `n_dets + 1`, last is miss).
+/// * `h` — observation matrix.
+pub fn jpda_state_update(
+    state: &DVector<f64>,
+    covariance: &DMatrix<f64>,
+    track: &JpdaTrack,
+    detections: &[DVector<f64>],
+    betas: &[f64],
+    h: &DMatrix<f64>,
+) -> JpdaUpdateResult {
+    let combined = jpda_combined_innovation(track, detections, betas);
+    let spread = jpda_covariance_correction(track, detections, betas, &combined);
+
+    // Kalman gain: K = P * H^T * S^{-1}
+    let s_inv = track
+        .innovation_covariance
+        .clone()
+        .try_inverse()
+        .expect("Innovation covariance S is singular in JPDA update");
+    let k = covariance * h.transpose() * &s_inv;
+
+    // State update: x+ = x- + K * v_combined
+    let state_updated = state + &k * &combined;
+
+    // Covariance update with spread-of-innovations:
+    //   P+ = beta_0 * P- + (1 - beta_0) * P_kf + K * P_spread * K^T
+    // where P_kf = P- - K * S * K^T (standard Kalman covariance update)
+    let beta_0 = *betas.last().unwrap_or(&0.0);
+    let p_kf = covariance - &k * &track.innovation_covariance * k.transpose();
+    let cov_updated = beta_0 * covariance + (1.0 - beta_0) * &p_kf + &k * &spread * k.transpose();
+
+    JpdaUpdateResult {
+        state: state_updated,
+        covariance: cov_updated,
+        miss_probability: beta_0,
+    }
+}
+
+/// Run JPDA association and state update for a set of tracks.
+///
+/// This is the main public API combining probability computation and
+/// Kalman-based state/covariance update.
+///
+/// # Arguments
+///
+/// * `tracks` — predicted measurement info per track.
+/// * `states` — prior state estimates, one per track.
+/// * `covariances` — prior covariance matrices, one per track.
+/// * `detections` — measurement vectors.
+/// * `h` — observation matrix (shared across all tracks).
+/// * `gate` — Mahalanobis distance squared gating threshold.
+/// * `p_detection` — probability of detection.
+/// * `clutter_density` — false alarm spatial density.
+#[allow(clippy::too_many_arguments)]
+pub fn jpda_associate_and_update(
+    tracks: &[JpdaTrack],
+    states: &[DVector<f64>],
+    covariances: &[DMatrix<f64>],
+    detections: &[DVector<f64>],
+    h: &DMatrix<f64>,
+    gate: f64,
+    p_detection: f64,
+    clutter_density: f64,
+) -> Vec<JpdaUpdateResult> {
+    let result = jpda_probabilities(tracks, detections, gate, p_detection, clutter_density);
+
+    result
+        .beta
+        .iter()
+        .enumerate()
+        .map(|(i, betas)| {
+            jpda_state_update(
+                &states[i],
+                &covariances[i],
+                &tracks[i],
+                detections,
+                betas,
+                h,
+            )
+        })
+        .collect()
+}
+
 /// Evaluate the multivariate Gaussian PDF: N(z; mu, S).
 ///
 /// Uses log-space internally to avoid underflow/overflow.
@@ -315,6 +420,104 @@ mod tests {
         // Expected: 0.5 * [1,0] + 0.3 * [0,1] = [0.5, 0.3]
         assert!((combined[0] - 0.5).abs() < 1e-10);
         assert!((combined[1] - 0.3).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_jpda_state_update_single_detection() {
+        // Single track, single detection very close: update should move state toward detection.
+        let state = DVector::from_column_slice(&[0.0, 0.0, 0.0, 0.0]);
+        let covariance = DMatrix::identity(4, 4) * 10.0;
+        let h = DMatrix::from_row_slice(2, 4, &[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+        let track = JpdaTrack {
+            predicted_measurement: DVector::from_column_slice(&[0.0, 0.0]),
+            innovation_covariance: &h * &covariance * h.transpose() + DMatrix::identity(2, 2),
+        };
+        let det = DVector::from_column_slice(&[5.0, 3.0]);
+        // High beta for the detection, low for miss
+        let betas = vec![0.99, 0.01];
+
+        let result = jpda_state_update(&state, &covariance, &track, &[det], &betas, &h);
+
+        // State should move toward [5, 0, 3, 0]
+        assert!(result.state[0] > 0.0, "x should move toward detection");
+        assert!(result.state[2] > 0.0, "y should move toward detection");
+        // Covariance should be reduced
+        assert!(
+            result.covariance[(0, 0)] < covariance[(0, 0)],
+            "covariance should decrease"
+        );
+    }
+
+    #[test]
+    fn test_jpda_state_update_missed_detection() {
+        // If beta_0 = 1.0 (all miss), state should not change.
+        let state = DVector::from_column_slice(&[1.0, 2.0]);
+        let covariance = DMatrix::identity(2, 2);
+        let h = DMatrix::identity(2, 2);
+        let track = JpdaTrack {
+            predicted_measurement: DVector::from_column_slice(&[1.0, 2.0]),
+            innovation_covariance: DMatrix::identity(2, 2) * 2.0,
+        };
+        let det = DVector::from_column_slice(&[10.0, 10.0]);
+        let betas = vec![0.0, 1.0]; // all miss
+
+        let result = jpda_state_update(&state, &covariance, &track, &[det], &betas, &h);
+
+        // With beta_0 = 1.0 and beta_det = 0.0, combined innovation is zero
+        assert!(
+            (result.state[0] - 1.0).abs() < 1e-10,
+            "state x should not change"
+        );
+        assert!(
+            (result.state[1] - 2.0).abs() < 1e-10,
+            "state y should not change"
+        );
+    }
+
+    #[test]
+    fn test_jpda_associate_and_update() {
+        let h = DMatrix::from_row_slice(2, 4, &[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+        let p = DMatrix::identity(4, 4) * 5.0;
+        let r = DMatrix::identity(2, 2);
+
+        let states = vec![
+            DVector::from_column_slice(&[0.0, 0.0, 0.0, 0.0]),
+            DVector::from_column_slice(&[10.0, 0.0, 0.0, 0.0]),
+        ];
+        let covariances = vec![p.clone(), p.clone()];
+        let tracks: Vec<JpdaTrack> = states
+            .iter()
+            .map(|s| {
+                let pred = &h * s;
+                let s_mat = &h * &p * h.transpose() + &r;
+                JpdaTrack {
+                    predicted_measurement: pred,
+                    innovation_covariance: s_mat,
+                }
+            })
+            .collect();
+
+        let detections = vec![
+            DVector::from_column_slice(&[0.5, 0.0]),
+            DVector::from_column_slice(&[9.5, 0.0]),
+        ];
+
+        let results = jpda_associate_and_update(
+            &tracks,
+            &states,
+            &covariances,
+            &detections,
+            &h,
+            100.0,
+            0.9,
+            1e-6,
+        );
+
+        assert_eq!(results.len(), 2);
+        // Track 0 should move toward det 0
+        assert!(results[0].state[0] > 0.0);
+        // Track 1 should move toward det 1
+        assert!(results[1].state[0] < 10.0);
     }
 
     #[test]
