@@ -2,11 +2,11 @@
 
 ## 1. Benchmark infrastructure
 
-- [ ] 1.1 Add `criterion` as a workspace dev-dependency in root `Cargo.toml`
-- [ ] 1.2 Create `crates/thresh-association/benches/hungarian.rs` with `hungarian_10x10`, `hungarian_100x100`, `hungarian_500x500` benchmarks using seeded random cost matrices
-- [ ] 1.3 Create `crates/thresh-filter/benches/kalman.rs` with `kf_predict_6d` and `kf_update_6d` benchmarks
-- [ ] 1.4 Create `crates/thresh-association/benches/mahalanobis.rs` with `mahalanobis_6d` benchmark
-- [ ] 1.5 Create `crates/thresh-tracker/benches/tracker_step.rs` with `tracker_step_10`, `tracker_step_50`, `tracker_step_200` benchmarks
+- [x] 1.1 Add `criterion` as a workspace dev-dependency in root `Cargo.toml`
+- [x] 1.2 Create `crates/thresh-association/benches/hungarian.rs` with `hungarian_10x10`, `hungarian_100x100`, `hungarian_500x500` benchmarks using seeded random cost matrices
+- [x] 1.3 Create `crates/thresh-filter/benches/kalman.rs` with `kf_predict_6d` and `kf_update_6d` benchmarks
+- [x] 1.4 Create `crates/thresh-association/benches/mahalanobis.rs` with `mahalanobis_6d` benchmark
+- [x] 1.5 Create `crates/thresh-tracker/benches/tracker_step.rs` with `tracker_step_10`, `tracker_step_50`, `tracker_step_200` benchmarks
 
 ## 2. Profiling
 

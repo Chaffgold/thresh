@@ -8,3 +8,11 @@ license.workspace = true
 [dependencies]
 thresh-core = { path = "../thresh-core" }
 nalgebra = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+nalgebra = { workspace = true }
+
+[[bench]]
+name = "kalman"
+harness = false
