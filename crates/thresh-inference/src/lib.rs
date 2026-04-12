@@ -9,5 +9,7 @@ pub mod preprocess;
 
 pub mod weights;
 
+pub mod native_detector;
+
 #[cfg(feature = "onnx")]
 pub mod session;
