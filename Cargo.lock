@@ -1556,6 +1556,7 @@ dependencies = [
  "nalgebra",
  "pyo3",
  "rand",
+ "rand_distr",
  "reqwest",
  "serde",
  "serde_json",

@@ -1,0 +1,35 @@
+name = "orbital-iss"
+description = "ISS pass tracking from a mid-latitude ground station. Uses a cached TLE so the scenario runs offline in the CI benchmark gate."
+
+[source.Orbital]
+norad_ids = [25544]
+tle_file = "orbital-iss.tle"
+station_lat_deg = 38.8339
+station_lon_deg = -104.8214
+station_alt_m = 1885.0
+
+[parameters]
+# 3-hour window to guarantee at least one ISS pass over the station,
+# regardless of TLE epoch phase. 5 s sampling × 2160 steps keeps the
+# CV Kalman's prediction-step distance (~35 km at ISS ground speed)
+# within the gate, at the cost of ~2 s of CI runtime.
+duration_s = 10800.0
+dt = 5.0
+measurement_noise_sigma = 1000.0
+# Generous gate in metres-squared of Mahalanobis residual: ISS slant
+# ranges are hundreds of km and even a few milliradians of angle noise
+# puts the innovation well above typical terrestrial tracker thresholds.
+gate_threshold = 100000.0
+
+[baselines]
+# The point of the CI gate is to catch regressions in the orbital
+# pipeline (SGP4 bindings, ECI→ENU transform, radar measurement
+# generation, tracker wiring) — not a tight tracking accuracy guarantee.
+# Orbital scenarios have sparse visibility windows and noisy
+# measurements, so a too-tight MOTA floor would flake. MOTA can
+# legitimately be slightly negative if the M-of-N confirmation window
+# never completes before a pass ends; the regression gate still catches
+# real pipeline breakage because on breakage the runner itself errors
+# out (propagation failures, TLE parse errors, missing TLE files), not
+# just MOTA degradation.
+mota = -2.0

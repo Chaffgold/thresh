@@ -1,0 +1,26 @@
+name = "orbital-starlink-train"
+description = "Synthetic 5-satellite train tracked from a mid-latitude ground station. Multi-target orbital pipeline regression — exercises SGP4 propagation, ENU transform, and the tracker's data-association path across overlapping tracks. TLEs are hand-crafted clones of the cached ISS orbit regime (same inclination, RAAN, and epoch) with staggered mean anomalies so the constellation definitely passes over the station the orbital-iss scenario already uses; no real Starlink telemetry is required, and the scenario runs fully offline in the CI benchmark gate."
+
+[source.Orbital]
+norad_ids = [90001, 90002, 90003, 90004, 90005]
+tle_file = "orbital-starlink-train.tle"
+station_lat_deg = 38.8339
+station_lon_deg = -104.8214
+station_alt_m = 1885.0
+
+[parameters]
+# Same 3-hour window as orbital-iss so the scenarios can share a CI
+# runtime budget. 5 Starlinks at the same inclination with staggered mean
+# anomalies means multiple pass windows overlap, which is what exercises
+# the tracker's association path.
+duration_s = 10800.0
+dt = 5.0
+measurement_noise_sigma = 1000.0
+gate_threshold = 100000.0
+
+[baselines]
+# Permissive floor — see orbital-iss.toml for rationale. The goal is to
+# catch pipeline-level regressions (TLE parse, SGP4, coordinate chain,
+# measurement generation, multi-target association) not to benchmark
+# tracker accuracy against a physically realistic orbital scenario.
+mota = -5.0
