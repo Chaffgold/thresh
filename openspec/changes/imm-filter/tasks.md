@@ -31,10 +31,10 @@
 
 ## 5. Tracker Integration (thresh-tracker)
 
-- [ ] 5.1 Add `dominant_mode: Option<usize>` and `mode_probabilities: Option<DVector<f64>>` fields to `Track` struct.
-- [ ] 5.2 Add `new_imm_position(config, measurement_noise_sigma, gate_threshold)` constructor on `MultiObjectTracker`. Stores the `ImmConfig` for birthing new tracks.
-- [ ] 5.3 Refactor `MultiObjectTracker::step()` to dispatch predict/update through an internal enum (`TrackerMode::SingleModel` vs `TrackerMode::Imm`) so the association and lifecycle logic remains shared.
-- [ ] 5.4 Implement IMM-aware `birth_track`: create an `ImmFilter` from the stored config, initialize from the detection, store combined state/covariance in the new `Track`.
+- [x] 5.1 Add `dominant_mode: Option<usize>` and `mode_probabilities: Option<DVector<f64>>` fields to `Track` struct.
+- [x] 5.2 Add `new_imm_position(config, measurement_noise_sigma, gate_threshold)` constructor on `MultiObjectTracker`. Stores the `ImmConfig` for birthing new tracks.
+- [x] 5.3 Refactor `MultiObjectTracker::step()` to dispatch predict/update through an internal enum (`TrackerMode::SingleModel` vs `TrackerMode::Imm`) so the association and lifecycle logic remains shared.
+- [x] 5.4 Implement IMM-aware `birth_track`: create an `ImmFilter` from the stored config, initialize from the detection, store combined state/covariance in the new `Track`.
 
 ## 6. Tests
 
@@ -44,5 +44,5 @@
 - [x] 6.4 Unit test: mode probability update shifts weight toward the model with smaller innovation.
 - [x] 6.5 Unit test: 2-model CV+CA IMM on a straight-line trajectory converges to CV-dominant mode probability (mu_CV > 0.8 after 20 steps).
 - [x] 6.6 Integration test: CV+CTRV IMM on a trajectory that switches from straight flight to coordinated turn. Verify mode probabilities flip and position RMSE is lower than either single-model filter alone.
-- [ ] 6.7 Integration test: 4-model IMM through `MultiObjectTracker::new_imm_position` -- birth, confirm, and maintain a maneuvering track over 50 steps. Verify `dominant_mode` changes when the target maneuvers.
-- [ ] 6.8 Integration test: IMM covariance stays positive semi-definite over 1000 steps with mode switching (eigenvalue check, same pattern as `kf_covariance_stays_psd`).
+- [x] 6.7 Integration test: 4-model IMM through `MultiObjectTracker::new_imm_position` -- birth, confirm, and maintain a maneuvering track over 50 steps. Verify `dominant_mode` changes when the target maneuvers.
+- [x] 6.8 Integration test: IMM covariance stays positive semi-definite over 1000 steps with mode switching (eigenvalue check, same pattern as `kf_covariance_stays_psd`).

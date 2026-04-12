@@ -581,6 +581,49 @@ impl ImmFilter {
         }
     }
 
+    /// Run the interaction and prediction steps, then return the combined
+    /// state and covariance. Call this before association so the tracker has
+    /// the predicted combined estimate for gating.
+    ///
+    /// After calling this, the internal model-conditioned filters are in
+    /// predicted (prior) state, ready for [`update_with_measurement`].
+    pub fn predict(&mut self, dt: f64) -> (DVector<f64>, DMatrix<f64>) {
+        self.interaction_step();
+        self.predict_step(dt);
+        self.combine()
+    }
+
+    /// Run the measurement update, mode probability update, and combination
+    /// steps. Must be called after [`predict`].
+    ///
+    /// Returns the combined state, covariance, mode probabilities, and
+    /// dominant mode index.
+    pub fn update_with_measurement(
+        &mut self,
+        z: &DVector<f64>,
+        h: &DMatrix<f64>,
+        r: &DMatrix<f64>,
+    ) -> ImmStepResult {
+        let log_likelihoods = self.update_step(z, h, r);
+        self.update_mode_probabilities(&log_likelihoods);
+        let (state, covariance) = self.combine();
+
+        let dominant_mode = self
+            .mode_probabilities
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+
+        ImmStepResult {
+            state,
+            covariance,
+            mode_probabilities: self.mode_probabilities.clone(),
+            dominant_mode,
+        }
+    }
+
     /// Model-conditioned prediction step.
     fn predict_step(&mut self, dt: f64) {
         for f in &mut self.filters {
