@@ -162,6 +162,13 @@ pub struct ScenarioParameters {
     /// requiring scenario files to change.
     #[serde(default)]
     pub tracker_variant: Option<TrackerVariant>,
+    /// Scenario type for synthetic benchmarks. Controls which trajectory
+    /// builder and radar configuration are used.
+    ///
+    /// Recognised values: `"cv-clean"`, `"maneuvering"`, `"heterogeneous"`,
+    /// `"low-pd"`. When `None` the runner defaults to `"cv-clean"`.
+    #[serde(default)]
+    pub scenario_type: Option<String>,
 }
 
 /// Expected metric baselines for regression gating.
@@ -272,15 +279,8 @@ pub fn run_synthetic_benchmark(manifest: &ScenarioManifest) -> BenchmarkResult {
         trajectories,
     };
 
-    // --- Radar config from manifest parameters ---
-    let radar_config = RadarConfig {
-        range_sigma: params.measurement_noise_sigma,
-        azimuth_sigma: params.measurement_noise_sigma / 10_000.0,
-        elevation_sigma: params.measurement_noise_sigma / 10_000.0,
-        p_detection: 1.0, // default; low-pd scenarios override via name convention
-        clutter_rate: 0.0,
-        ..Default::default()
-    };
+    // --- Radar config from scenario type ---
+    let radar_config = radar_config_for_scenario(params);
 
     let (gt_entries, measurements) = run_scenario(&scenario, &radar_config);
 
@@ -418,8 +418,23 @@ fn measurement_to_cartesian(m: &thresh_core::measurement::Measurement) -> DVecto
     }
 }
 
-/// Build a set of CV trajectories spread in space for benchmark.
+/// Dispatch to the appropriate trajectory builder based on `scenario_type`.
 fn build_trajectories(params: &ScenarioParameters) -> Vec<Trajectory> {
+    match params.scenario_type.as_deref() {
+        None | Some("cv-clean") => build_cv_clean_trajectories(params),
+        Some("maneuvering") => build_maneuvering_trajectories(params),
+        Some("heterogeneous") => build_heterogeneous_trajectories(params),
+        Some("low-pd") => build_low_pd_trajectories(params),
+        Some(other) => {
+            eprintln!("unknown scenario_type {other:?}, falling back to cv-clean");
+            build_cv_clean_trajectories(params)
+        }
+    }
+}
+
+/// Build 5 constant-velocity trajectories spread in space (the original
+/// default benchmark geometry).
+fn build_cv_clean_trajectories(params: &ScenarioParameters) -> Vec<Trajectory> {
     let n_targets = 5;
     (0..n_targets)
         .map(|i| {
@@ -440,6 +455,142 @@ fn build_trajectories(params: &ScenarioParameters) -> Vec<Trajectory> {
             }
         })
         .collect()
+}
+
+/// Build 4 maneuvering trajectories with CV / CTRV / CA segments,
+/// 10 km spacing between targets.
+fn build_maneuvering_trajectories(params: &ScenarioParameters) -> Vec<Trajectory> {
+    let segment_dur = params.duration_s / 3.0;
+    (0..4)
+        .map(|i| {
+            let spacing = 10_000.0;
+            Trajectory {
+                target_id: i,
+                initial_position: [
+                    10_000.0 + i as f64 * spacing,
+                    5_000.0 + i as f64 * spacing * 0.5,
+                    3_000.0,
+                ],
+                initial_velocity: [200.0 + i as f64 * 30.0, 100.0 - i as f64 * 20.0, 0.0],
+                segments: vec![
+                    Segment {
+                        segment_type: SegmentType::Cv,
+                        duration: segment_dur,
+                    },
+                    Segment {
+                        segment_type: SegmentType::Ctrv {
+                            turn_rate: 0.03 * if i % 2 == 0 { 1.0 } else { -1.0 },
+                        },
+                        duration: segment_dur,
+                    },
+                    Segment {
+                        segment_type: SegmentType::Ca {
+                            acceleration: [10.0, -5.0, 0.0],
+                        },
+                        duration: segment_dur,
+                    },
+                ],
+                dt: params.dt,
+            }
+        })
+        .collect()
+}
+
+/// Build 5 heterogeneous trajectories across three kinematic classes:
+/// UAV-like (slow, low altitude), aircraft-like (medium), and
+/// missile-like (fast, high altitude).
+fn build_heterogeneous_trajectories(params: &ScenarioParameters) -> Vec<Trajectory> {
+    vec![
+        // --- UAV-like targets (2) ---
+        Trajectory {
+            target_id: 0,
+            initial_position: [5_000.0, 2_000.0, 200.0],
+            initial_velocity: [15.0, 10.0, 0.0],
+            segments: vec![Segment {
+                segment_type: SegmentType::Cv,
+                duration: params.duration_s,
+            }],
+            dt: params.dt,
+        },
+        Trajectory {
+            target_id: 1,
+            initial_position: [8_000.0, 4_000.0, 300.0],
+            initial_velocity: [20.0, -5.0, 0.0],
+            segments: vec![Segment {
+                segment_type: SegmentType::Ctrv { turn_rate: 0.02 },
+                duration: params.duration_s,
+            }],
+            dt: params.dt,
+        },
+        // --- Aircraft-like targets (2) ---
+        Trajectory {
+            target_id: 2,
+            initial_position: [20_000.0, 10_000.0, 8_000.0],
+            initial_velocity: [250.0, 50.0, 0.0],
+            segments: vec![Segment {
+                segment_type: SegmentType::Cv,
+                duration: params.duration_s,
+            }],
+            dt: params.dt,
+        },
+        Trajectory {
+            target_id: 3,
+            initial_position: [30_000.0, 15_000.0, 10_000.0],
+            initial_velocity: [220.0, -30.0, 0.0],
+            segments: vec![
+                Segment {
+                    segment_type: SegmentType::Cv,
+                    duration: params.duration_s / 2.0,
+                },
+                Segment {
+                    segment_type: SegmentType::Ctrv { turn_rate: 0.01 },
+                    duration: params.duration_s / 2.0,
+                },
+            ],
+            dt: params.dt,
+        },
+        // --- Missile-like target (1) ---
+        Trajectory {
+            target_id: 4,
+            initial_position: [50_000.0, 30_000.0, 20_000.0],
+            initial_velocity: [800.0, 200.0, 50.0],
+            segments: vec![Segment {
+                segment_type: SegmentType::Ca {
+                    acceleration: [20.0, 0.0, 5.0],
+                },
+                duration: params.duration_s,
+            }],
+            dt: params.dt,
+        },
+    ]
+}
+
+/// Build trajectories for the low-pd scenario. Uses the same geometry as
+/// cv-clean; the challenge comes from the reduced detection probability
+/// and increased clutter in the radar config.
+fn build_low_pd_trajectories(params: &ScenarioParameters) -> Vec<Trajectory> {
+    build_cv_clean_trajectories(params)
+}
+
+/// Return the appropriate `RadarConfig` for a scenario type.
+///
+/// Default (cv-clean / maneuvering / heterogeneous) uses perfect detection
+/// (`p_detection = 1.0`, `clutter_rate = 0.0`). The `"low-pd"` variant
+/// models a challenging sensor environment with `p_detection = 0.7` and
+/// `clutter_rate = 5.0`.
+fn radar_config_for_scenario(params: &ScenarioParameters) -> RadarConfig {
+    let (p_detection, clutter_rate) = match params.scenario_type.as_deref() {
+        Some("low-pd") => (0.7, 5.0),
+        _ => (1.0, 0.0),
+    };
+    RadarConfig {
+        range_sigma: params.measurement_noise_sigma,
+        azimuth_sigma: params.measurement_noise_sigma / 10_000.0,
+        elevation_sigma: params.measurement_noise_sigma / 10_000.0,
+        p_detection,
+        clutter_rate,
+        ..Default::default()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1068,6 +1219,7 @@ mod tests {
                 measurement_noise_sigma: 50.0,
                 gate_threshold: 500.0,
                 tracker_variant: None,
+                scenario_type: Some("cv-clean".into()),
             },
             baselines: Some(Baselines {
                 mota: Some(0.5),
@@ -1103,6 +1255,150 @@ mod tests {
             "MOTA should be reasonable for clean CV scenario, got {}",
             result.mota
         );
+    }
+
+    #[test]
+    fn test_build_maneuvering_trajectories() {
+        let params = ScenarioParameters {
+            duration_s: 30.0,
+            dt: 1.0,
+            measurement_noise_sigma: 50.0,
+            gate_threshold: 500.0,
+            tracker_variant: None,
+            scenario_type: Some("maneuvering".into()),
+        };
+        let trajs = build_maneuvering_trajectories(&params);
+        assert_eq!(trajs.len(), 4, "expected 4 maneuvering trajectories");
+        for t in &trajs {
+            assert!(
+                t.segments.len() > 1,
+                "each maneuvering trajectory should have multiple segments"
+            );
+            let waypoints = t.generate();
+            let total_dur: f64 = waypoints.last().unwrap().time - waypoints.first().unwrap().time;
+            assert!(
+                total_dur >= params.duration_s - params.dt,
+                "waypoints should span approximately duration_s"
+            );
+        }
+    }
+
+    #[test]
+    fn test_build_heterogeneous_trajectories() {
+        let params = ScenarioParameters {
+            duration_s: 30.0,
+            dt: 1.0,
+            measurement_noise_sigma: 50.0,
+            gate_threshold: 500.0,
+            tracker_variant: None,
+            scenario_type: Some("heterogeneous".into()),
+        };
+        let trajs = build_heterogeneous_trajectories(&params);
+        assert_eq!(trajs.len(), 5, "expected 5 heterogeneous trajectories");
+
+        // Verify distinct velocity magnitudes: UAV < aircraft < missile.
+        let speed = |t: &Trajectory| -> f64 {
+            let v = t.initial_velocity;
+            (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
+        };
+        let uav_speed = speed(&trajs[0]).max(speed(&trajs[1]));
+        let aircraft_speed = speed(&trajs[2]).min(speed(&trajs[3]));
+        let missile_speed = speed(&trajs[4]);
+        assert!(
+            uav_speed < aircraft_speed,
+            "UAV speed ({uav_speed:.1}) should be less than aircraft ({aircraft_speed:.1})"
+        );
+        assert!(
+            aircraft_speed < missile_speed,
+            "aircraft speed ({aircraft_speed:.1}) should be less than missile ({missile_speed:.1})"
+        );
+    }
+
+    #[test]
+    fn test_build_low_pd_trajectories() {
+        let params = ScenarioParameters {
+            duration_s: 30.0,
+            dt: 1.0,
+            measurement_noise_sigma: 50.0,
+            gate_threshold: 500.0,
+            tracker_variant: None,
+            scenario_type: Some("low-pd".into()),
+        };
+        let low_pd = build_low_pd_trajectories(&params);
+        let cv_clean = build_cv_clean_trajectories(&params);
+        assert_eq!(
+            low_pd.len(),
+            cv_clean.len(),
+            "low-pd should produce the same number of trajectories as cv-clean"
+        );
+        for (a, b) in low_pd.iter().zip(cv_clean.iter()) {
+            assert_eq!(a.initial_position, b.initial_position);
+            assert_eq!(a.initial_velocity, b.initial_velocity);
+        }
+    }
+
+    #[test]
+    fn test_radar_config_for_scenario() {
+        let default_params = ScenarioParameters {
+            duration_s: 30.0,
+            dt: 1.0,
+            measurement_noise_sigma: 50.0,
+            gate_threshold: 500.0,
+            tracker_variant: None,
+            scenario_type: None,
+        };
+        let default_cfg = radar_config_for_scenario(&default_params);
+        assert!(
+            (default_cfg.p_detection - 1.0).abs() < f64::EPSILON,
+            "default p_detection should be 1.0"
+        );
+        assert!(
+            default_cfg.clutter_rate.abs() < f64::EPSILON,
+            "default clutter_rate should be 0.0"
+        );
+
+        let low_pd_params = ScenarioParameters {
+            scenario_type: Some("low-pd".into()),
+            ..default_params.clone()
+        };
+        let low_pd_cfg = radar_config_for_scenario(&low_pd_params);
+        assert!(
+            (low_pd_cfg.p_detection - 0.7).abs() < f64::EPSILON,
+            "low-pd p_detection should be 0.7"
+        );
+        assert!(
+            (low_pd_cfg.clutter_rate - 5.0).abs() < f64::EPSILON,
+            "low-pd clutter_rate should be 5.0"
+        );
+    }
+
+    #[test]
+    fn test_manifest_deserialization_scenario_variants() {
+        let scenarios_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scenarios");
+        let cases = [
+            ("synth-cv-clean.toml", Some("cv-clean"), Some(0.5)),
+            ("synth-maneuvering.toml", Some("maneuvering"), Some(0.3)),
+            ("synth-heterogeneous.toml", Some("heterogeneous"), Some(0.3)),
+            ("synth-low-pd.toml", Some("low-pd"), Some(0.2)),
+        ];
+        for (file, expected_type, expected_mota) in &cases {
+            let path = scenarios_dir.join(file);
+            let manifest = load_scenario(&path).unwrap_or_else(|e| {
+                panic!("failed to load {file}: {e}");
+            });
+            assert_eq!(
+                manifest.parameters.scenario_type.as_deref(),
+                *expected_type,
+                "scenario_type mismatch for {file}"
+            );
+            if let Some(mota) = expected_mota {
+                let baselines = manifest.baselines.as_ref().expect("baselines should exist");
+                assert!(
+                    (baselines.mota.unwrap() - mota).abs() < f64::EPSILON,
+                    "mota baseline mismatch for {file}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -1176,6 +1472,7 @@ mod tests {
                 measurement_noise_sigma: 50.0,
                 gate_threshold: 500.0,
                 tracker_variant: None,
+                scenario_type: None,
             },
             baselines: Some(Baselines {
                 mota: Some(-1.0),
@@ -1481,6 +1778,7 @@ mod tests {
                 measurement_noise_sigma: 1.0,
                 gate_threshold: 50.0,
                 tracker_variant: None,
+                scenario_type: None,
             },
             baselines: Some(Baselines {
                 mota: Some(-2.0),

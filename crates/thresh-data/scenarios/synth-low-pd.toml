@@ -1,0 +1,13 @@
+name = "synth-low-pd"
+description = "5 CV targets with reduced detection probability (0.7) and clutter (5.0). Tests tracker resilience to missed detections and false alarms."
+source = "Synthetic"
+
+[parameters]
+scenario_type = "low-pd"
+duration_s = 30.0
+dt = 1.0
+measurement_noise_sigma = 50.0
+gate_threshold = 500.0
+
+[baselines]
+mota = 0.2
