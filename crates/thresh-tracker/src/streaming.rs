@@ -99,6 +99,8 @@ pub struct TrackSnapshot {
     pub timestamp: f64,
     /// Track states at this instant.
     pub tracks: Vec<TrackState>,
+    /// Number of intermediate frames that were skipped due to latency.
+    pub frames_dropped: u64,
 }
 
 /// State of a single track within a [`TrackSnapshot`].
@@ -257,9 +259,17 @@ impl StreamingTracker {
         let binner = TemporalBinner::new(config.frame_duration_s);
         let broadcast_tx = track_tx.clone();
         let frame_dur = config.frame_duration_s;
+        let max_lat = config.max_latency_s;
 
         let task = SendableFn::new(move || {
-            run_loop_blocking(tracker, measurement_rx, broadcast_tx, binner, frame_dur);
+            run_loop_blocking(
+                tracker,
+                measurement_rx,
+                broadcast_tx,
+                binner,
+                frame_dur,
+                max_lat,
+            );
         });
         let thread_handle = std::thread::spawn(move || {
             // SAFETY: `call` is invoked exactly once.
@@ -299,23 +309,60 @@ impl StreamingTracker {
 ///
 /// Uses `blocking_recv` on the tokio mpsc receiver so we do not need the
 /// tracker (which is `!Send`) to live inside an async task.
+///
+/// When the tracker falls behind `max_latency_s`, intermediate frames are
+/// skipped: the binner's `current_frame_start` is advanced and predict-only
+/// steps (`tracker.step(&[], dt)`) are issued for each skipped frame.
 fn run_loop_blocking(
     mut tracker: MultiObjectTracker,
     mut rx: mpsc::Receiver<TimestampedMeasurement>,
     broadcast_tx: broadcast::Sender<TrackSnapshot>,
     mut binner: TemporalBinner,
     frame_duration_s: f64,
+    max_latency_s: f64,
 ) {
+    let mut total_frames_dropped: u64 = 0;
+
     while let Some(measurement) = rx.blocking_recv() {
         let ts = measurement.timestamp;
         if let Some(frame) = binner.push(measurement) {
-            step_and_broadcast(&mut tracker, &frame, frame_duration_s, ts, &broadcast_tx);
+            // Check if we've fallen behind: if the measurement timestamp is
+            // far ahead of the binner's current frame start, skip frames.
+            if let Some(frame_start) = binner.current_frame_start {
+                let lag = ts - frame_start;
+                if lag > max_latency_s {
+                    // Calculate how many frames to skip
+                    let frames_to_skip = ((lag - max_latency_s) / frame_duration_s).floor() as u64;
+                    for _ in 0..frames_to_skip {
+                        tracker.step(&[], frame_duration_s);
+                        total_frames_dropped += 1;
+                    }
+                    // Advance binner's frame start past the skipped frames
+                    binner.current_frame_start =
+                        Some(frame_start + frames_to_skip as f64 * frame_duration_s);
+                }
+            }
+            step_and_broadcast(
+                &mut tracker,
+                &frame,
+                frame_duration_s,
+                ts,
+                &broadcast_tx,
+                total_frames_dropped,
+            );
         }
     }
     // Channel closed — flush remaining measurements.
     if let Some(frame) = binner.flush() {
         let ts = binner.current_frame_start.unwrap_or(0.0);
-        step_and_broadcast(&mut tracker, &frame, frame_duration_s, ts, &broadcast_tx);
+        step_and_broadcast(
+            &mut tracker,
+            &frame,
+            frame_duration_s,
+            ts,
+            &broadcast_tx,
+            total_frames_dropped,
+        );
     }
 }
 
@@ -325,14 +372,19 @@ fn step_and_broadcast(
     dt: f64,
     timestamp: f64,
     broadcast_tx: &broadcast::Sender<TrackSnapshot>,
+    frames_dropped: u64,
 ) {
     tracker.step(frame, dt);
-    let snapshot = capture_snapshot(tracker, timestamp);
+    let snapshot = capture_snapshot(tracker, timestamp, frames_dropped);
     // Ignore send errors (no active receivers).
     let _ = broadcast_tx.send(snapshot);
 }
 
-fn capture_snapshot(tracker: &MultiObjectTracker, timestamp: f64) -> TrackSnapshot {
+fn capture_snapshot(
+    tracker: &MultiObjectTracker,
+    timestamp: f64,
+    frames_dropped: u64,
+) -> TrackSnapshot {
     use thresh_core::track::TrackState as Lifecycle;
 
     let tracks = tracker
@@ -371,7 +423,11 @@ fn capture_snapshot(tracker: &MultiObjectTracker, timestamp: f64) -> TrackSnapsh
         })
         .collect();
 
-    TrackSnapshot { timestamp, tracks }
+    TrackSnapshot {
+        timestamp,
+        tracks,
+        frames_dropped,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -514,6 +570,158 @@ mod tests {
         assert!(
             !snapshots[0].tracks.is_empty(),
             "first snapshot should contain at least one track"
+        );
+    }
+
+    #[test]
+    fn test_temporal_binner_gap_produces_flush() {
+        let mut binner = TemporalBinner::new(0.1); // 100ms frames
+
+        // t=0.0: first measurement, starts frame [0.0, 0.1)
+        let r1 = binner.push(TimestampedMeasurement {
+            measurement: DVector::from_column_slice(&[1.0, 0.0, 0.0]),
+            timestamp: 0.0,
+        });
+        assert!(r1.is_none(), "first measurement should not flush");
+
+        // t=0.035: within the same 100ms frame
+        let r2 = binner.push(TimestampedMeasurement {
+            measurement: DVector::from_column_slice(&[2.0, 0.0, 0.0]),
+            timestamp: 0.035,
+        });
+        assert!(
+            r2.is_none(),
+            "second measurement within frame should not flush"
+        );
+
+        // t=1.5: 3+ frames later -> should flush the first frame
+        let r3 = binner.push(TimestampedMeasurement {
+            measurement: DVector::from_column_slice(&[3.0, 0.0, 0.0]),
+            timestamp: 1.5,
+        });
+        let frame = r3.expect("gap measurement should flush previous frame");
+        assert_eq!(
+            frame.len(),
+            2,
+            "flushed frame should contain 2 measurements"
+        );
+        assert_eq!(frame[0][0], 1.0);
+        assert_eq!(frame[1][0], 2.0);
+
+        // The new measurement should be buffered for the next frame
+        assert_eq!(binner.buffer.len(), 1);
+        assert_eq!(binner.buffer[0][0], 3.0);
+    }
+
+    /// 5.2: Send measurements with a 3-frame gap, verify predict-only frames
+    /// advance tracker state.
+    #[tokio::test]
+    async fn test_streaming_gap_advances_tracker_state() {
+        let tracker = MultiObjectTracker::new_cv_position(10.0, 50.0);
+        let config = StreamingConfig {
+            frame_duration_s: 0.1,
+            max_latency_s: 0.5,
+            channel_capacity: 64,
+            ..Default::default()
+        };
+        let (streaming, handle) = StreamingTracker::new(tracker, config);
+
+        let tx = streaming.sender();
+        let mut rx = streaming.subscribe();
+
+        // Frame 1: measurements at t=0.00..0.05
+        for i in 0..3 {
+            tx.send(TimestampedMeasurement {
+                measurement: DVector::from_column_slice(&[100.0, 200.0, 50.0]),
+                timestamp: i as f64 * 0.02,
+            })
+            .await
+            .unwrap();
+        }
+
+        // Frame 2: measurement at t=0.12 (crosses boundary, flushes frame 1)
+        tx.send(TimestampedMeasurement {
+            measurement: DVector::from_column_slice(&[100.0, 200.0, 50.0]),
+            timestamp: 0.12,
+        })
+        .await
+        .unwrap();
+
+        // Gap: jump to t=0.55 (3+ frames later, flushes frame 2)
+        tx.send(TimestampedMeasurement {
+            measurement: DVector::from_column_slice(&[110.0, 210.0, 55.0]),
+            timestamp: 0.55,
+        })
+        .await
+        .unwrap();
+
+        // Another measurement to flush the gap frame
+        tx.send(TimestampedMeasurement {
+            measurement: DVector::from_column_slice(&[115.0, 215.0, 58.0]),
+            timestamp: 0.70,
+        })
+        .await
+        .unwrap();
+
+        drop(tx);
+        drop(streaming);
+
+        tokio::task::spawn_blocking(move || handle.join())
+            .await
+            .unwrap();
+
+        let mut snapshots = Vec::new();
+        while let Ok(snap) = rx.try_recv() {
+            snapshots.push(snap);
+        }
+
+        // We should have received multiple snapshots (frames were processed).
+        assert!(
+            snapshots.len() >= 2,
+            "should have at least 2 snapshots, got {}",
+            snapshots.len()
+        );
+
+        // The tracker state should have advanced — tracks should exist
+        // even after the gap because the tracker did predict-only steps.
+        let last = snapshots.last().unwrap();
+        assert!(
+            !last.tracks.is_empty(),
+            "tracks should persist through the gap"
+        );
+    }
+
+    /// 5.4: Verify clean shutdown when all senders are dropped.
+    #[tokio::test]
+    async fn test_streaming_clean_shutdown_on_sender_drop() {
+        let tracker = MultiObjectTracker::new_cv_position(10.0, 50.0);
+        let config = StreamingConfig {
+            frame_duration_s: 0.1,
+            channel_capacity: 64,
+            ..Default::default()
+        };
+        let (streaming, handle) = StreamingTracker::new(tracker, config);
+
+        let tx = streaming.sender();
+
+        // Send a few measurements so the loop has something to process.
+        tx.send(TimestampedMeasurement {
+            measurement: DVector::from_column_slice(&[50.0, 60.0, 70.0]),
+            timestamp: 0.0,
+        })
+        .await
+        .unwrap();
+
+        // Drop all senders — this should cause the channel to close
+        // and the background loop to exit cleanly.
+        drop(tx);
+        drop(streaming);
+
+        // The handle should join without panic.
+        let result = tokio::task::spawn_blocking(move || handle.join()).await;
+        assert!(
+            result.is_ok(),
+            "background thread should join cleanly after senders are dropped"
         );
     }
 

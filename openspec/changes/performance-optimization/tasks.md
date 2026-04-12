@@ -35,6 +35,6 @@
 
 ## 6. CI performance gate
 
-- [ ] 6.1 Add CI job that runs `cargo bench` on `develop` pushes and stores baseline results as artifacts
+- [x] 6.1 Add CI job that runs `cargo bench` on `develop` pushes and stores baseline results as artifacts
 - [ ] 6.2 Add PR check that compares benchmark results against baseline and flags >10% regressions
-- [ ] 6.3 Document benchmark methodology and regression thresholds in `docs/reference/`
+- [x] 6.3 Document benchmark methodology and regression thresholds in `docs/reference/`
