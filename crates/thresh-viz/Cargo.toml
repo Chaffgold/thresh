@@ -1,0 +1,27 @@
+[package]
+name = "thresh-viz"
+description = "Track visualization dashboard for the thresh tracking framework"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = []
+gui = ["eframe", "egui", "egui_plot"]
+
+[dependencies]
+thresh-core = { path = "../thresh-core" }
+thresh-tracker = { path = "../thresh-tracker" }
+thresh-eval = { path = "../thresh-eval" }
+nalgebra = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# GUI deps are optional — the data layer works without them
+eframe = { version = "0.31", optional = true }
+egui = { version = "0.31", optional = true }
+egui_plot = { version = "0.31", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
