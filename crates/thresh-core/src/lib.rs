@@ -10,3 +10,4 @@ pub mod sensor;
 pub mod state;
 pub mod time;
 pub mod track;
+pub mod weights;

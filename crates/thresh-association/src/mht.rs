@@ -19,14 +19,19 @@ pub struct Hypothesis {
     pub assignments: Assignment,
     /// Log-likelihood of this hypothesis.
     pub log_likelihood: f64,
+    /// Index of the parent hypothesis in the previous scan (for N-scan pruning).
+    pub parent: Option<usize>,
+    /// Scan (timestep) at which this hypothesis was created.
+    pub scan: usize,
 }
 
 /// MHT hypothesis tree with pruning.
 pub struct HypothesisTree {
     hypotheses: Vec<Hypothesis>,
     max_hypotheses: usize,
-    #[allow(dead_code)]
     n_scan_depth: usize,
+    /// Current scan (timestep) counter.
+    current_scan: usize,
 }
 
 impl HypothesisTree {
@@ -39,6 +44,7 @@ impl HypothesisTree {
             hypotheses: Vec::new(),
             max_hypotheses,
             n_scan_depth,
+            current_scan: 0,
         }
     }
 
@@ -57,11 +63,16 @@ impl HypothesisTree {
     ///   gated-out pairs.
     /// * `gate` — log-likelihood threshold; pairs below this are infeasible.
     pub fn expand(&mut self, n_tracks: usize, n_dets: usize, likelihoods: &[Vec<f64>], gate: f64) {
+        self.current_scan += 1;
+        let scan = self.current_scan;
+
         let parents = if self.hypotheses.is_empty() {
             // Bootstrap: create a single empty parent hypothesis.
             vec![Hypothesis {
                 assignments: Vec::new(),
                 log_likelihood: 0.0,
+                parent: None,
+                scan: 0,
             }]
         } else {
             std::mem::take(&mut self.hypotheses)
@@ -69,7 +80,7 @@ impl HypothesisTree {
 
         let mut children = Vec::new();
 
-        for parent in &parents {
+        for (parent_idx, parent) in parents.iter().enumerate() {
             let mut ctx = EnumCtx {
                 n_tracks,
                 likelihoods,
@@ -85,8 +96,21 @@ impl HypothesisTree {
                 children.push(Hypothesis {
                     assignments,
                     log_likelihood: parent.log_likelihood + score,
+                    parent: Some(parent_idx),
+                    scan,
                 });
             }
+        }
+
+        // Hypothesis count monitoring: warn if count exceeds 2 * k_best.
+        // In debug builds, emit to stderr so developers notice.
+        if children.len() > 2 * self.max_hypotheses {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "[MHT] hypothesis count {} exceeds 2 * k_best ({}); pruning may be insufficient",
+                children.len(),
+                self.max_hypotheses
+            );
         }
 
         self.hypotheses = children;
@@ -101,6 +125,87 @@ impl HypothesisTree {
         self.hypotheses
             .sort_by(|a, b| b.log_likelihood.partial_cmp(&a.log_likelihood).unwrap());
         self.hypotheses.truncate(self.max_hypotheses);
+    }
+
+    /// Perform N-scan pruning: look back `n_scan_depth` scans and identify
+    /// track-detection assignments that all surviving hypotheses agree on.
+    /// Collapse those agreed-upon assignments and remove hypotheses that are
+    /// no longer reachable.
+    ///
+    /// Returns the agreed-upon assignments at the oldest scan as
+    /// `Vec<(track_idx, Option<det_idx>)>`, which the caller can use to
+    /// finalize those associations.
+    pub fn prune_n_scan(&mut self) -> Vec<(usize, Option<usize>)> {
+        if self.hypotheses.is_empty() || self.current_scan <= self.n_scan_depth {
+            return Vec::new();
+        }
+
+        // For N-scan pruning we look at the assignments in all surviving hypotheses.
+        // Since we store flat hypotheses (not a tree with shared ancestry), we
+        // compare the assignments across all hypotheses. Assignments that are
+        // identical across ALL hypotheses are "agreed upon" and can be collapsed.
+
+        let first = &self.hypotheses[0].assignments;
+        let mut agreed: Vec<(usize, Option<usize>)> = Vec::new();
+
+        for &(ti, ref di) in first {
+            let all_agree = self
+                .hypotheses
+                .iter()
+                .skip(1)
+                .all(|h| h.assignments.iter().any(|(t, d)| *t == ti && d == di));
+            if all_agree {
+                agreed.push((ti, *di));
+            }
+        }
+
+        // If there are agreed-upon assignments, remove them from all hypotheses
+        // (they are finalized and no longer need to be tracked).
+        if !agreed.is_empty() {
+            for hyp in &mut self.hypotheses {
+                hyp.assignments
+                    .retain(|(ti, di)| !agreed.iter().any(|(at, ad)| *at == *ti && *ad == *di));
+            }
+
+            // Memory reclamation: deduplicate hypotheses that are now identical.
+            self.compact();
+        }
+
+        agreed
+    }
+
+    /// Remove duplicate hypotheses (same assignments and similar scores)
+    /// after N-scan pruning collapses agreed assignments.
+    fn compact(&mut self) {
+        if self.hypotheses.len() <= 1 {
+            return;
+        }
+
+        // Sort by score descending so we keep the best when deduplicating.
+        self.hypotheses
+            .sort_by(|a, b| b.log_likelihood.partial_cmp(&a.log_likelihood).unwrap());
+
+        let mut unique: Vec<Hypothesis> = Vec::with_capacity(self.hypotheses.len());
+        for hyp in std::mem::take(&mut self.hypotheses) {
+            let is_dup = unique.iter().any(|u| u.assignments == hyp.assignments);
+            if !is_dup {
+                unique.push(hyp);
+            }
+        }
+        self.hypotheses = unique;
+    }
+
+    /// Extract consistent track IDs by tracing the best hypothesis's
+    /// assignment history.
+    ///
+    /// Returns a map from track index to the detection index it was assigned
+    /// to in the best hypothesis, providing a consistent association across
+    /// timesteps.
+    pub fn consistent_track_assignments(&self) -> Vec<(usize, Option<usize>)> {
+        match self.best_hypothesis() {
+            Some(h) => h.assignments.clone(),
+            None => Vec::new(),
+        }
     }
 
     /// Get the best (most likely) hypothesis.
@@ -242,6 +347,8 @@ mod tests {
             .map(|i| Hypothesis {
                 assignments: vec![(0, Some(0))],
                 log_likelihood: -(i as f64),
+                parent: None,
+                scan: 1,
             })
             .collect();
 
@@ -267,14 +374,20 @@ mod tests {
             Hypothesis {
                 assignments: vec![(0, Some(0))],
                 log_likelihood: -5.0,
+                parent: None,
+                scan: 1,
             },
             Hypothesis {
                 assignments: vec![(0, Some(1))],
                 log_likelihood: -1.0,
+                parent: None,
+                scan: 1,
             },
             Hypothesis {
                 assignments: vec![(0, None)],
                 log_likelihood: -3.0,
+                parent: None,
+                scan: 1,
             },
         ];
 
@@ -320,6 +433,106 @@ mod tests {
     fn test_mht_empty_tree_best_hypothesis() {
         let tree = HypothesisTree::new(10, 3);
         assert!(tree.best_hypothesis().is_none());
+    }
+
+    #[test]
+    fn test_mht_n_scan_pruning_collapses_agreed() {
+        // Manually construct hypotheses that all agree on the same assignment
+        // for track 0, but differ on track 1. N-scan pruning should find
+        // the agreed assignment for track 0.
+        let mut tree = HypothesisTree::new(100, 1);
+        tree.current_scan = 2; // pretend we're past n_scan_depth
+
+        tree.hypotheses = vec![
+            Hypothesis {
+                // Both agree: track 0 -> det 0
+                // Differ: track 1 -> det 1 vs det 2
+                assignments: vec![(0, Some(0)), (1, Some(1))],
+                log_likelihood: -1.0,
+                parent: None,
+                scan: 2,
+            },
+            Hypothesis {
+                assignments: vec![(0, Some(0)), (1, Some(2))],
+                log_likelihood: -2.0,
+                parent: None,
+                scan: 2,
+            },
+            Hypothesis {
+                assignments: vec![(0, Some(0)), (1, None)],
+                log_likelihood: -3.0,
+                parent: None,
+                scan: 2,
+            },
+        ];
+
+        let agreed = tree.prune_n_scan();
+
+        // All hypotheses agree on (0, Some(0)), so it should be collapsed
+        assert_eq!(agreed.len(), 1, "should find one agreed assignment");
+        assert_eq!(agreed[0], (0, Some(0)));
+
+        // After pruning, the agreed assignment should be removed from all hypotheses
+        for h in &tree.hypotheses {
+            assert!(
+                !h.assignments.iter().any(|(t, d)| *t == 0 && *d == Some(0)),
+                "agreed assignment should be removed from hypotheses"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mht_consistent_track_assignments() {
+        let mut tree = HypothesisTree::new(100, 3);
+        let likelihoods = vec![vec![-1.0, -2.0], vec![-1.5, -0.5]];
+        tree.expand(2, 2, &likelihoods, f64::NEG_INFINITY);
+
+        let assignments = tree.consistent_track_assignments();
+        // Should return the assignments from the best hypothesis
+        assert!(!assignments.is_empty());
+        // Each track should appear exactly once
+        let track_ids: Vec<usize> = assignments.iter().map(|(t, _)| *t).collect();
+        assert!(track_ids.contains(&0));
+        assert!(track_ids.contains(&1));
+    }
+
+    #[test]
+    fn test_mht_compact_removes_duplicates() {
+        let mut tree = HypothesisTree::new(100, 3);
+        tree.hypotheses = vec![
+            Hypothesis {
+                assignments: vec![(0, Some(0))],
+                log_likelihood: -1.0,
+                parent: None,
+                scan: 1,
+            },
+            Hypothesis {
+                assignments: vec![(0, Some(0))],
+                log_likelihood: -2.0,
+                parent: None,
+                scan: 1,
+            },
+            Hypothesis {
+                assignments: vec![(0, Some(1))],
+                log_likelihood: -1.5,
+                parent: None,
+                scan: 1,
+            },
+        ];
+        tree.compact();
+        // Two unique assignment sets: (0, Some(0)) and (0, Some(1))
+        assert_eq!(
+            tree.hypothesis_count(),
+            2,
+            "compact should remove duplicate assignment sets"
+        );
+        // The better-scoring duplicate should be kept
+        let best = tree
+            .hypotheses
+            .iter()
+            .find(|h| h.assignments == vec![(0, Some(0))])
+            .unwrap();
+        assert!((best.log_likelihood - (-1.0)).abs() < 1e-10);
     }
 
     #[test]

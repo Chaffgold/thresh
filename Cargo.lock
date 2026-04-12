@@ -4142,6 +4142,7 @@ dependencies = [
  "nalgebra",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
