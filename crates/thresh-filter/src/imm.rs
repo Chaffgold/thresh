@@ -586,7 +586,7 @@ impl ImmFilter {
     /// the predicted combined estimate for gating.
     ///
     /// After calling this, the internal model-conditioned filters are in
-    /// predicted (prior) state, ready for [`update_with_measurement`].
+    /// predicted (prior) state, ready for `update_with_measurement`.
     pub fn predict(&mut self, dt: f64) -> (DVector<f64>, DMatrix<f64>) {
         self.interaction_step();
         self.predict_step(dt);
@@ -594,7 +594,7 @@ impl ImmFilter {
     }
 
     /// Run the measurement update, mode probability update, and combination
-    /// steps. Must be called after [`predict`].
+    /// steps. Must be called after `predict`.
     ///
     /// Returns the combined state, covariance, mode probabilities, and
     /// dominant mode index.
