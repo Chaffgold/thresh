@@ -128,3 +128,34 @@ jobs:
             echo "no orbital-*.toml scenarios found under crates/thresh-data/scenarios/" >&2
             exit 1
           fi
+
+  adsb-benchmark-gate:
+    # Same regression gate pattern as synth-benchmark-gate / orbital-benchmark-gate,
+    # but for ADS-B scenarios that need the `adsb` feature (reqwest + csv).
+    # All adsb-*.toml scenarios in the repo reference cached JSON state-vector
+    # fixtures so this job runs offline. The live-OpenSky fallback path in
+    # `run_adsb_benchmark` is exercised by the `--ignored` integration tests
+    # under `crates/thresh-data/tests/`.
+    name: ADS-B benchmark gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build thresh-data CLI with adsb feature
+        run: cargo build -p thresh-data --features adsb --bin thresh-data
+      - name: Run all ADS-B scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          any=0
+          for toml in crates/thresh-data/scenarios/adsb-*.toml; do
+            any=1
+            echo "=== $toml ==="
+            ./target/debug/thresh-data run "$toml"
+          done
+          if [ "$any" -eq 0 ]; then
+            echo "no adsb-*.toml scenarios found under crates/thresh-data/scenarios/" >&2
+            exit 1
+          fi

@@ -1,0 +1,22 @@
+name = "adsb-tracon"
+description = "Synthetic 4-aircraft TRACON approach to JFK from NE / SE / NW / SW. Exercises the multi-target ADS-B pipeline: state-vector ingestion, WGS84→ENU, ground-truth extraction, and tracker data-association across overlapping descents. Deterministic fixture so the CI gate is reproducible and runs offline."
+
+[source.AdsB]
+region = "JFK-TRACON"
+state_file = "adsb-tracon.json"
+ref_lat_deg = 40.6413
+ref_lon_deg = -73.7781
+ref_alt_m = 0.0
+
+[parameters]
+duration_s = 90.0
+dt = 1.0
+measurement_noise_sigma = 50.0
+gate_threshold = 500.0
+
+[baselines]
+# Permissive floor, same rationale as adsb-single-flight. The association
+# path across 4 simultaneous tracks is the distinguishing feature of this
+# scenario relative to the single-flight one; catastrophic association
+# breakage still surfaces through the pipeline error path.
+mota = -2.0

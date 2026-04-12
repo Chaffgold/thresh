@@ -1,0 +1,28 @@
+name = "adsb-single-flight"
+description = "Single synthetic ADS-B flight descending into JFK. Uses a cached state-vector fixture so the scenario runs offline in the CI benchmark gate and is deterministic across runs."
+
+[source.AdsB]
+region = "JFK"
+state_file = "adsb-single-flight.json"
+ref_lat_deg = 40.6413
+ref_lon_deg = -73.7781
+ref_alt_m = 0.0
+
+[parameters]
+# One sample per second over the ~60 s approach in the fixture.
+duration_s = 60.0
+dt = 1.0
+measurement_noise_sigma = 50.0
+# Generous gate — ADS-B altitude noise is larger than the horizontal
+# component, and the tracker operates in metres so the threshold is in
+# squared-Mahalanobis units.
+gate_threshold = 500.0
+
+[baselines]
+# Permissive floor — the point of the CI gate is to catch breakage in
+# the ADS-B ingestion pipeline (state-vector fixture parse, WGS84→ENU
+# transform, ground-truth extraction, tracker wiring) rather than
+# flaking on marginal tracker accuracy. Orbital scenarios use the same
+# convention. Catastrophic pipeline breakage fails earlier because the
+# runner itself errors out before reaching the regression check.
+mota = -1.0

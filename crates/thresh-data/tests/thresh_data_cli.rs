@@ -30,10 +30,20 @@ gate_threshold = 500.0
 mota = 0.3
 "#;
 
-const ADSB_TOML: &str = r#"
+/// ADS-B scenario with no cached `state_file` set. Used by
+/// `run_adsb_errors_out_without_fixture_or_network` to verify that the
+/// CLI exits non-zero regardless of feature configuration when there's
+/// nothing the runner can load. Without `adsb` → "feature required";
+/// with `adsb` → the runner errors because the fallback to OpenSky is
+/// intentionally disabled in the CI-facing code path.
+const ADSB_TOML_NO_FIXTURE: &str = r#"
 name = "test-adsb"
-description = "ADS-B scenario (should error out)"
-source = { AdsB = { region = "JFK" } }
+description = "ADS-B scenario with no cached fixture"
+[source.AdsB]
+region = "JFK"
+ref_lat_deg = 40.6413
+ref_lon_deg = -73.7781
+ref_alt_m = 0.0
 
 [parameters]
 duration_s = 10.0
@@ -140,7 +150,7 @@ fn unknown_subcommand_errors() {
 fn list_walks_directory() {
     let dir = tempfile::tempdir().unwrap();
     write_scenario(dir.path(), "synth.toml", SYNTH_CV_CLEAN_TOML);
-    write_scenario(dir.path(), "adsb.toml", ADSB_TOML);
+    write_scenario(dir.path(), "adsb.toml", ADSB_TOML_NO_FIXTURE);
     // A non-.toml file must be skipped silently.
     std::fs::write(dir.path().join("notes.md"), "ignore me").unwrap();
 
@@ -260,16 +270,29 @@ fn run_synthetic_reports_regression_failure() {
 }
 
 #[test]
-fn run_adsb_errors_out() {
+fn run_adsb_errors_out_without_fixture_or_network() {
+    // With no `state_file` set the ADS-B runner must exit non-zero
+    // regardless of whether the binary was built with `--features adsb`:
+    //   - Without the feature: errors with "feature required".
+    //   - With the feature: `run_adsb_benchmark` surfaces the "no
+    //     state_file set" error because the live-OpenSky fallback is
+    //     disabled in the benchmark path.
     let dir = tempfile::tempdir().unwrap();
-    let path = write_scenario(dir.path(), "adsb.toml", ADSB_TOML);
+    let path = write_scenario(dir.path(), "adsb.toml", ADSB_TOML_NO_FIXTURE);
     let out = Command::new(bin_path())
         .arg("run")
         .arg(&path)
         .output()
         .expect("spawn thresh-data");
     assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("ADS-B"));
+    let stderr = String::from_utf8_lossy(&out.stderr).to_lowercase();
+    assert!(
+        stderr.contains("adsb")
+            || stderr.contains("ads-b")
+            || stderr.contains("state_file")
+            || stderr.contains("feature required"),
+        "unexpected stderr: {stderr}"
+    );
 }
 
 #[test]
@@ -355,6 +378,52 @@ fn run_orbital_iss_cached_tle_end_to_end() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("scenario:    orbital-iss"));
     assert!(stdout.contains("MOTA:"));
+    assert!(stdout.contains("regression: OK"));
+}
+
+#[cfg(feature = "adsb")]
+#[test]
+fn run_adsb_single_flight_cached_fixture_end_to_end() {
+    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scenarios")
+        .join("adsb-single-flight.toml");
+    assert!(manifest.exists(), "fixture {} missing", manifest.display());
+    let out = Command::new(bin_path())
+        .arg("run")
+        .arg(&manifest)
+        .output()
+        .expect("spawn thresh-data");
+    assert!(
+        out.status.success(),
+        "adsb-single-flight scenario exited non-zero. stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("scenario:    adsb-single-flight"));
+    assert!(stdout.contains("regression: OK"));
+}
+
+#[cfg(feature = "adsb")]
+#[test]
+fn run_adsb_tracon_cached_fixture_end_to_end() {
+    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scenarios")
+        .join("adsb-tracon.toml");
+    assert!(manifest.exists(), "fixture missing");
+    let out = Command::new(bin_path())
+        .arg("run")
+        .arg(&manifest)
+        .output()
+        .expect("spawn thresh-data");
+    assert!(
+        out.status.success(),
+        "adsb-tracon scenario exited non-zero. stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("scenario:    adsb-tracon"));
     assert!(stdout.contains("regression: OK"));
 }
 
