@@ -277,6 +277,9 @@ impl MultiObjectTrackerEcef {
                 age: et.age,
                 history: Vec::new(),
                 max_history: 1,
+                dominant_mode: None,
+                mode_probabilities: None,
+                imm_key: None,
             };
             update_lifecycle(&mut tmp, was_associated, &self.confirmation, &self.deletion);
             et.hits = tmp.total_hits;

@@ -18,6 +18,7 @@ target
 
 # ONNX models (loaded at runtime, not committed)
 *.onnx
+!test-data/models/*.onnx
 *.trt
 *.engine
 

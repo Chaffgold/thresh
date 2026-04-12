@@ -7,4 +7,5 @@ license.workspace = true
 
 [dependencies]
 thresh-core = { path = "../thresh-core" }
+thresh-association = { path = "../thresh-association" }
 nalgebra = { workspace = true }

@@ -4,3 +4,4 @@ pub mod centralized;
 pub mod covariance_intersection;
 pub mod information;
 pub mod registration;
+pub mod t2t;

@@ -1,0 +1,13 @@
+name = "synth-heterogeneous"
+description = "5 targets across three kinematic classes (UAV, aircraft, missile). Tests tracker with widely varying speeds and altitudes."
+source = "Synthetic"
+
+[parameters]
+scenario_type = "heterogeneous"
+duration_s = 30.0
+dt = 1.0
+measurement_noise_sigma = 50.0
+gate_threshold = 500.0
+
+[baselines]
+mota = 0.3
