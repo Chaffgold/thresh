@@ -5,6 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-04-12
+
+Major feature release: IMM adaptive filtering, streaming tracker, track-to-track fusion, detection pipeline, Python bindings, and performance optimizations.
+
+### Added
+
+#### Interacting Multiple Model (IMM) Filter
+- `ImmFilter` in `thresh-filter` combining N motion models (CV, CA, CTRV, CT) with Markov-switching transition probabilities. Full 5-step cycle: interaction → model-conditioned predict → update → mode probability update (log-space likelihoods) → state/covariance combination.
+- `StateMapping` trait for cross-model state projection (6D common representation).
+- `ImmConfig` with factory methods: `cv_ca()`, `cv_ctrv()`, `cv_ca_ctrv_ct()`.
+- `MultiObjectTracker::new_imm_position()` constructor for IMM-based tracking with automatic mode switching.
+
+#### Real-Time Streaming Tracker
+- `StreamingTracker` in `thresh-tracker` (feature-gated: `streaming`) wrapping `MultiObjectTracker` with tokio mpsc/broadcast channels.
+- `TemporalBinner` for frame accumulation with configurable `frame_duration_s` and `max_latency_s`.
+- `StreamingConfig` with `DropPolicy::DropOldest | Block` and latency management (predict-only frames when tracker falls behind).
+- `TrackSnapshot` / `TrackState` broadcast output with track positions, velocities, and confirmation status.
+
+#### Track-to-Track Fusion
+- `TrackExchange` wire format, `t2t_association()` via augmented-state Mahalanobis distance + Hungarian assignment.
+- Three fusion modes: `Naive` (inverse-covariance-weighted), `CovarianceIntersection` (safe for unknown cross-covariances), `OptimalWithCrossCovariance` (Bar-Shalom formula with P12 bookkeeping).
+- `FederatedFusionManager` with stateful track management, temporal extrapolation (`extrapolate_track`, `align_to_common_time`), track birth/timeout, and `get_fused_tracks()` common operating picture.
+
+#### Transformer-Based Detection Pipeline
+- `Detection3D` type in `thresh-core` with position, dimensions, yaw, class_id, confidence.
+- `DetectionPipeline` trait, `SensorInput`, `SensorInputType` enum (PointCloud, ImageTensor).
+- 3D non-maximum suppression (`nms_3d`) and confidence filtering (`filter_by_confidence`).
+- `OnnxDetector` (feature-gated: `onnx`) with placeholder inference; `MockDetector` for testing.
+- `OnnxDetectorConfig` with voxel size and confidence threshold configuration.
+- Point cloud voxelization and image normalization preprocessing in `thresh-inference::preprocess`.
+- `MultiObjectTracker::step_detections(&[Detection3D], dt)` bridging detection output to tracker input.
+- Synthetic ONNX test model (`test-data/models/test_detector.onnx`) for CI validation.
+
+#### Python Bindings (`thresh-py`)
+- New `crates/thresh-py` crate with PyO3 `#[pymodule]` exposing:
+  - `PyMultiObjectTracker` — step with list-of-lists detections, get confirmed tracks.
+  - `PyKalmanFilter` — predict/update with list-based matrix I/O.
+  - `compute_mot_metrics_py` — MOTA/MOTP/ID-switches from Python lists.
+  - `ThreshError` custom exception, `run_scenario` placeholder.
+- `pyproject.toml` for maturin wheel builds.
+- Conversion helpers: `lists_to_dvectors`, `dmatrix_to_lists`, `lists_to_dmatrix`.
+- pytest suite (`tests/python/`) for tracker, filter, and metrics.
+- CI: `python-tests` job (maturin develop + pytest) and cross-platform wheel build matrix.
+
+#### Performance Optimization
+- `HungarianSolver` with pre-allocated flat buffers — avoids per-call Vec allocation for repeated assignment problems. `hungarian_assignment()` remains as a convenience wrapper.
+- `rayon` parallelism (feature-gated: `parallel`) for `predict_all` (≥32 tracks) and `build_track_cost_matrix` (per-row parallel computation).
+- Criterion micro-benchmark suite: Hungarian (10/100/500), KF predict/update, Mahalanobis 6D, tracker step (10/50/200 targets).
+- CI benchmark job with artifact upload; profiling documentation in `docs/reference/`.
+
+#### Scenario Variants
+- Three new synthetic benchmark scenarios: `synth-maneuvering` (CV/CTRV/CA mode switches), `synth-heterogeneous` (UAV/aircraft/missile mixed dynamics), `synth-low-pd` (P_d=0.7 + clutter).
+- `scenario_type` field on `ScenarioParameters` with dispatcher pattern.
+- `radar_config_for_scenario()` for scenario-specific detection parameters.
+
+### Changed
+- `ScenarioSource::AdsB` and `ScenarioSource::Orbital` extended with additional configuration fields (all backward-compatible via serde defaults).
+- `FederatedFusionManager` is now stateful — maintains fused tracks across `fuse()` calls.
+- SonarCloud CPD exclusion for IMM trait-impl files (false-positive duplication on `StateMapping` method signatures).
+
 ## [0.1.0] - 2026-04-12
 
 Initial public release. Multi-sensor fusion multi-object tracking framework in Rust.
@@ -57,4 +117,5 @@ Initial public release. Multi-sensor fusion multi-object tracking framework in R
 - Mathematical reference documents in `docs/reference/`.
 - 22 validated OpenSpec capability specifications across 8 domains.
 
+[0.2.0]: https://github.com/Chaffgold/thresh/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Chaffgold/thresh/releases/tag/v0.1.0
