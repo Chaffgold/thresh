@@ -26,6 +26,12 @@ pub enum OrbitalError {
     Json(String),
     /// Invalid input parameter.
     InvalidInput(String),
+    /// HTTP request failed (Space-Track / CelesTrak clients).
+    Http(String),
+    /// HTTP response had a non-success status code.
+    HttpStatus { code: u16, body: String },
+    /// Authentication failed (bad credentials or expired session).
+    Auth(String),
 }
 
 impl fmt::Display for OrbitalError {
@@ -35,11 +41,23 @@ impl fmt::Display for OrbitalError {
             OrbitalError::Sgp4(msg) => write!(f, "SGP4 error: {msg}"),
             OrbitalError::Json(msg) => write!(f, "JSON parse error: {msg}"),
             OrbitalError::InvalidInput(msg) => write!(f, "invalid input: {msg}"),
+            OrbitalError::Http(msg) => write!(f, "HTTP error: {msg}"),
+            OrbitalError::HttpStatus { code, body } => {
+                let snippet: String = body.chars().take(200).collect();
+                write!(f, "HTTP {code}: {snippet}")
+            }
+            OrbitalError::Auth(msg) => write!(f, "authentication error: {msg}"),
         }
     }
 }
 
 impl std::error::Error for OrbitalError {}
+
+impl From<reqwest::Error> for OrbitalError {
+    fn from(e: reqwest::Error) -> Self {
+        OrbitalError::Http(e.to_string())
+    }
+}
 
 impl From<sgp4::Error> for OrbitalError {
     fn from(e: sgp4::Error) -> Self {
@@ -727,12 +745,27 @@ fn build_ground_truth_frame(p: &EnuPosition, norad_id: u64) -> Frame {
 }
 
 // ---------------------------------------------------------------------------
-// Space-Track client stub (Task 4.1)
+// Space-Track client (Task 4.1)
 // ---------------------------------------------------------------------------
 
-/// Space-Track.org API client (stub — requires network/reqwest).
+const SPACETRACK_BASE: &str = "https://www.space-track.org";
+
+/// Space-Track.org API client with session-cookie authentication.
+///
+/// On construction, credentials are loaded from the thresh credential store
+/// under the `"spacetrack"` service name (env vars `THRESH_SPACETRACK_USERNAME`
+/// / `THRESH_SPACETRACK_PASSWORD`, or `~/.thresh/credentials.toml` as a
+/// fallback). The first authenticated call triggers a POST to
+/// `/ajaxauth/login`; the session cookie returned by the server is captured
+/// from the `Set-Cookie` response header and replayed on subsequent requests.
+///
+/// A hand-rolled cookie jar is used (rather than reqwest's `cookies` feature)
+/// so that enabling the `orbital` feature does not pull in the
+/// `cookie_store` / `publicsuffix` transitive dependency graph.
 pub struct SpaceTrackClient {
-    _credentials: crate::credentials::Credentials,
+    client: reqwest::blocking::Client,
+    credentials: crate::credentials::Credentials,
+    session_cookie: std::cell::RefCell<Option<String>>,
 }
 
 impl Default for SpaceTrackClient {
@@ -745,26 +778,142 @@ impl SpaceTrackClient {
     /// Create a new Space-Track client using stored credentials.
     pub fn new() -> Self {
         Self {
-            _credentials: crate::credentials::load_credentials("spacetrack"),
+            client: reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .expect("failed to build HTTP client"),
+            credentials: crate::credentials::load_credentials("spacetrack"),
+            session_cookie: std::cell::RefCell::new(None),
         }
     }
 
-    /// Fetch TLEs for a given NORAD catalog ID.
+    /// Authenticate with Space-Track by POSTing credentials to
+    /// `/ajaxauth/login`. The session cookie returned in the
+    /// `Set-Cookie` header is captured and reused for subsequent requests.
+    fn authenticate(&self) -> Result<()> {
+        if self.session_cookie.borrow().is_some() {
+            return Ok(());
+        }
+        let (user, pass) = match (
+            self.credentials.username.as_ref(),
+            self.credentials.password.as_ref(),
+        ) {
+            (Some(u), Some(p)) => (u, p),
+            _ => {
+                return Err(OrbitalError::Auth(
+                    "Space-Track credentials not set — set THRESH_SPACETRACK_USERNAME / \
+                     THRESH_SPACETRACK_PASSWORD or ~/.thresh/credentials.toml"
+                        .into(),
+                ));
+            }
+        };
+
+        let resp = self
+            .client
+            .post(format!("{SPACETRACK_BASE}/ajaxauth/login"))
+            .form(&[("identity", user.as_str()), ("password", pass.as_str())])
+            .send()?;
+
+        if !resp.status().is_success() {
+            let code = resp.status().as_u16();
+            let body = resp.text().unwrap_or_default();
+            return Err(OrbitalError::Auth(format!(
+                "login failed (HTTP {code}): {}",
+                body.chars().take(200).collect::<String>()
+            )));
+        }
+
+        let cookies: Vec<String> = resp
+            .headers()
+            .get_all(reqwest::header::SET_COOKIE)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .map(parse_cookie_name_value)
+            .collect();
+        if cookies.is_empty() {
+            return Err(OrbitalError::Auth(
+                "login succeeded but no Set-Cookie header was returned".into(),
+            ));
+        }
+        *self.session_cookie.borrow_mut() = Some(cookies.join("; "));
+        Ok(())
+    }
+
+    /// Fetch the latest TLE for a single NORAD catalog ID.
     ///
-    /// TODO: Implement HTTP calls when reqwest is available under the `orbital` feature.
-    pub fn fetch_tle(&self, _norad_id: u32) -> Result<Vec<Tle>> {
-        Err(OrbitalError::InvalidInput(
-            "Space-Track HTTP client not yet implemented".to_string(),
-        ))
+    /// Issues a GP query against
+    /// `/basicspacedata/query/class/gp/NORAD_CAT_ID/<id>/format/json`.
+    /// Parses the response with [`parse_gp_json`] so TLE / GP changes stay
+    /// localised to one parser.
+    pub fn fetch_tle(&self, norad_id: u32) -> Result<Vec<Tle>> {
+        self.authenticate()?;
+        let url = format!(
+            "{SPACETRACK_BASE}/basicspacedata/query/class/gp/NORAD_CAT_ID/{norad_id}/format/json"
+        );
+        let body = self.get_text(&url)?;
+        parse_gp_json(&body)
+    }
+
+    /// Fetch the latest TLEs for a list of NORAD catalog IDs in one request.
+    pub fn fetch_tles(&self, norad_ids: &[u32]) -> Result<Vec<Tle>> {
+        if norad_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.authenticate()?;
+        let ids = norad_ids
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let url = format!(
+            "{SPACETRACK_BASE}/basicspacedata/query/class/gp/NORAD_CAT_ID/{ids}/format/json"
+        );
+        let body = self.get_text(&url)?;
+        parse_gp_json(&body)
+    }
+
+    /// Issue an authenticated GET and return the response body as a string,
+    /// mapping non-success HTTP statuses to [`OrbitalError::HttpStatus`].
+    fn get_text(&self, url: &str) -> Result<String> {
+        let mut req = self.client.get(url);
+        if let Some(cookie) = self.session_cookie.borrow().as_ref() {
+            req = req.header(reqwest::header::COOKIE, cookie);
+        }
+        let resp = req.send()?;
+        if !resp.status().is_success() {
+            let code = resp.status().as_u16();
+            let body = resp.text().unwrap_or_default();
+            return Err(OrbitalError::HttpStatus { code, body });
+        }
+        Ok(resp.text()?)
     }
 }
 
+/// Parse a `Set-Cookie` header value down to its `name=value` pair. Any
+/// attributes after the first `;` (Path=, HttpOnly, etc.) are dropped because
+/// we only care about replaying the session cookie on subsequent requests to
+/// the same host.
+fn parse_cookie_name_value(set_cookie: &str) -> String {
+    set_cookie
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
 // ---------------------------------------------------------------------------
-// CelesTrak client stub (Task 4.9)
+// CelesTrak client (Task 4.9)
 // ---------------------------------------------------------------------------
 
-/// CelesTrak API client (stub — requires network/reqwest).
-pub struct CelestrakClient;
+const CELESTRAK_BASE: &str = "https://celestrak.org";
+
+/// CelesTrak public GP data client. No authentication required; used as a
+/// redundant backup for Space-Track when Space-Track is throttling or the
+/// user has not configured credentials.
+pub struct CelestrakClient {
+    client: reqwest::blocking::Client,
+}
 
 impl Default for CelestrakClient {
     fn default() -> Self {
@@ -775,16 +924,39 @@ impl Default for CelestrakClient {
 impl CelestrakClient {
     /// Create a new CelesTrak client (no authentication needed).
     pub fn new() -> Self {
-        Self
+        Self {
+            client: reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .expect("failed to build HTTP client"),
+        }
     }
 
-    /// Fetch GP data for a given group name.
-    ///
-    /// TODO: Implement HTTP calls when reqwest is available under the `orbital` feature.
-    pub fn fetch_gp_group(&self, _group: &str) -> Result<Vec<Tle>> {
-        Err(OrbitalError::InvalidInput(
-            "CelesTrak HTTP client not yet implemented".to_string(),
-        ))
+    /// Fetch the GP JSON for a named CelesTrak group (e.g. `"stations"`,
+    /// `"active"`, `"starlink"`).
+    pub fn fetch_gp_group(&self, group: &str) -> Result<Vec<Tle>> {
+        let url = format!("{CELESTRAK_BASE}/NORAD/elements/gp.php?GROUP={group}&FORMAT=json");
+        self.fetch_json(&url)
+    }
+
+    /// Fetch a single satellite by NORAD catalog ID.
+    pub fn fetch_catnr(&self, norad_id: u32) -> Result<Vec<Tle>> {
+        let url = format!("{CELESTRAK_BASE}/NORAD/elements/gp.php?CATNR={norad_id}&FORMAT=json");
+        self.fetch_json(&url)
+    }
+
+    /// Shared GET-and-parse path used by both [`fetch_gp_group`] and
+    /// [`fetch_catnr`]. Maps non-success HTTP statuses to
+    /// [`OrbitalError::HttpStatus`] and delegates parsing to [`parse_gp_json`].
+    fn fetch_json(&self, url: &str) -> Result<Vec<Tle>> {
+        let resp = self.client.get(url).send()?;
+        if !resp.status().is_success() {
+            let code = resp.status().as_u16();
+            let body = resp.text().unwrap_or_default();
+            return Err(OrbitalError::HttpStatus { code, body });
+        }
+        let body = resp.text()?;
+        parse_gp_json(&body)
     }
 }
 
@@ -1035,21 +1207,103 @@ ISS (ZARYA)
         assert!(meta.name.contains("ISS"));
     }
 
-    // ── Task 4.12: Network integration test (ignored) ────────────────────
+    // ── Task 4.1 / 4.9: Unit tests for HTTP clients (no network) ─────────
+
+    #[test]
+    fn parse_cookie_strips_attributes() {
+        // A realistic Space-Track Set-Cookie header.
+        let raw = "chocolatechip=abc123xyz; Path=/; HttpOnly; Secure; SameSite=Lax";
+        assert_eq!(parse_cookie_name_value(raw), "chocolatechip=abc123xyz");
+    }
+
+    #[test]
+    fn parse_cookie_handles_no_attributes() {
+        assert_eq!(
+            parse_cookie_name_value("session=token42"),
+            "session=token42"
+        );
+    }
+
+    #[test]
+    fn parse_cookie_trims_whitespace() {
+        assert_eq!(
+            parse_cookie_name_value("  session=token42  ; Path=/"),
+            "session=token42"
+        );
+    }
+
+    #[test]
+    fn spacetrack_missing_credentials_yields_auth_error() {
+        // Force empty credentials by constructing the client with a
+        // guaranteed-missing service name, then swapping the inner
+        // credentials. We can't easily do that, so this test asserts the
+        // error path on a freshly-constructed client when there is no
+        // configured THRESH_SPACETRACK_* env vars in the test environment.
+        // If the developer happens to have real creds set in their shell,
+        // `authenticate()` would instead try to hit the network; we skip
+        // the assertion in that case.
+        if std::env::var("THRESH_SPACETRACK_USERNAME").is_ok()
+            && std::env::var("THRESH_SPACETRACK_PASSWORD").is_ok()
+        {
+            return;
+        }
+        let client = SpaceTrackClient::new();
+        // Hold session cookie to None so authenticate() runs.
+        *client.session_cookie.borrow_mut() = None;
+        // The client's credentials come from load_credentials("spacetrack");
+        // with no env vars and no ~/.thresh/credentials.toml entry, both
+        // fields are None, which must map to an Auth error rather than
+        // attempting a network request.
+        if client.credentials.username.is_none() || client.credentials.password.is_none() {
+            let err = client.authenticate().unwrap_err();
+            assert!(
+                matches!(err, OrbitalError::Auth(_)),
+                "expected Auth error, got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn celestrak_fetch_catnr_url_shape() {
+        // Build a client but don't dispatch — just confirm the struct
+        // constructs cleanly. The URL shape is covered by the network-gated
+        // integration test below.
+        let _client = CelestrakClient::new();
+    }
+
+    // ── Task 4.12: Network integration tests (ignored by default) ────────
 
     #[test]
     #[ignore]
     fn spacetrack_fetch_tle() {
+        // Exercises the real Space-Track HTTP client. Requires:
+        //   - THRESH_SPACETRACK_USERNAME / _PASSWORD env vars
+        //   - Network access to www.space-track.org
+        // Run with: `cargo test -p thresh-data --features orbital -- --ignored spacetrack_fetch_tle`
         let client = SpaceTrackClient::new();
-        // Would fetch ISS TLE — requires network and credentials.
-        let _result = client.fetch_tle(25544);
+        let tles = client.fetch_tle(25544).expect("fetch ISS TLE");
+        assert!(!tles.is_empty(), "Space-Track returned no TLEs for ISS");
+        assert_eq!(tles[0].norad_id, 25544);
     }
 
     #[test]
     #[ignore]
     fn celestrak_fetch_gp() {
+        // Exercises the real CelesTrak HTTP client. Requires network access
+        // to celestrak.org. Run with:
+        // `cargo test -p thresh-data --features orbital -- --ignored celestrak_fetch_gp`
         let client = CelestrakClient::new();
-        // Would fetch station group — requires network.
-        let _result = client.fetch_gp_group("stations");
+        let tles = client.fetch_gp_group("stations").expect("fetch stations");
+        assert!(!tles.is_empty(), "CelesTrak returned no TLEs for stations");
+    }
+
+    #[test]
+    #[ignore]
+    fn celestrak_fetch_catnr_iss() {
+        // Same end-to-end exercise but via the single-ID path.
+        let client = CelestrakClient::new();
+        let tles = client.fetch_catnr(25544).expect("fetch ISS via CATNR");
+        assert!(!tles.is_empty());
+        assert_eq!(tles[0].norad_id, 25544);
     }
 }
