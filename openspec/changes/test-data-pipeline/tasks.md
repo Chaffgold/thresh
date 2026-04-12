@@ -32,7 +32,7 @@
 - [x] 3.5 `state_vector_to_measurement` converts to `Measurement::AdsB` via WGS84→ENU.
 - [x] 3.6 `extract_ground_truth` groups state vectors by ICAO24 and interpolates to a 1-second grid (refactored in PR #33 for cognitive complexity).
 - [x] 3.7 `AdsBDataset` implements the `Dataset` trait.
-- [ ] 3.8 Add download caching with **content-hash** deduplication — current cache keys state vectors by `(time, bbox)` tuple rather than by request hash; revisit when caches grow large enough for key collisions to matter.
+- [x] 3.8 Added `content_hash_key(namespace, parts)` helper in `crates/thresh-data/src/cache.rs` — derives a deterministic 16-char hex cache key from a namespace + arbitrary request-identifying parts via `DefaultHasher`, with 6 unit tests covering determinism, part / namespace distinction, hex length, order sensitivity, and the zero-part path. `OpenSkyClient::fetch_states` and `fetch_track` now route through it; floats in the bbox are hashed via `f64::to_bits()` so `-0.0` vs `0.0` and locale-sensitive formatting can't introduce silent collisions.
 - [x] 3.9 Rate limiting with exponential backoff implemented via `RateLimiter::{wait, failure, success}` in `adsb.rs` — doubles backoff on HTTP errors / 429 responses up to a configured max.
 - [x] 3.10 `parse_sbs_msg4_velocity` and `parse_sbs_rejects_non_msg` tests cover SBS message parsing.
 - [x] 3.11 `parse_opensky_states_json`, `parse_opensky_states_empty`, and `parse_opensky_track_json` round-trip mock OpenSky JSON payloads through the parser.
@@ -87,5 +87,5 @@
 - [x] 7.8 Created `crates/thresh-data/scenarios/synth-cv-clean.toml`; it round-trips through `load_scenario` → `run_synthetic_benchmark` and clears its MOTA baseline (MOTA ≈ 0.94 with the default 5-CV trajectory set). Additional synth variants (`synth-maneuvering`, `synth-heterogeneous`, `synth-low-pd`) are deferred until `build_trajectories` learns to dispatch on a scenario-flavour field rather than hard-coding 5 CV targets.
 - [x] 7.9 `run_synthetic_benchmark` in `benchmark.rs` is the synthetic scenario runner — builds trajectories, runs the tracker, computes MOTA/MOTP/IDF1/HOTA.
 - [x] 7.10 `check_regression` returns a list of baseline failures (empty = pass); the CLI prints each failure and exits non-zero.
-- [ ] 7.11 Add CI job for synthetic benchmarks (no network required) — pending, needs a `.github/workflows/*.yml` addition to run `thresh-data run crates/thresh-data/scenarios/synth-cv-clean.toml`.
+- [x] 7.11 Added `synth-benchmark-gate` job to `.github/workflows/ci.yml` — builds the `thresh-data` binary and iterates over every `crates/thresh-data/scenarios/synth-*.toml` file with `thresh-data run`, failing the build if any regression check trips. The glob + `set -euo pipefail` wrapper means new synthetic scenario manifests are picked up automatically without another workflow edit.
 - [ ] 7.12 Add nightly CI job for network-dependent benchmarks — pending, needs the scenarios from 7.3-7.7 and a nightly workflow.

@@ -266,13 +266,26 @@ impl OpenSkyClient {
         time: i64,
         bbox: Option<BoundingBox>,
     ) -> Result<Vec<StateVector>> {
-        let cache_key = match &bbox {
+        // Content-hashed cache key: hashes (time, bbox-or-none) into a
+        // 16-char hex filename so cache entries don't collide when a new
+        // query parameter is added later, and we don't have to worry about
+        // formatting floats consistently across callers.
+        let time_part = format!("time={time}");
+        let bbox_part = match &bbox {
             Some(b) => format!(
-                "states_{time}_{:.2}_{:.2}_{:.2}_{:.2}.json",
-                b.lat_min, b.lat_max, b.lon_min, b.lon_max
+                "bbox={},{},{},{}",
+                b.lat_min.to_bits(),
+                b.lat_max.to_bits(),
+                b.lon_min.to_bits(),
+                b.lon_max.to_bits(),
             ),
-            None => format!("states_{time}.json"),
+            None => "bbox=none".to_string(),
         };
+        let hash = crate::cache::content_hash_key(
+            "opensky/states",
+            &[time_part.as_str(), bbox_part.as_str()],
+        );
+        let cache_key = format!("{hash}.json");
 
         // Check cache first.
         if crate::cache::is_cached("opensky", "states", &cache_key)
@@ -304,7 +317,13 @@ impl OpenSkyClient {
 
     /// Fetch the track (waypoints) for a specific aircraft.
     pub fn fetch_track(&mut self, icao24: &str) -> Result<Vec<TrackPoint>> {
-        let cache_key = format!("track_{icao24}.json");
+        // Content-hashed cache key keyed on (icao24). Using
+        // `content_hash_key` rather than the raw ICAO24 means a future
+        // change that adds a time window to this endpoint's cache key
+        // won't retroactively collide with existing cached tracks.
+        let icao_part = format!("icao24={icao24}");
+        let hash = crate::cache::content_hash_key("opensky/tracks", &[icao_part.as_str()]);
+        let cache_key = format!("{hash}.json");
 
         if crate::cache::is_cached("opensky", "tracks", &cache_key)
             && let Ok(path) = crate::cache::cache_path("opensky", "tracks", &cache_key)
