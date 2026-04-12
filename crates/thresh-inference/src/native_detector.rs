@@ -821,6 +821,55 @@ mod tests {
     }
 
     #[test]
+    fn test_from_safetensors_fails_gracefully_missing_file() {
+        // Verify that loading from a nonexistent safetensors file produces an error
+        let loader = crate::weights::SafeTensorsLoader;
+        let result = crate::weights::WeightLoader::load(&loader, "/nonexistent/path.safetensors");
+        assert!(result.is_err(), "loading a missing file should return Err");
+
+        // Also verify that from_safetensors fails gracefully with an empty WeightSet
+        let config = NativeDetectorConfig::default();
+        let empty_weights = crate::weights::WeightSet {
+            tensors: std::collections::HashMap::new(),
+        };
+        let result = NativeDetector::from_safetensors(config, &empty_weights, 4);
+        assert!(
+            result.is_err(),
+            "from_safetensors with empty weights should return Err"
+        );
+    }
+
+    #[test]
+    fn benchmark_native_detector_inference_latency() {
+        let config = NativeDetectorConfig {
+            n_layers: 2,
+            d_model: 64,
+            n_heads: 4,
+            d_ff: 128,
+            n_queries: 10,
+            n_classes: 5,
+            confidence_threshold: 0.0,
+            nms_iou_threshold: 1.0,
+        };
+        let detector = NativeDetector::new_random(config, 3);
+        let input = SensorInput {
+            points: vec![[1.0, 2.0, 3.0]; 100],
+            intensities: None,
+            timestamp: 0.0,
+        };
+        let start = std::time::Instant::now();
+        for _ in 0..10 {
+            let _ = detector.detect(&input);
+        }
+        let elapsed = start.elapsed();
+        eprintln!(
+            "NativeDetector 10 inferences (small model): {:?} ({:?}/inference)",
+            elapsed,
+            elapsed / 10
+        );
+    }
+
+    #[test]
     fn test_native_detector_empty_input() {
         let config = NativeDetectorConfig {
             d_model: 32,
