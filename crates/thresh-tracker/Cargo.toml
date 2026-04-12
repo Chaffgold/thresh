@@ -16,6 +16,12 @@ serde = { workspace = true }
 [dev-dependencies]
 thresh-synth = { path = "../thresh-synth" }
 thresh-eval = { path = "../thresh-eval" }
+criterion = { workspace = true }
+nalgebra = { workspace = true }
 rand = "0.9"
 rand_distr = "0.5"
 serde_json = { workspace = true }
+
+[[bench]]
+name = "tracker_step"
+harness = false
