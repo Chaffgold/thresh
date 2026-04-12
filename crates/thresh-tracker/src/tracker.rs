@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use nalgebra::{DMatrix, DVector};
 use thresh_association::hungarian::hungarian_assignment;
+use thresh_core::detection::Detection3D;
 use thresh_core::track::{TargetClass, TrackState};
 use thresh_filter::imm::{ImmConfig, ImmFilter};
 use thresh_filter::kf::KalmanFilter;
@@ -253,6 +254,18 @@ impl MultiObjectTracker {
         self.tracks.push(track);
     }
 
+    /// Run one tracking cycle using high-level [`Detection3D`] inputs.
+    ///
+    /// Converts each detection's position to a `DVector<f64>` measurement and
+    /// delegates to [`step`](Self::step).
+    pub fn step_detections(&mut self, detections: &[Detection3D], dt: f64) {
+        let cart: Vec<DVector<f64>> = detections
+            .iter()
+            .map(|d| DVector::from_column_slice(&d.position))
+            .collect();
+        self.step(&cart, dt);
+    }
+
     /// Number of confirmed tracks.
     pub fn confirmed_count(&self) -> usize {
         self.tracks
@@ -270,6 +283,7 @@ impl MultiObjectTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use thresh_core::detection::Detection3D;
     use thresh_filter::imm::ImmConfig;
 
     #[test]
@@ -338,6 +352,25 @@ mod tests {
                 assert!(ids.insert(t.id), "Duplicate TrackId in live set: {}", t.id);
             }
         }
+    }
+
+    #[test]
+    fn step_detections_produces_confirmed_tracks() {
+        let mut tracker = MultiObjectTracker::new_cv_position(10.0, 100.0);
+        let det = Detection3D {
+            position: [100.0, 200.0, 50.0],
+            dimensions: [2.0, 2.0, 2.0],
+            yaw: 0.0,
+            class_id: 0,
+            confidence: 0.95,
+        };
+        for _ in 0..6 {
+            tracker.step_detections(std::slice::from_ref(&det), 1.0);
+        }
+        assert!(
+            tracker.confirmed_count() >= 1,
+            "should have at least one confirmed track after 6 steps"
+        );
     }
 
     /// 6.7 Integration test: 4-model IMM through `new_imm_position` --
