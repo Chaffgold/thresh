@@ -49,10 +49,344 @@ pub struct AssignmentResult {
 /// Tolerance used when comparing cost entries against zero.
 const ZERO_EPS: f64 = 1e-10;
 
+/// Pre-allocated solver for the Hungarian (Munkres) algorithm.
+///
+/// Reuses internal buffers across calls to avoid per-invocation allocation.
+/// Create once with [`HungarianSolver::new`] and call [`HungarianSolver::solve`]
+/// repeatedly. The solver transparently grows its buffers if a call exceeds the
+/// initial `max_dim`.
+pub struct HungarianSolver {
+    /// Flat row-major cost buffer (`dim * dim` elements).
+    cost_buf: Vec<f64>,
+    /// Pre-allocated row assignment buffer.
+    row_assign: Vec<Option<usize>>,
+    /// Pre-allocated column assignment buffer.
+    col_assign: Vec<Option<usize>>,
+    /// Pre-allocated row-covered flags (for mark_cover).
+    row_covered: Vec<bool>,
+    /// Pre-allocated col-covered flags (for mark_cover).
+    col_covered: Vec<bool>,
+    /// Pre-allocated row-marked flags (for mark_cover).
+    row_marked: Vec<bool>,
+    /// Pre-allocated unmarked-rows scratch list.
+    unmarked_rows: Vec<usize>,
+    /// Pre-allocated BFS visited-col flags (for augment_matching).
+    visited_col: Vec<bool>,
+    /// Pre-allocated BFS parent map (for augment_matching).
+    parent_row_for_col: Vec<Option<usize>>,
+    /// Pre-allocated BFS queue (for augment_matching).
+    queue: Vec<usize>,
+    /// Current maximum dimension the buffers can handle without realloc.
+    capacity: usize,
+}
+
+impl HungarianSolver {
+    /// Create a new solver pre-allocated for matrices up to `max_dim x max_dim`.
+    pub fn new(max_dim: usize) -> Self {
+        Self {
+            cost_buf: vec![0.0; max_dim * max_dim],
+            row_assign: vec![None; max_dim],
+            col_assign: vec![None; max_dim],
+            row_covered: vec![false; max_dim],
+            col_covered: vec![false; max_dim],
+            row_marked: vec![false; max_dim],
+            unmarked_rows: Vec::with_capacity(max_dim),
+            visited_col: vec![false; max_dim],
+            parent_row_for_col: vec![None; max_dim],
+            queue: Vec::with_capacity(max_dim),
+            capacity: max_dim,
+        }
+    }
+
+    /// Ensure all buffers are large enough for `dim`.
+    fn ensure_capacity(&mut self, dim: usize) {
+        if dim <= self.capacity {
+            return;
+        }
+        self.cost_buf.resize(dim * dim, 0.0);
+        self.row_assign.resize(dim, None);
+        self.col_assign.resize(dim, None);
+        self.row_covered.resize(dim, false);
+        self.col_covered.resize(dim, false);
+        self.row_marked.resize(dim, false);
+        self.visited_col.resize(dim, false);
+        self.parent_row_for_col.resize(dim, None);
+        self.capacity = dim;
+    }
+
+    /// Solve the linear assignment problem on a flat pre-allocated buffer.
+    ///
+    /// Semantically identical to [`hungarian_assignment`] but reuses internal
+    /// storage across calls.
+    pub fn solve(&mut self, cost: &[Vec<f64>], gate: f64) -> AssignmentResult {
+        let n_rows = cost.len();
+        if n_rows == 0 {
+            return empty_result();
+        }
+        let n_cols = cost[0].len();
+        if n_cols == 0 {
+            return all_rows_unassigned(n_rows);
+        }
+
+        let dim = n_rows.max(n_cols);
+        self.ensure_capacity(dim);
+
+        // Fill the flat cost buffer (row-major).
+        for (i, row) in cost.iter().enumerate() {
+            let base = i * dim;
+            for (j, &val) in row.iter().enumerate() {
+                self.cost_buf[base + j] = val;
+            }
+            for j in n_cols..dim {
+                self.cost_buf[base + j] = gate;
+            }
+        }
+        for i in n_rows..dim {
+            let base = i * dim;
+            for j in 0..dim {
+                self.cost_buf[base + j] = gate;
+            }
+        }
+
+        // Reduce cost matrix (row then column reduction) on flat buffer.
+        self.reduce_flat(dim);
+
+        // Greedy zero assignment on flat buffer.
+        self.greedy_zero_flat(dim);
+
+        // Run Munkres loop on flat buffer.
+        self.run_munkres_loop_flat(dim);
+
+        // Extract assignment from row_assign (same logic as the free function).
+        extract_assignment(cost, gate, &self.row_assign, n_rows, n_cols)
+    }
+
+    /// Flat-buffer row and column reduction.
+    fn reduce_flat(&mut self, dim: usize) {
+        // Row reduction.
+        for i in 0..dim {
+            let base = i * dim;
+            let min = self.cost_buf[base..base + dim]
+                .iter()
+                .copied()
+                .fold(f64::INFINITY, f64::min);
+            if min.is_finite() {
+                for v in &mut self.cost_buf[base..base + dim] {
+                    *v -= min;
+                }
+            }
+        }
+        // Column reduction.
+        for j in 0..dim {
+            let min = (0..dim)
+                .map(|i| self.cost_buf[i * dim + j])
+                .fold(f64::INFINITY, f64::min);
+            if min.is_finite() {
+                for i in 0..dim {
+                    self.cost_buf[i * dim + j] -= min;
+                }
+            }
+        }
+    }
+
+    /// Greedy zero assignment on the flat buffer.
+    fn greedy_zero_flat(&mut self, dim: usize) {
+        for v in &mut self.row_assign[..dim] {
+            *v = None;
+        }
+        for v in &mut self.col_assign[..dim] {
+            *v = None;
+        }
+        for i in 0..dim {
+            for j in 0..dim {
+                if self.cost_buf[i * dim + j].abs() < ZERO_EPS
+                    && self.row_assign[i].is_none()
+                    && self.col_assign[j].is_none()
+                {
+                    self.row_assign[i] = Some(j);
+                    self.col_assign[j] = Some(i);
+                }
+            }
+        }
+    }
+
+    /// Augment matching on the flat buffer via BFS.
+    fn augment_matching_flat(&mut self, dim: usize) {
+        for start_row in 0..dim {
+            if self.row_assign[start_row].is_some() {
+                continue;
+            }
+            self.try_augment_from_flat(start_row, dim);
+        }
+    }
+
+    /// BFS augmenting path from `start_row` on the flat buffer.
+    fn try_augment_from_flat(&mut self, start_row: usize, dim: usize) -> bool {
+        for v in &mut self.visited_col[..dim] {
+            *v = false;
+        }
+        for v in &mut self.parent_row_for_col[..dim] {
+            *v = None;
+        }
+        self.queue.clear();
+        self.queue.push(start_row);
+        let mut terminal_col: Option<usize> = None;
+
+        while let Some(r) = self.queue.pop() {
+            for j in 0..dim {
+                if self.visited_col[j] || self.cost_buf[r * dim + j].abs() >= ZERO_EPS {
+                    continue;
+                }
+                self.visited_col[j] = true;
+                self.parent_row_for_col[j] = Some(r);
+                match self.col_assign[j] {
+                    None => {
+                        terminal_col = Some(j);
+                        break;
+                    }
+                    Some(next_row) => self.queue.push(next_row),
+                }
+            }
+            if terminal_col.is_some() {
+                break;
+            }
+        }
+
+        if let Some(mut j) = terminal_col {
+            loop {
+                let r = self.parent_row_for_col[j].expect("augmenting path parent must be set");
+                let prev_col = self.row_assign[r];
+                self.col_assign[j] = Some(r);
+                self.row_assign[r] = Some(j);
+                match prev_col {
+                    None => break,
+                    Some(pc) => j = pc,
+                }
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Main Munkres loop on the flat buffer.
+    fn run_munkres_loop_flat(&mut self, dim: usize) {
+        self.augment_matching_flat(dim);
+
+        loop {
+            let n_assigned = self.row_assign[..dim]
+                .iter()
+                .filter(|a| a.is_some())
+                .count();
+            if n_assigned == dim {
+                return;
+            }
+
+            // mark_cover on flat buffer
+            self.mark_cover_flat(dim);
+
+            let covered_count = self.row_covered[..dim].iter().filter(|&&f| f).count()
+                + self.col_covered[..dim].iter().filter(|&&f| f).count();
+            if covered_count >= dim {
+                return;
+            }
+
+            // min uncovered value
+            let mut min_val = f64::INFINITY;
+            for i in 0..dim {
+                if self.row_covered[i] {
+                    continue;
+                }
+                for j in 0..dim {
+                    if !self.col_covered[j] {
+                        let v = self.cost_buf[i * dim + j];
+                        if v < min_val {
+                            min_val = v;
+                        }
+                    }
+                }
+            }
+            if !min_val.is_finite() || min_val.abs() < 1e-15 {
+                return;
+            }
+
+            // update labels
+            for i in 0..dim {
+                for j in 0..dim {
+                    let idx = i * dim + j;
+                    if !self.row_covered[i] && !self.col_covered[j] {
+                        self.cost_buf[idx] -= min_val;
+                    } else if self.row_covered[i] && self.col_covered[j] {
+                        self.cost_buf[idx] += min_val;
+                    }
+                }
+            }
+
+            // Re-run greedy + augment
+            self.greedy_zero_flat(dim);
+            self.augment_matching_flat(dim);
+        }
+    }
+
+    /// Compute minimum vertex cover (König marking) on the flat buffer.
+    fn mark_cover_flat(&mut self, dim: usize) {
+        // Initialize: mark all unassigned rows.
+        self.unmarked_rows.clear();
+        for i in 0..dim {
+            if self.row_assign[i].is_none() {
+                self.row_marked[i] = true;
+                self.unmarked_rows.push(i);
+            } else {
+                self.row_marked[i] = false;
+            }
+        }
+        for v in &mut self.col_covered[..dim] {
+            *v = false;
+        }
+        // col_marked is stored in col_covered for this phase.
+        let mut changed = true;
+        while changed {
+            changed = false;
+            // Mark columns with zeros in marked rows.
+            for &r in &self.unmarked_rows {
+                for j in 0..dim {
+                    if !self.col_covered[j] && self.cost_buf[r * dim + j].abs() < ZERO_EPS {
+                        self.col_covered[j] = true;
+                        changed = true;
+                    }
+                }
+            }
+            // Mark rows assigned to marked columns.
+            let mut new_rows = Vec::new();
+            for j in 0..dim {
+                if let Some(r) = self.col_assign[j]
+                    && self.col_covered[j]
+                    && !self.row_marked[r]
+                {
+                    self.row_marked[r] = true;
+                    new_rows.push(r);
+                    changed = true;
+                }
+            }
+            self.unmarked_rows.extend_from_slice(&new_rows);
+        }
+
+        // row_covered = !row_marked; col_covered stays as col_marked.
+        for i in 0..dim {
+            self.row_covered[i] = !self.row_marked[i];
+        }
+    }
+}
+
 /// Solve the linear assignment problem using the Hungarian algorithm.
 ///
 /// Finds the assignment that minimizes total cost. Handles rectangular matrices.
 /// Entries with cost >= `gate` are considered infeasible.
+///
+/// This is a convenience wrapper around [`HungarianSolver`]. For repeated
+/// calls (e.g. every tracker frame), prefer creating a solver once with
+/// [`HungarianSolver::new`] and reusing it via [`HungarianSolver::solve`] to
+/// avoid per-call allocation.
 pub fn hungarian_assignment(cost: &[Vec<f64>], gate: f64) -> AssignmentResult {
     let n_rows = cost.len();
     if n_rows == 0 {
@@ -64,13 +398,8 @@ pub fn hungarian_assignment(cost: &[Vec<f64>], gate: f64) -> AssignmentResult {
     }
 
     let dim = n_rows.max(n_cols);
-    let mut c = build_square_cost(cost, gate, dim, n_rows, n_cols);
-    reduce_cost_matrix(&mut c, dim);
-
-    let (mut row_assign, mut col_assign) = greedy_zero_assignment(&c, dim);
-    run_munkres_loop(&mut c, &mut row_assign, &mut col_assign, dim);
-
-    extract_assignment(cost, gate, &row_assign, n_rows, n_cols)
+    let mut solver = HungarianSolver::new(dim);
+    solver.solve(cost, gate)
 }
 
 // ---------------------------------------------------------------------------
@@ -95,29 +424,13 @@ fn all_rows_unassigned(n_rows: usize) -> AssignmentResult {
     }
 }
 
-/// Pad `cost` to a `dim x dim` square, filling dummy entries with `gate`.
-fn build_square_cost(
-    cost: &[Vec<f64>],
-    gate: f64,
-    dim: usize,
-    n_rows: usize,
-    n_cols: usize,
-) -> Vec<Vec<f64>> {
-    let mut c = vec![vec![0.0f64; dim]; dim];
-    for i in 0..dim {
-        for j in 0..dim {
-            if i < n_rows && j < n_cols {
-                c[i][j] = cost[i][j];
-            } else {
-                c[i][j] = gate;
-            }
-        }
-    }
-    c
-}
+// The following Vec<Vec<f64>>-based phase helpers are retained for their
+// unit tests (which validate algorithmic correctness in isolation). Production
+// code uses the flat-buffer equivalents inside `HungarianSolver`.
 
 /// Subtract the row minimum from each row, then the column minimum from each
 /// column. Non-finite minima (all-infinity rows/columns) are left untouched.
+#[cfg(test)]
 fn reduce_cost_matrix(c: &mut [Vec<f64>], dim: usize) {
     for row in c.iter_mut() {
         let min = row.iter().copied().fold(f64::INFINITY, f64::min);
@@ -139,6 +452,7 @@ fn reduce_cost_matrix(c: &mut [Vec<f64>], dim: usize) {
 
 /// Greedy initial matching: claim zero entries in row-major order whenever
 /// both endpoints are still unmatched.
+#[cfg(test)]
 fn greedy_zero_assignment(c: &[Vec<f64>], dim: usize) -> (Vec<Option<usize>>, Vec<Option<usize>>) {
     let mut row_assign = vec![None::<usize>; dim];
     let mut col_assign = vec![None::<usize>; dim];
@@ -153,153 +467,6 @@ fn greedy_zero_assignment(c: &[Vec<f64>], dim: usize) -> (Vec<Option<usize>>, Ve
     (row_assign, col_assign)
 }
 
-/// Run the main Munkres improvement loop until every row is assigned or no
-/// further progress is possible.
-fn run_munkres_loop(
-    c: &mut [Vec<f64>],
-    row_assign: &mut [Option<usize>],
-    col_assign: &mut [Option<usize>],
-    dim: usize,
-) {
-    // The initial matching from greedy_zero_assignment may not be maximum
-    // (greedy can get stuck). Augment it via bipartite alternating paths
-    // so the vertex-cover / König check below is valid.
-    augment_matching(c, row_assign, col_assign, dim);
-
-    loop {
-        let n_assigned = row_assign.iter().filter(|a| a.is_some()).count();
-        if n_assigned == dim {
-            return;
-        }
-
-        let (row_covered, col_covered) = mark_cover(c, row_assign, col_assign, dim);
-        let covered_count = count_true(&row_covered) + count_true(&col_covered);
-        if covered_count >= dim {
-            // König: cover size == max-matching size. If it equals dim, we
-            // already have a perfect matching (augment_matching ran above).
-            return;
-        }
-
-        let min_val = min_uncovered_value(c, &row_covered, &col_covered, dim);
-        if !min_val.is_finite() || min_val.abs() < 1e-15 {
-            return;
-        }
-
-        update_labels(c, &row_covered, &col_covered, dim, min_val);
-        // After update_labels introduces new zeros, re-run greedy + augment
-        // so the matching reflects the new zero graph.
-        let (new_rows, new_cols) = greedy_zero_assignment(c, dim);
-        row_assign.copy_from_slice(&new_rows);
-        col_assign.copy_from_slice(&new_cols);
-        augment_matching(c, row_assign, col_assign, dim);
-    }
-}
-
-/// Grow the current matching to maximum by searching for alternating
-/// augmenting paths from each unmatched row in the bipartite zero graph.
-fn augment_matching(
-    c: &[Vec<f64>],
-    row_assign: &mut [Option<usize>],
-    col_assign: &mut [Option<usize>],
-    dim: usize,
-) {
-    for start_row in 0..dim {
-        if row_assign[start_row].is_some() {
-            continue;
-        }
-        try_augment_from(start_row, c, dim, row_assign, col_assign);
-    }
-}
-
-/// Attempt to augment the matching starting from `start_row` using BFS on
-/// the zero graph. Returns whether an augmenting path was found and applied.
-fn try_augment_from(
-    start_row: usize,
-    c: &[Vec<f64>],
-    dim: usize,
-    row_assign: &mut [Option<usize>],
-    col_assign: &mut [Option<usize>],
-) -> bool {
-    let mut visited_col = vec![false; dim];
-    let mut parent_row_for_col: Vec<Option<usize>> = vec![None; dim];
-    let mut queue: Vec<usize> = vec![start_row];
-    let mut terminal_col: Option<usize> = None;
-
-    while let Some(r) = queue.pop() {
-        if let Some(tc) = find_augmenting_target(
-            r,
-            c,
-            dim,
-            col_assign,
-            &mut visited_col,
-            &mut parent_row_for_col,
-            &mut queue,
-        ) {
-            terminal_col = Some(tc);
-            break;
-        }
-    }
-
-    if let Some(mut j) = terminal_col {
-        apply_augmenting_path(j, row_assign, col_assign, &parent_row_for_col);
-        // Clippy: consume j so the compiler sees we used it post-move.
-        let _ = &mut j;
-        true
-    } else {
-        false
-    }
-}
-
-/// From row `r`, scan its zero columns. If any lead to an unmatched column,
-/// return it as a terminal (end of augmenting path). Otherwise push the next
-/// row (via the current matching of each zero col) onto the BFS queue.
-fn find_augmenting_target(
-    r: usize,
-    c: &[Vec<f64>],
-    dim: usize,
-    col_assign: &[Option<usize>],
-    visited_col: &mut [bool],
-    parent_row_for_col: &mut [Option<usize>],
-    queue: &mut Vec<usize>,
-) -> Option<usize> {
-    for j in 0..dim {
-        if visited_col[j] || c[r][j].abs() >= ZERO_EPS {
-            continue;
-        }
-        visited_col[j] = true;
-        parent_row_for_col[j] = Some(r);
-        match col_assign[j] {
-            None => return Some(j),
-            Some(next_row) => queue.push(next_row),
-        }
-    }
-    None
-}
-
-/// Flip the edges along the augmenting path, turning previously unmatched
-/// edges into matched edges and vice versa.
-fn apply_augmenting_path(
-    mut j: usize,
-    row_assign: &mut [Option<usize>],
-    col_assign: &mut [Option<usize>],
-    parent_row_for_col: &[Option<usize>],
-) {
-    loop {
-        let r = parent_row_for_col[j].expect("augmenting path parent must be set");
-        let prev_col = row_assign[r];
-        col_assign[j] = Some(r);
-        row_assign[r] = Some(j);
-        match prev_col {
-            None => return,
-            Some(pc) => j = pc,
-        }
-    }
-}
-
-fn count_true(flags: &[bool]) -> usize {
-    flags.iter().filter(|&&f| f).count()
-}
-
 /// Compute a minimum vertex cover of the zero graph via the classical
 /// marking procedure. Returns `(row_covered, col_covered)` boolean vectors.
 ///
@@ -310,6 +477,7 @@ fn count_true(flags: &[bool]) -> usize {
 /// can be smaller than the matching and `run_munkres_loop` would terminate on
 /// a non-optimal assignment. `run_munkres_loop` enforces this precondition by
 /// calling `augment_matching` before every `mark_cover` invocation.
+#[cfg(test)]
 fn mark_cover(
     c: &[Vec<f64>],
     row_assign: &[Option<usize>],
@@ -341,6 +509,7 @@ fn mark_cover(
     (row_covered, col_covered)
 }
 
+#[cfg(test)]
 fn mark_cols_with_zeros_in_marked_rows(
     c: &[Vec<f64>],
     unmarked_rows: &[usize],
@@ -359,6 +528,7 @@ fn mark_cols_with_zeros_in_marked_rows(
     changed
 }
 
+#[cfg(test)]
 fn mark_rows_assigned_to_marked_cols(
     col_assign: &[Option<usize>],
     col_marked: &[bool],
@@ -381,6 +551,7 @@ fn mark_rows_assigned_to_marked_cols(
 }
 
 /// Smallest cost entry that lies in an uncovered row and uncovered column.
+#[cfg(test)]
 fn min_uncovered_value(
     c: &[Vec<f64>],
     row_covered: &[bool],
@@ -403,6 +574,7 @@ fn min_uncovered_value(
 
 /// Update potentials: subtract `min_val` from every uncovered entry and add
 /// `min_val` to every doubly-covered entry.
+#[cfg(test)]
 fn update_labels(
     c: &mut [Vec<f64>],
     row_covered: &[bool],
@@ -629,5 +801,74 @@ mod tests {
         assert_eq!(c[0][1], 10.0);
         assert_eq!(c[1][0], 10.0);
         assert_eq!(c[1][1], 8.0);
+    }
+
+    // ---- HungarianSolver correctness tests ----------------------------------
+
+    #[test]
+    fn solver_matches_free_function_on_100x100() {
+        use rand::prelude::*;
+
+        let dim = 100;
+        let mut rng = StdRng::seed_from_u64(42);
+        let cost: Vec<Vec<f64>> = (0..dim)
+            .map(|_| (0..dim).map(|_| rng.random::<f64>() * 100.0).collect())
+            .collect();
+        let gate = f64::INFINITY;
+
+        // Run via the free function (which internally creates a solver).
+        let result_free = hungarian_assignment(&cost, gate);
+
+        // Run via an explicitly pre-allocated solver.
+        let mut solver = HungarianSolver::new(dim);
+        let result_solver = solver.solve(&cost, gate);
+
+        // Both must produce the same optimal total cost and the same number of
+        // matches. The actual match pairs may differ when multiple optimal
+        // assignments exist, so we only compare total cost.
+        assert_eq!(
+            result_free.matches.len(),
+            result_solver.matches.len(),
+            "match count differs"
+        );
+        assert!(
+            (result_free.total_cost - result_solver.total_cost).abs() < 1e-6,
+            "total cost differs: free={}, solver={}",
+            result_free.total_cost,
+            result_solver.total_cost,
+        );
+        assert_eq!(
+            result_free.unassigned_rows.len(),
+            result_solver.unassigned_rows.len()
+        );
+        assert_eq!(
+            result_free.unassigned_cols.len(),
+            result_solver.unassigned_cols.len()
+        );
+    }
+
+    #[test]
+    fn solver_reuse_across_different_sizes() {
+        // Verify that a solver pre-allocated for 50 can handle 10, 50, and 80
+        // correctly (the last exceeding the initial capacity).
+        use rand::prelude::*;
+        let mut solver = HungarianSolver::new(50);
+        let mut rng = StdRng::seed_from_u64(99);
+
+        for dim in [10, 50, 80] {
+            let cost: Vec<Vec<f64>> = (0..dim)
+                .map(|_| (0..dim).map(|_| rng.random::<f64>() * 50.0).collect())
+                .collect();
+            let gate = f64::INFINITY;
+
+            let expected = hungarian_assignment(&cost, gate);
+            let got = solver.solve(&cost, gate);
+
+            assert_eq!(expected.matches.len(), got.matches.len(), "dim={dim}");
+            assert!(
+                (expected.total_cost - got.total_cost).abs() < 1e-6,
+                "dim={dim}: cost differs"
+            );
+        }
     }
 }

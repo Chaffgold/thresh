@@ -5,6 +5,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+parallel = ["rayon"]
+
 [dependencies]
 thresh-core = { path = "../thresh-core" }
 thresh-filter = { path = "../thresh-filter" }
@@ -12,6 +15,7 @@ thresh-association = { path = "../thresh-association" }
 thresh-fusion = { path = "../thresh-fusion" }
 nalgebra = { workspace = true }
 serde = { workspace = true }
+rayon = { version = "1.10", optional = true }
 
 [dev-dependencies]
 thresh-synth = { path = "../thresh-synth" }
