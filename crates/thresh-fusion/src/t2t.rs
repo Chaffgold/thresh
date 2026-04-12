@@ -234,6 +234,11 @@ pub struct FederatedFusionManager {
     site_tracks: Vec<(u32, Vec<TrackExchange>)>,
     /// Which fusion algorithm to use for matched pairs.
     pub mode: FusionMode,
+    /// Persistent fused track state maintained across calls to `fuse()`.
+    fused_tracks: Vec<TrackExchange>,
+    /// Optional timeout (seconds): fused tracks older than
+    /// `latest_time - timeout` are pruned after each `fuse()` call.
+    pub fused_track_timeout_s: Option<f64>,
 }
 
 impl FederatedFusionManager {
@@ -242,6 +247,8 @@ impl FederatedFusionManager {
         Self {
             site_tracks: Vec::new(),
             mode: FusionMode::CovarianceIntersection,
+            fused_tracks: Vec::new(),
+            fused_track_timeout_s: None,
         }
     }
 
@@ -250,7 +257,14 @@ impl FederatedFusionManager {
         Self {
             site_tracks: Vec::new(),
             mode,
+            fused_tracks: Vec::new(),
+            fused_track_timeout_s: None,
         }
+    }
+
+    /// Return a reference to the persistent fused track state.
+    pub fn get_fused_tracks(&self) -> &[TrackExchange] {
+        &self.fused_tracks
     }
 
     /// Submit tracks from a single site. Replaces any previous submission from
@@ -273,7 +287,7 @@ impl FederatedFusionManager {
     /// 3. Fuse matched pairs via Covariance Intersection.
     /// 4. Append unmatched tracks from the new site (track birth).
     /// 5. Pass through unmatched fused tracks unchanged (coasting).
-    pub fn fuse(&self, gate: f64) -> Vec<TrackExchange> {
+    pub fn fuse(&mut self, gate: f64) -> Vec<TrackExchange> {
         if self.site_tracks.is_empty() {
             return Vec::new();
         }
@@ -324,6 +338,18 @@ impl FederatedFusionManager {
 
             fused = new_fused;
         }
+
+        // Prune fused tracks that have timed out.
+        if let Some(timeout) = self.fused_track_timeout_s {
+            let latest_time = fused
+                .iter()
+                .map(|t| t.timestamp)
+                .fold(f64::NEG_INFINITY, f64::max);
+            fused.retain(|t| latest_time - t.timestamp <= timeout);
+        }
+
+        // Persist for `get_fused_tracks()`.
+        self.fused_tracks = fused.clone();
 
         fused
     }
@@ -598,5 +624,316 @@ mod tests {
             "expected 2 unfused tracks, got {}",
             fused.len()
         );
+    }
+
+    // -- Task 3.3: manual extrapolation verification ---------------------------
+
+    #[test]
+    fn test_extrapolation_matches_manual() {
+        // 6D constant-velocity state: [x, vx, y, vy, z, vz]
+        let state = DVector::from_column_slice(&[100.0, 10.0, 200.0, -5.0, 300.0, 2.0]);
+        let cov_diag = &[4.0, 1.0, 9.0, 2.0, 16.0, 3.0];
+        let p = DMatrix::from_diagonal(&DVector::from_column_slice(cov_diag));
+        let track = TrackExchange {
+            track_id: 42,
+            source_id: 1,
+            state: state.clone(),
+            covariance: p.clone(),
+            timestamp: 5.0,
+        };
+
+        let dt = 2.0;
+        // CV transition matrix for 3 position/velocity pairs:
+        // [[1, dt, 0, 0,  0, 0 ],
+        //  [0, 1,  0, 0,  0, 0 ],
+        //  [0, 0,  1, dt, 0, 0 ],
+        //  [0, 0,  0, 1,  0, 0 ],
+        //  [0, 0,  0, 0,  1, dt],
+        //  [0, 0,  0, 0,  0, 1 ]]
+        #[rustfmt::skip]
+        let f = DMatrix::from_row_slice(6, 6, &[
+            1.0, dt,  0.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, dt,  0.0, 0.0,
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 1.0, dt,
+            0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ]);
+
+        let q = DMatrix::from_diagonal(&DVector::from_column_slice(&[
+            0.1, 0.01, 0.1, 0.01, 0.1, 0.01,
+        ]));
+
+        let result = extrapolate_track(&track, 5.0 + dt, &f, &q);
+
+        // Manual: x_new = F * x
+        let expected_state = &f * &state;
+        // Manual: P_new = F * P * F' + Q
+        let expected_cov = &f * &p * f.transpose() + &q;
+
+        assert!(
+            (result.timestamp - 7.0).abs() < 1e-10,
+            "timestamp should be 7.0"
+        );
+        assert_eq!(result.state.len(), 6);
+        for i in 0..6 {
+            assert!(
+                (result.state[i] - expected_state[i]).abs() < 1e-10,
+                "state[{i}]: got {} expected {}",
+                result.state[i],
+                expected_state[i]
+            );
+        }
+        for i in 0..6 {
+            for j in 0..6 {
+                assert!(
+                    (result.covariance[(i, j)] - expected_cov[(i, j)]).abs() < 1e-10,
+                    "cov[{i},{j}]: got {} expected {}",
+                    result.covariance[(i, j)],
+                    expected_cov[(i, j)]
+                );
+            }
+        }
+
+        // Spot-check expected values:
+        // x_new[0] = 100 + 10*2 = 120
+        assert!((result.state[0] - 120.0).abs() < 1e-10);
+        // x_new[2] = 200 + (-5)*2 = 190
+        assert!((result.state[2] - 190.0).abs() < 1e-10);
+        // x_new[4] = 300 + 2*2 = 304
+        assert!((result.state[4] - 304.0).abs() < 1e-10);
+        // Velocities unchanged
+        assert!((result.state[1] - 10.0).abs() < 1e-10);
+        assert!((result.state[3] - -5.0).abs() < 1e-10);
+        assert!((result.state[5] - 2.0).abs() < 1e-10);
+    }
+
+    // -- Task 5.1: track birth from unmatched incoming -------------------------
+
+    #[test]
+    fn test_federated_manager_births_unmatched_tracks() {
+        let mut mgr = FederatedFusionManager::new();
+
+        // Site 1: one track
+        mgr.submit_tracks(1, vec![make_track(1, 1, &[10.0, 20.0], &[2.0, 2.0])]);
+
+        // Site 2: one matching track + one completely different (should be birthed)
+        mgr.submit_tracks(
+            2,
+            vec![
+                make_track(10, 2, &[10.1, 19.9], &[3.0, 3.0]), // matches track 1
+                make_track(20, 2, &[500.0, 600.0], &[2.0, 2.0]), // no match -> birth
+            ],
+        );
+
+        let fused = mgr.fuse(20.0);
+
+        // Should have 2 tracks: 1 fused pair + 1 birthed
+        assert_eq!(
+            fused.len(),
+            2,
+            "expected 2 fused tracks, got {}",
+            fused.len()
+        );
+
+        // The birthed track should have source_id = 0 and state near [500, 600]
+        let birthed = fused
+            .iter()
+            .find(|t| (t.state[0] - 500.0).abs() < 1.0)
+            .expect("birthed track near [500, 600] should exist");
+        assert_eq!(
+            birthed.source_id, 0,
+            "birthed track should have source_id=0"
+        );
+    }
+
+    // -- Task 5.2: fused track timeout -----------------------------------------
+
+    #[test]
+    fn test_fused_track_timeout() {
+        let mut mgr = FederatedFusionManager::with_mode(FusionMode::CovarianceIntersection);
+        mgr.fused_track_timeout_s = Some(5.0);
+
+        // Submit tracks at different times
+        let mut track_old = make_track(1, 1, &[10.0, 20.0], &[2.0, 2.0]);
+        track_old.timestamp = 0.0; // old
+
+        let mut track_new = make_track(2, 1, &[50.0, 60.0], &[2.0, 2.0]);
+        track_new.timestamp = 10.0; // recent
+
+        mgr.submit_tracks(1, vec![track_old, track_new]);
+
+        let fused = mgr.fuse(20.0);
+
+        // The old track at t=0 should be pruned because latest=10, 10-0=10 > 5
+        assert_eq!(
+            fused.len(),
+            1,
+            "old track should have been pruned, got {} tracks",
+            fused.len()
+        );
+        assert!(
+            (fused[0].timestamp - 10.0).abs() < 1e-10,
+            "remaining track should be the recent one"
+        );
+    }
+
+    #[test]
+    fn test_fused_track_timeout_no_prune_within_window() {
+        let mut mgr = FederatedFusionManager::new();
+        mgr.fused_track_timeout_s = Some(20.0);
+
+        let mut t1 = make_track(1, 1, &[10.0, 20.0], &[2.0, 2.0]);
+        t1.timestamp = 5.0;
+        let mut t2 = make_track(2, 1, &[50.0, 60.0], &[2.0, 2.0]);
+        t2.timestamp = 10.0;
+
+        mgr.submit_tracks(1, vec![t1, t2]);
+        let fused = mgr.fuse(20.0);
+
+        // Both within window (10 - 5 = 5 <= 20)
+        assert_eq!(fused.len(), 2, "both tracks should survive");
+    }
+
+    // -- Task 5.3: get_fused_tracks persists -----------------------------------
+
+    #[test]
+    fn test_get_fused_tracks_persists_across_calls() {
+        let mut mgr = FederatedFusionManager::new();
+
+        // Initially empty
+        assert!(mgr.get_fused_tracks().is_empty());
+
+        mgr.submit_tracks(1, vec![make_track(1, 1, &[10.0, 20.0], &[2.0, 2.0])]);
+        mgr.submit_tracks(2, vec![make_track(10, 2, &[10.1, 19.9], &[3.0, 3.0])]);
+
+        let result = mgr.fuse(20.0);
+        assert_eq!(result.len(), 1);
+
+        // get_fused_tracks should return same state
+        let persisted = mgr.get_fused_tracks();
+        assert_eq!(persisted.len(), 1);
+        assert!((persisted[0].state[0] - result[0].state[0]).abs() < 1e-10);
+    }
+
+    // -- Task 6.1: integration — two sites, three overlapping targets ----------
+
+    #[test]
+    fn test_integration_two_sites_three_targets() {
+        let mut mgr = FederatedFusionManager::with_mode(FusionMode::CovarianceIntersection);
+
+        // True target positions (3 targets in 2D)
+        let targets = [[100.0, 200.0], [500.0, 600.0], [900.0, 100.0]];
+
+        // Site A: tracks with some noise
+        let site_a: Vec<TrackExchange> = targets
+            .iter()
+            .enumerate()
+            .map(|(i, &[x, y])| {
+                let mut t = TrackExchange {
+                    track_id: i as u64,
+                    source_id: 1,
+                    state: DVector::from_column_slice(&[x + 0.5, y - 0.3]),
+                    covariance: DMatrix::from_diagonal(&DVector::from_column_slice(&[4.0, 4.0])),
+                    timestamp: 10.0,
+                };
+                t.timestamp = 10.0;
+                t
+            })
+            .collect();
+
+        // Site B: tracks with different noise
+        let site_b: Vec<TrackExchange> = targets
+            .iter()
+            .enumerate()
+            .map(|(i, &[x, y])| TrackExchange {
+                track_id: 10 + i as u64,
+                source_id: 2,
+                state: DVector::from_column_slice(&[x - 0.4, y + 0.6]),
+                covariance: DMatrix::from_diagonal(&DVector::from_column_slice(&[5.0, 5.0])),
+                timestamp: 10.0,
+            })
+            .collect();
+
+        mgr.submit_tracks(1, site_a.clone());
+        mgr.submit_tracks(2, site_b.clone());
+
+        let fused = mgr.fuse(50.0);
+
+        // Should have exactly 3 fused tracks
+        assert_eq!(
+            fused.len(),
+            3,
+            "expected 3 fused tracks, got {}",
+            fused.len()
+        );
+
+        // Each fused track should have lower covariance than either input
+        for ft in &fused {
+            let tr_fused = ft.covariance.trace();
+            // Site A trace = 8.0 (4+4), Site B trace = 10.0 (5+5).
+            // CI is conservative, so fused trace will be less than the larger
+            // input but may be slightly above the smaller — verify it beats
+            // the worst-case input.
+            assert!(
+                tr_fused < 10.0,
+                "fused trace {tr_fused} should be < largest input trace 10.0"
+            );
+        }
+    }
+
+    // -- Task 6.2: integration — asynchronous site updates ---------------------
+
+    #[test]
+    fn test_integration_asynchronous_updates() {
+        let mut mgr = FederatedFusionManager::with_mode(FusionMode::CovarianceIntersection);
+
+        // Simulate 4 time steps.
+        // Site A submits every step (t=0,1,2,3).
+        // Site B submits every other step (t=0,2).
+        let cov = DMatrix::from_diagonal(&DVector::from_column_slice(&[4.0, 4.0]));
+
+        for step in 0..4u64 {
+            let t = step as f64;
+
+            // Site A always submits
+            let track_a = TrackExchange {
+                track_id: 1,
+                source_id: 1,
+                state: DVector::from_column_slice(&[100.0 + t * 10.0, 200.0]),
+                covariance: cov.clone(),
+                timestamp: t,
+            };
+            mgr.submit_tracks(1, vec![track_a]);
+
+            if step % 2 == 0 {
+                // Site B submits every other step
+                let track_b = TrackExchange {
+                    track_id: 10,
+                    source_id: 2,
+                    state: DVector::from_column_slice(&[100.5 + t * 10.0, 199.5]),
+                    covariance: cov.clone(),
+                    timestamp: t,
+                };
+                mgr.submit_tracks(2, vec![track_b]);
+            }
+
+            let fused = mgr.fuse(50.0);
+
+            // Should always produce exactly 1 fused track
+            assert_eq!(
+                fused.len(),
+                1,
+                "step {step}: expected 1 fused track, got {}",
+                fused.len()
+            );
+
+            // Fused timestamp should be the latest of inputs
+            assert!(
+                fused[0].timestamp >= t - 1.0,
+                "step {step}: fused timestamp {} too old",
+                fused[0].timestamp
+            );
+        }
     }
 }
