@@ -1,0 +1,2 @@
+- [ECI coordinates needed](project_eci_coordinates.md) — ECI frame for thresh-core, tracked in test-data-pipeline tasks 2.5–2.8
+- [Branch & PR plan](project_branch_plan.md) — Worktree layout: finish transformer-fusion → PR → then test-data-pipeline
