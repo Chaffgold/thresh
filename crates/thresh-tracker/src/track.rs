@@ -28,6 +28,12 @@ pub struct Track {
     pub history: Vec<DVector<f64>>,
     /// Maximum history length.
     pub max_history: usize,
+    /// Dominant IMM mode index (populated only in IMM mode).
+    pub dominant_mode: Option<usize>,
+    /// IMM mode probabilities (populated only in IMM mode).
+    pub mode_probabilities: Option<DVector<f64>>,
+    /// Key into the tracker's `imm_filters` map (populated only in IMM mode).
+    pub(crate) imm_key: Option<usize>,
 }
 
 impl Track {
@@ -45,6 +51,9 @@ impl Track {
             age: 1,
             history: Vec::new(),
             max_history: 50,
+            dominant_mode: None,
+            mode_probabilities: None,
+            imm_key: None,
         }
     }
 
