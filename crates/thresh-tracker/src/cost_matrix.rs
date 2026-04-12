@@ -59,6 +59,32 @@ pub fn predict_all<T: LinearTrack>(tracks: &mut [T], f: &DMatrix<f64>, q: &DMatr
     }
 }
 
+/// Parallel version of [`predict_all`] using rayon.
+///
+/// Falls back to the sequential path when fewer than 32 tracks are alive.
+/// Requires the `parallel` feature.
+#[cfg(feature = "parallel")]
+pub fn predict_all_parallel<T: LinearTrack + Send>(
+    tracks: &mut [T],
+    f: &DMatrix<f64>,
+    q: &DMatrix<f64>,
+) {
+    let alive_count = tracks.iter().filter(|t| t.is_alive()).count();
+    if alive_count < 32 {
+        predict_all(tracks, f, q);
+        return;
+    }
+    use rayon::prelude::*;
+    tracks.par_iter_mut().for_each(|track| {
+        if !track.is_alive() {
+            return;
+        }
+        let (s, c) = predict_linear(track.state(), track.covariance(), f, q);
+        *track.state_mut() = s;
+        *track.covariance_mut() = c;
+    });
+}
+
 /// Collect indices of alive tracks.
 pub fn alive_indices<T: LinearTrack>(tracks: &[T]) -> Vec<usize> {
     tracks
@@ -85,6 +111,39 @@ pub fn build_track_cost_matrix<T: LinearTrack>(
         .map(|&ti| h * tracks[ti].covariance() * h.transpose() + r)
         .collect();
     build_cost_matrix(&predicted_obs, &innovation_covs, detections, gate_threshold)
+}
+
+/// Parallel version of [`build_track_cost_matrix`] using rayon.
+///
+/// Each row (one track vs all detections) is computed independently.
+/// Requires the `parallel` feature.
+#[cfg(feature = "parallel")]
+pub fn build_track_cost_matrix_parallel<T: LinearTrack + Sync>(
+    tracks: &[T],
+    alive: &[usize],
+    h: &DMatrix<f64>,
+    r: &DMatrix<f64>,
+    detections: &[DVector<f64>],
+    gate_threshold: f64,
+) -> Vec<Vec<f64>> {
+    use rayon::prelude::*;
+    use thresh_association::gating::mahalanobis_squared as mah_sq;
+
+    alive
+        .par_iter()
+        .map(|&ti| {
+            let z_hat = h * tracks[ti].state();
+            let s = h * tracks[ti].covariance() * h.transpose() + r;
+            let mut row = vec![gate_threshold; detections.len()];
+            for (dj, det) in detections.iter().enumerate() {
+                let d2 = mah_sq(det, &z_hat, &s);
+                if d2 < gate_threshold {
+                    row[dj] = d2;
+                }
+            }
+            row
+        })
+        .collect()
 }
 
 /// Build a Mahalanobis-distance cost matrix between predicted track

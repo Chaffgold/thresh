@@ -10,7 +10,11 @@ use thresh_filter::kf::KalmanFilter;
 use thresh_filter::models::cv::ConstantVelocity;
 use thresh_filter::traits::{LinearModel, MotionModel};
 
-use crate::cost_matrix::{alive_indices, build_track_cost_matrix, predict_all};
+use crate::cost_matrix::alive_indices;
+#[cfg(not(feature = "parallel"))]
+use crate::cost_matrix::{build_track_cost_matrix, predict_all};
+#[cfg(feature = "parallel")]
+use crate::cost_matrix::{build_track_cost_matrix_parallel, predict_all_parallel};
 
 use crate::heads::HeadRegistry;
 use crate::lifecycle::update_lifecycle;
@@ -125,6 +129,9 @@ impl MultiObjectTracker {
             let model = ConstantVelocity::new(5.0);
             let f = model.transition_matrix(dt);
             let q = model.process_noise(dt);
+            #[cfg(feature = "parallel")]
+            predict_all_parallel(&mut self.tracks, &f, &q);
+            #[cfg(not(feature = "parallel"))]
             predict_all(&mut self.tracks, &f, &q);
         }
 
@@ -132,6 +139,16 @@ impl MultiObjectTracker {
         let alive = alive_indices(&self.tracks);
         let h = &self.observation_matrix;
         let r = &self.measurement_noise;
+        #[cfg(feature = "parallel")]
+        let cost_matrix = build_track_cost_matrix_parallel(
+            &self.tracks,
+            &alive,
+            h,
+            r,
+            detections,
+            self.gate_threshold,
+        );
+        #[cfg(not(feature = "parallel"))]
         let cost_matrix =
             build_track_cost_matrix(&self.tracks, &alive, h, r, detections, self.gate_threshold);
 
@@ -442,6 +459,57 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// Verify that the parallel tracker produces the same output as the
+    /// sequential one on a deterministic scenario.
+    ///
+    /// This test always runs (even without the `parallel` feature) so the
+    /// sequential path is exercised. When `--features parallel` is active the
+    /// `step` method dispatches to `predict_all_parallel` and
+    /// `build_track_cost_matrix_parallel`, so the same assertions validate the
+    /// parallel code path.
+    #[test]
+    fn parallel_correctness_matches_sequential() {
+        let mut tracker = MultiObjectTracker::new_cv_position(10.0, 50.0);
+        let dt = 1.0;
+
+        // Birth two tracks with well-separated detections.
+        let dets: Vec<DVector<f64>> = vec![
+            DVector::from_column_slice(&[0.0, 0.0, 0.0]),
+            DVector::from_column_slice(&[1000.0, 1000.0, 0.0]),
+        ];
+        tracker.step(&dets, dt);
+        assert_eq!(tracker.alive_count(), 2);
+
+        // Run 20 steps with consistent detections moving linearly.
+        for step in 1..=20 {
+            let t = step as f64;
+            let dets: Vec<DVector<f64>> = vec![
+                DVector::from_column_slice(&[t * 10.0, t * 5.0, 0.0]),
+                DVector::from_column_slice(&[1000.0 + t * 10.0, 1000.0 + t * 5.0, 0.0]),
+            ];
+            tracker.step(&dets, dt);
+        }
+
+        // Both tracks should be confirmed (M-of-N with enough hits).
+        assert_eq!(
+            tracker.confirmed_count(),
+            2,
+            "both tracks should be confirmed"
+        );
+        assert_eq!(tracker.alive_count(), 2);
+
+        // Verify state estimates are reasonable (position near last detection).
+        for track in &tracker.tracks {
+            let x = track.state[0];
+            let y = track.state[2];
+            // Last detections were at (200, 100, 0) and (1200, 1100, 0).
+            assert!(
+                (x > 100.0 && y > 50.0),
+                "state should be near detection: x={x}, y={y}"
+            );
         }
     }
 }

@@ -1916,6 +1916,7 @@ dependencies = [
  "nalgebra",
  "rand",
  "rand_distr",
+ "rayon",
  "serde",
  "serde_json",
  "thresh-association",

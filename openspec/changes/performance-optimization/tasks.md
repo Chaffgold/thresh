@@ -15,17 +15,17 @@
 
 ## 3. Hungarian optimization
 
-- [ ] 3.1 Implement `HungarianSolver` struct with pre-allocated flat `Vec<f64>` cost buffer and reusable marking arrays
-- [ ] 3.2 Implement `HungarianSolver::solve(&mut self, cost: &[Vec<f64>], gate: f64) -> AssignmentResult` reusing internal buffers
-- [ ] 3.3 Keep existing `hungarian_assignment` free function as a convenience wrapper around `HungarianSolver`
-- [ ] 3.4 Benchmark `HungarianSolver::solve` vs old `hungarian_assignment` at 100x100 and 500x500; verify improvement
+- [x] 3.1 Implement `HungarianSolver` struct with pre-allocated flat `Vec<f64>` cost buffer and reusable marking arrays
+- [x] 3.2 Implement `HungarianSolver::solve(&mut self, cost: &[Vec<f64>], gate: f64) -> AssignmentResult` reusing internal buffers
+- [x] 3.3 Keep existing `hungarian_assignment` free function as a convenience wrapper around `HungarianSolver`
+- [x] 3.4 Benchmark `HungarianSolver::solve` vs old `hungarian_assignment` at 100x100 and 500x500; verify improvement
 
 ## 4. Rayon parallelism
 
-- [ ] 4.1 Add `rayon` as an optional dependency in `crates/thresh-tracker/Cargo.toml` behind `parallel` feature gate
-- [ ] 4.2 Parallelize `predict_all` with `rayon::par_iter_mut` when `parallel` feature is enabled, with a threshold of 32 tracks
-- [ ] 4.3 Parallelize cost matrix row computation in `build_track_cost_matrix` with `rayon::par_iter` and collect
-- [ ] 4.4 Benchmark `tracker_step_200` with and without `parallel` feature; verify net improvement
+- [x] 4.1 Add `rayon` as an optional dependency in `crates/thresh-tracker/Cargo.toml` behind `parallel` feature gate
+- [x] 4.2 Parallelize `predict_all` with `rayon::par_iter_mut` when `parallel` feature is enabled, with a threshold of 32 tracks
+- [x] 4.3 Parallelize cost matrix row computation in `build_track_cost_matrix` with `rayon::par_iter` and collect
+- [x] 4.4 Benchmark `tracker_step_200` with and without `parallel` feature; verify net improvement
 
 ## 5. Cache-friendly storage (conditional)
 
