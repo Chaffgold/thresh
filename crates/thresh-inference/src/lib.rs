@@ -7,5 +7,7 @@ pub mod detection;
 pub mod pipeline;
 pub mod preprocess;
 
+pub mod weights;
+
 #[cfg(feature = "onnx")]
 pub mod session;

@@ -13,3 +13,4 @@ onnx = ["ort"]
 thresh-core = { path = "../thresh-core" }
 nalgebra = { workspace = true }
 ort = { workspace = true, optional = true }
+safetensors = "0.4"
