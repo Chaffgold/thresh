@@ -33,13 +33,49 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run criterion benchmarks
-        run: cargo bench --workspace -- --output-format bencher | tee benchmark-results.txt
+        run: cargo bench --workspace -- --output-format bencher 2>&1 | tee benchmark-results.txt
       - name: Upload benchmark results
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results-${{ github.sha }}
           path: benchmark-results.txt
           retention-days: 90
+
+  # PR benchmark regression check — runs on pull requests to compare against
+  # the latest develop baseline. Currently extracts timing data and uploads as
+  # an artifact for manual review.
+  #
+  # TODO: Integrate `github-action-benchmark` (or `criterion-compare-action`)
+  # to automatically compare PR results against the stored develop baseline
+  # and post a comment on the PR flagging any >10% regressions. This requires:
+  #   1. A gh-pages branch or separate artifact store for baseline data
+  #   2. `github-action-benchmark` configured with alert-threshold: 110%
+  #   3. comment-on-alert: true to post PR comments
+  # See: https://github.com/benchmark-action/github-action-benchmark
+  pr-benchmark-check:
+    name: PR benchmark regression check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run criterion benchmarks
+        run: cargo bench --workspace -- --output-format bencher 2>&1 | tee bench-output.txt
+      - name: Extract timing summary
+        run: |
+          echo "## Benchmark Results" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E "^test .* bench:" bench-output.txt | \
+            awk '{printf "%-60s %s %s\n", $2, $5, $6}' >> "$GITHUB_STEP_SUMMARY" \
+            || echo "No benchmark lines found" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload PR benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-benchmark-results-${{ github.event.pull_request.number }}-${{ github.sha }}
+          path: bench-output.txt
+          retention-days: 30
 
   network-benchmarks:
     # Runs the `#[ignore]`-gated network-backed integration tests that
