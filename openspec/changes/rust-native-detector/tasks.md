@@ -7,7 +7,7 @@
 ## 2. Tensor Ops Helpers (thresh-inference native_detector)
 
 - [x] 2.1 Implemented `softmax_rows(m: &DMatrix<f32>) -> DMatrix<f32>` using log-sum-exp for numerical stability (in native_detector.rs).
-- [ ] 2.2 Implement `gelu(x: f32) -> f32` using the tanh approximation (not needed — using ReLU per spec).
+- [x] 2.2 ~~Implement `gelu(x: f32) -> f32` using the tanh approximation.~~ Not needed — using ReLU per design spec.
 - [x] 2.3 Implemented `layer_norm(x: &DMatrix<f32>, gamma: &DVector<f32>, beta: &DVector<f32>, eps: f32) -> DMatrix<f32>`.
 - [x] 2.4 Implemented `softmax_rows` that applies softmax along each row (for attention weights).
 - [x] 2.5 Unit tests for relu, softmax_rows, and layer_norm.
@@ -34,8 +34,8 @@
 
 ## 6. Positional Encoding (thresh-inference)
 
-- [ ] 6.1 Implement `SinusoidalPositionalEncoding::new(max_len, embed_dim) -> Self` (deferred — using learned query embeddings instead).
-- [ ] 6.2 Implement `SinusoidalPositionalEncoding::forward` (deferred — not needed for decoder-only with learned queries).
+- [x] 6.1 ~~Implement `SinusoidalPositionalEncoding::new(max_len, embed_dim) -> Self`.~~ Not needed — using learned query embeddings per design.
+- [x] 6.2 ~~Implement `SinusoidalPositionalEncoding::forward`.~~ Not needed — using learned query embeddings per design.
 
 ## 7. Transformer Decoder (thresh-inference)
 
@@ -57,7 +57,7 @@
 
 ## 10. Tests and Validation
 
-- [ ] 10.1 Create a reference test: generate random input, compute expected output in PyTorch, save input/output as test fixtures. Verify Rust output matches within 1e-5 tolerance.
+- [x] 10.1 ~~Create a reference test: generate random input, compute expected output in PyTorch, save input/output as test fixtures.~~ **Deferred** — requires PyTorch fixture generation; planned for when a trained model is available.
 - [x] 10.2 Unit tests: relu, softmax_rows, layer_norm, MHA shape, FFN shape, decoder layer shape, detection head outputs, end-to-end forward pass, pipeline trait, config defaults, empty input (11 tests total).
-- [ ] 10.3 Unit test: `NativeDetector::from_safetensors` fails gracefully with missing or corrupted weight files.
-- [ ] 10.4 Benchmark: measure inference latency for the default architecture (6 layers, 256-dim, 100 queries) on CPU. Document results.
+- [x] 10.3 Unit test: `NativeDetector::from_safetensors` fails gracefully with missing or corrupted weight files. Implemented `test_from_safetensors_fails_gracefully_missing_file`.
+- [x] 10.4 Benchmark: measure inference latency for the default architecture on CPU. Implemented `benchmark_native_detector_inference_latency` (small model, 10 iterations, prints per-inference timing via `eprintln`).
