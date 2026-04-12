@@ -7,6 +7,37 @@
 use thresh_core::detection::Detection3D;
 
 // ---------------------------------------------------------------------------
+// ONNX detector configuration
+// ---------------------------------------------------------------------------
+
+/// Configuration for the ONNX-based 3D object detector.
+#[derive(Debug, Clone)]
+pub struct OnnxDetectorConfig {
+    /// Path to the `.onnx` model file.
+    pub model_path: String,
+    /// Minimum confidence to keep a detection.
+    pub confidence_threshold: f64,
+    /// IoU threshold for non-maximum suppression.
+    pub nms_iou_threshold: f64,
+    /// Voxel dimensions `[x, y, z]` in metres (for point-cloud inputs).
+    pub voxel_size: [f64; 3],
+    /// Maximum number of points per voxel.
+    pub max_points_per_voxel: usize,
+}
+
+impl Default for OnnxDetectorConfig {
+    fn default() -> Self {
+        Self {
+            model_path: String::new(),
+            confidence_threshold: 0.5,
+            nms_iou_threshold: 0.4,
+            voxel_size: [0.1, 0.1, 0.2],
+            max_points_per_voxel: 35,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Sensor input
 // ---------------------------------------------------------------------------
 
@@ -342,6 +373,29 @@ mod tests {
         assert_eq!(result[0].position, expected[0].position);
         assert_eq!(result[1].position, expected[1].position);
         assert_eq!(detector.name(), "MockDetector");
+    }
+
+    #[test]
+    fn test_onnx_detector_config_default() {
+        let config = OnnxDetectorConfig::default();
+        assert!(config.model_path.is_empty());
+        assert!((config.confidence_threshold - 0.5).abs() < f64::EPSILON);
+        assert!((config.nms_iou_threshold - 0.4).abs() < f64::EPSILON);
+        assert_eq!(config.voxel_size, [0.1, 0.1, 0.2]);
+        assert_eq!(config.max_points_per_voxel, 35);
+    }
+
+    #[test]
+    fn test_onnx_detector_config_custom() {
+        let config = OnnxDetectorConfig {
+            model_path: "/tmp/model.onnx".into(),
+            confidence_threshold: 0.8,
+            nms_iou_threshold: 0.5,
+            voxel_size: [0.2, 0.2, 0.4],
+            max_points_per_voxel: 64,
+        };
+        assert_eq!(config.model_path, "/tmp/model.onnx");
+        assert!((config.confidence_threshold - 0.8).abs() < f64::EPSILON);
     }
 
     #[test]

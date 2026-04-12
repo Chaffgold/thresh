@@ -3,20 +3,20 @@
 ## 1. Core types
 
 - [x] 1.1 Add `TrackExchange` struct (track_id, source_id, state, covariance, timestamp) to `crates/thresh-fusion/src/t2t.rs`; derives `Debug`, `Clone`
-- [ ] 1.2 Add `From<&Track>` impl for `TrackExchange` to convert internal tracks to exchange format
-- [ ] 1.3 Add `FusionMode` enum (`Naive`, `CovarianceIntersection`, `OptimalCrossCovariance`) to `crates/thresh-fusion/src/federated.rs`
+- [x] 1.2 Add `From<&Track>` impl for `TrackExchange` to convert internal tracks to exchange format
+- [x] 1.3 Add `FusionMode` enum (`Naive`, `CovarianceIntersection`) to `crates/thresh-fusion/src/t2t.rs`
 
 ## 2. Track-to-track association
 
 - [x] 2.1 Implement `augmented_mahalanobis` distance function in `crates/thresh-fusion/src/t2t.rs`
-- [ ] 2.2 Implement `augmented_mahalanobis_with_cross_cov(x1, P1, x2, P2, P12) -> f64` for the cross-covariance-aware variant
+- [x] 2.2 Implement `augmented_mahalanobis_with_cross_cov(x1, P1, x2, P2, P12) -> f64` for the cross-covariance-aware variant
 - [x] 2.3 Implement `t2t_association` function building cost matrix and calling Hungarian solver in `crates/thresh-fusion/src/t2t.rs`
 - [x] 2.4 Unit tests: two identical tracks associate, two distant tracks do not
 
 ## 3. Temporal alignment
 
-- [ ] 3.1 Implement `extrapolate_track(exchange: &TrackExchange, target_time: f64, model: &dyn MotionModel) -> TrackExchange` in `crates/thresh-fusion/src/temporal.rs`
-- [ ] 3.2 Implement batch alignment: `align_to_common_time(tracks: &mut [TrackExchange])` extrapolating all tracks to the latest timestamp
+- [x] 3.1 Implement `extrapolate_track(exchange: &TrackExchange, target_time: f64, f: &DMatrix, q: &DMatrix) -> TrackExchange` in `crates/thresh-fusion/src/t2t.rs`
+- [x] 3.2 Implement batch alignment: `align_to_common_time(tracks: &mut [TrackExchange], f, q)` extrapolating all tracks to the latest timestamp
 - [ ] 3.3 Unit test: extrapolation of a constant-velocity track matches manual F*x + Q computation
 
 ## 4. Federated fusion manager

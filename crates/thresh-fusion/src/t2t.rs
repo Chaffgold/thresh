@@ -12,6 +12,88 @@ use nalgebra::{DMatrix, DVector};
 use thresh_association::hungarian::{AssignmentResult, hungarian_assignment};
 
 // ---------------------------------------------------------------------------
+// Fusion mode
+// ---------------------------------------------------------------------------
+
+/// Selects which fusion algorithm the [`FederatedFusionManager`] uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FusionMode {
+    /// Naive inverse-covariance-weighted fusion (assumes independence).
+    Naive,
+    /// Covariance Intersection (safe when cross-covariances are unknown).
+    CovarianceIntersection,
+}
+
+// ---------------------------------------------------------------------------
+// Temporal alignment
+// ---------------------------------------------------------------------------
+
+/// Extrapolate a track exchange to `target_time` using a linear state
+/// transition matrix `f` and process noise `q`.
+///
+/// If `dt` ≈ 0 the original exchange is returned unchanged.
+pub fn extrapolate_track(
+    exchange: &TrackExchange,
+    target_time: f64,
+    f: &DMatrix<f64>,
+    q: &DMatrix<f64>,
+) -> TrackExchange {
+    let dt = target_time - exchange.timestamp;
+    if dt.abs() < 1e-10 {
+        return exchange.clone();
+    }
+    // Simple linear extrapolation: x_new = F * x, P_new = F*P*F' + Q
+    let new_state = f * &exchange.state;
+    let new_cov = f * &exchange.covariance * f.transpose() + q;
+    TrackExchange {
+        track_id: exchange.track_id,
+        state: new_state,
+        covariance: new_cov,
+        timestamp: target_time,
+        source_id: exchange.source_id,
+    }
+}
+
+/// Align all track exchanges to the latest timestamp in the slice.
+///
+/// Each track whose timestamp is earlier than the latest is extrapolated
+/// forward using the provided state transition `f` and process noise `q`.
+pub fn align_to_common_time(tracks: &mut [TrackExchange], f: &DMatrix<f64>, q: &DMatrix<f64>) {
+    let latest = tracks
+        .iter()
+        .map(|t| t.timestamp)
+        .fold(f64::NEG_INFINITY, f64::max);
+    for track in tracks.iter_mut() {
+        if (track.timestamp - latest).abs() > 1e-10 {
+            *track = extrapolate_track(track, latest, f, q);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Cross-covariance-aware Mahalanobis
+// ---------------------------------------------------------------------------
+
+/// Augmented Mahalanobis distance accounting for cross-covariance between
+/// two estimates.
+///
+/// `d² = (x₁ - x₂)ᵀ (P₁ + P₂ - P₁₂ - P₁₂ᵀ)⁻¹ (x₁ - x₂)`
+pub fn augmented_mahalanobis_with_cross_cov(
+    x1: &DVector<f64>,
+    p1: &DMatrix<f64>,
+    x2: &DVector<f64>,
+    p2: &DMatrix<f64>,
+    p12: &DMatrix<f64>,
+) -> f64 {
+    let diff = x1 - x2;
+    let s = p1 + p2 - p12 - p12.transpose();
+    match s.try_inverse() {
+        Some(s_inv) => (diff.transpose() * s_inv * &diff)[(0, 0)],
+        None => f64::MAX,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Core type
 // ---------------------------------------------------------------------------
 
@@ -150,6 +232,8 @@ pub fn fuse_naive(a: &TrackExchange, b: &TrackExchange) -> TrackExchange {
 pub struct FederatedFusionManager {
     /// Per-site track submissions, keyed by source_id.
     site_tracks: Vec<(u32, Vec<TrackExchange>)>,
+    /// Which fusion algorithm to use for matched pairs.
+    pub mode: FusionMode,
 }
 
 impl FederatedFusionManager {
@@ -157,6 +241,15 @@ impl FederatedFusionManager {
     pub fn new() -> Self {
         Self {
             site_tracks: Vec::new(),
+            mode: FusionMode::CovarianceIntersection,
+        }
+    }
+
+    /// Create a new manager with the specified fusion mode.
+    pub fn with_mode(mode: FusionMode) -> Self {
+        Self {
+            site_tracks: Vec::new(),
+            mode,
         }
     }
 
@@ -200,11 +293,17 @@ impl FederatedFusionManager {
             let mut matched_incoming: Vec<bool> = vec![false; incoming.len()];
             let mut new_fused = Vec::new();
 
-            // Fuse matched pairs
+            // Fuse matched pairs using the configured mode
             for &(fi, ii) in &matches {
                 matched_fused[fi] = true;
                 matched_incoming[ii] = true;
-                new_fused.push(fuse_covariance_intersection(&fused[fi], &incoming[ii]));
+                let fused_pair = match self.mode {
+                    FusionMode::Naive => fuse_naive(&fused[fi], &incoming[ii]),
+                    FusionMode::CovarianceIntersection => {
+                        fuse_covariance_intersection(&fused[fi], &incoming[ii])
+                    }
+                };
+                new_fused.push(fused_pair);
             }
 
             // Keep unmatched fused tracks (coasting)
@@ -362,6 +461,124 @@ mod tests {
             3,
             "expected 3 fused tracks, got {}",
             fused.len()
+        );
+    }
+
+    #[test]
+    fn test_fusion_mode_selects_algorithm() {
+        // Create a manager with Naive mode and verify it uses naive fusion
+        // (which produces a different result from CI).
+        let mut mgr_naive = FederatedFusionManager::with_mode(FusionMode::Naive);
+        let mut mgr_ci = FederatedFusionManager::with_mode(FusionMode::CovarianceIntersection);
+
+        let tracks_a = vec![make_track(1, 1, &[10.0, 20.0], &[4.0, 4.0])];
+        let tracks_b = vec![make_track(10, 2, &[11.0, 19.0], &[4.0, 4.0])];
+
+        mgr_naive.submit_tracks(1, tracks_a.clone());
+        mgr_naive.submit_tracks(2, tracks_b.clone());
+        mgr_ci.submit_tracks(1, tracks_a);
+        mgr_ci.submit_tracks(2, tracks_b);
+
+        let fused_naive = mgr_naive.fuse(50.0);
+        let fused_ci = mgr_ci.fuse(50.0);
+
+        assert_eq!(fused_naive.len(), 1);
+        assert_eq!(fused_ci.len(), 1);
+
+        // Naive and CI should produce different covariances for the same inputs
+        let tr_naive = fused_naive[0].covariance.trace();
+        let tr_ci = fused_ci[0].covariance.trace();
+        assert!(
+            (tr_naive - tr_ci).abs() > 1e-6,
+            "Naive and CI should produce different covariances, got naive={tr_naive}, ci={tr_ci}"
+        );
+    }
+
+    #[test]
+    fn test_extrapolate_track_zero_dt() {
+        let track = make_track(1, 1, &[10.0, 1.0], &[2.0, 2.0]);
+        let f = DMatrix::identity(2, 2);
+        let q = DMatrix::zeros(2, 2);
+        let result = extrapolate_track(&track, track.timestamp, &f, &q);
+        assert_eq!(result.state, track.state);
+        assert_eq!(result.covariance, track.covariance);
+    }
+
+    #[test]
+    fn test_extrapolate_track_positive_dt() {
+        let mut track = make_track(1, 1, &[10.0, 1.0], &[2.0, 2.0]);
+        track.timestamp = 0.0;
+        // F = [[1, dt], [0, 1]] with dt=1.0 (constant velocity)
+        let dt = 1.0;
+        let f = DMatrix::from_row_slice(2, 2, &[1.0, dt, 0.0, 1.0]);
+        let q = DMatrix::from_diagonal(&DVector::from_column_slice(&[0.1, 0.1]));
+
+        let result = extrapolate_track(&track, dt, &f, &q);
+        assert!((result.timestamp - dt).abs() < 1e-10);
+        // x_new = F * [10, 1] = [10 + 1*1, 1] = [11, 1]
+        assert!((result.state[0] - 11.0).abs() < 1e-10);
+        assert!((result.state[1] - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_align_to_common_time() {
+        let mut tracks = vec![
+            TrackExchange {
+                track_id: 1,
+                state: DVector::from_column_slice(&[10.0, 1.0]),
+                covariance: DMatrix::from_diagonal(&DVector::from_column_slice(&[1.0, 1.0])),
+                timestamp: 0.0,
+                source_id: 1,
+            },
+            TrackExchange {
+                track_id: 2,
+                state: DVector::from_column_slice(&[20.0, 2.0]),
+                covariance: DMatrix::from_diagonal(&DVector::from_column_slice(&[1.0, 1.0])),
+                timestamp: 0.5,
+                source_id: 2,
+            },
+            TrackExchange {
+                track_id: 3,
+                state: DVector::from_column_slice(&[30.0, 3.0]),
+                covariance: DMatrix::from_diagonal(&DVector::from_column_slice(&[1.0, 1.0])),
+                timestamp: 1.0,
+                source_id: 3,
+            },
+        ];
+
+        let f = DMatrix::identity(2, 2);
+        let q = DMatrix::zeros(2, 2);
+        align_to_common_time(&mut tracks, &f, &q);
+
+        // All tracks should now be at timestamp 1.0
+        for track in &tracks {
+            assert!(
+                (track.timestamp - 1.0).abs() < 1e-10,
+                "track {} should be at t=1.0, got {}",
+                track.track_id,
+                track.timestamp
+            );
+        }
+    }
+
+    #[test]
+    fn test_augmented_mahalanobis_with_zero_cross_cov() {
+        // With zero cross-covariance, should equal regular augmented Mahalanobis
+        let a = make_track(1, 1, &[10.0, 20.0], &[4.0, 9.0]);
+        let b = make_track(2, 2, &[11.0, 19.0], &[4.0, 9.0]);
+
+        let d_regular = augmented_mahalanobis(&a, &b);
+        let d_cross = augmented_mahalanobis_with_cross_cov(
+            &a.state,
+            &a.covariance,
+            &b.state,
+            &b.covariance,
+            &DMatrix::zeros(2, 2),
+        );
+
+        assert!(
+            (d_regular - d_cross).abs() < 1e-10,
+            "zero cross-cov should match regular: {d_regular} vs {d_cross}"
         );
     }
 
