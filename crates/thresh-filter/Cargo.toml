@@ -1,0 +1,10 @@
+[package]
+name = "thresh-filter"
+description = "Kalman filter family (KF, EKF, UKF) with configurable motion models"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thresh-core = { path = "../thresh-core" }
+nalgebra = { workspace = true }

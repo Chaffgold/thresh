@@ -1,0 +1,71 @@
+name: SonarCloud
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  sonarcloud:
+    name: SonarCloud Analysis
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.fork == false || github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: "Generate coverage (LCOV with absolute SF: paths)"
+        run: |
+          cargo llvm-cov --workspace --lcov --output-path lcov.info
+          # Rewrite SF: entries to absolute paths so SonarCloud can match
+          # them back to the crates/ source tree (cargo-llvm-cov emits
+          # repo-relative paths by default).
+          workspace="${GITHUB_WORKSPACE:-$PWD}"
+          tmp_lcov="$(mktemp)"
+          while IFS= read -r line; do
+            case "$line" in
+              SF:/*)
+                printf '%s\n' "$line" >> "$tmp_lcov"
+                ;;
+              SF:*)
+                printf 'SF:%s/%s\n' "$workspace" "${line#SF:}" >> "$tmp_lcov"
+                ;;
+              *)
+                printf '%s\n' "$line" >> "$tmp_lcov"
+                ;;
+            esac
+          done < lcov.info
+          mv "$tmp_lcov" lcov.info
+          if grep -q '^SF:[^/]' lcov.info; then
+            echo "Found non-absolute SF: entries in lcov.info"
+            grep '^SF:' lcov.info | head -5
+            exit 1
+          fi
+          echo "--- LCOV head ---"
+          head -20 lcov.info
+      - name: Run clippy for SonarCloud
+        run: cargo clippy --workspace --all-targets --quiet --message-format=json > clippy-report.json
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.sources=crates/
+            -Dsonar.tests=crates/
+            -Dsonar.test.inclusions=**/*test*/**,**/tests/**
+            -Dsonar.exclusions=**/target/**
+            -Dsonar.coverage.exclusions=**/tests/**,**/test*/**
+            -Dsonar.rust.lcov.reportPaths=lcov.info
+            -Dsonar.community.rust.lcov.reportPaths=lcov.info
+            -Dsonar.community.rust.clippy.reportPaths=clippy-report.json

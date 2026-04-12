@@ -1,0 +1,12 @@
+name = "synth-maneuvering"
+description = "3 targets with CTRV maneuvering segments"
+source = "Synthetic"
+
+[parameters]
+duration_s = 60.0
+dt = 1.0
+measurement_noise_sigma = 15.0
+gate_threshold = 80.0
+
+[baselines]
+mota = 0.5

@@ -1,0 +1,161 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+
+jobs:
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  doc:
+    name: Doc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -Dwarnings
+
+  openspec:
+    name: OpenSpec Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install -g @fission-ai/openspec@latest
+        env:
+          OPENSPEC_TELEMETRY: '0'
+      - run: openspec validate --all --strict --no-interactive
+        env:
+          OPENSPEC_TELEMETRY: '0'
+
+  synth-benchmark-gate:
+    # Runs every synthetic benchmark scenario through `thresh-data run` and
+    # fails the build if any scenario's regression check (MOTA / HOTA / IDF1
+    # baselines) does not pass. This is the cheap in-repo equivalent of the
+    # full benchmarks workflow — no network, no long-running integration
+    # tests, just the baseline regression gate for the scenarios checked
+    # into `crates/thresh-data/scenarios/`.
+    name: Synthetic benchmark gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build thresh-data CLI
+        run: cargo build -p thresh-data --bin thresh-data
+      - name: Run all synthetic scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          any=0
+          for toml in crates/thresh-data/scenarios/synth-*.toml; do
+            any=1
+            echo "=== $toml ==="
+            ./target/debug/thresh-data run "$toml"
+          done
+          if [ "$any" -eq 0 ]; then
+            echo "no synth-*.toml scenarios found under crates/thresh-data/scenarios/" >&2
+            exit 1
+          fi
+
+  orbital-benchmark-gate:
+    # Same regression gate pattern as synth-benchmark-gate, but for orbital
+    # scenarios that need the `orbital` feature (sgp4 + reqwest). All
+    # orbital-*.toml scenarios in the repo use cached TLE files so this
+    # job still runs without network access; the HTTP fallback path in
+    # `run_orbital_benchmark` is exercised by the `--ignored` integration
+    # tests under `crates/thresh-data/tests/`.
+    name: Orbital benchmark gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build thresh-data CLI with orbital feature
+        run: cargo build -p thresh-data --features orbital --bin thresh-data
+      - name: Run all orbital scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          any=0
+          for toml in crates/thresh-data/scenarios/orbital-*.toml; do
+            any=1
+            echo "=== $toml ==="
+            ./target/debug/thresh-data run "$toml"
+          done
+          if [ "$any" -eq 0 ]; then
+            echo "no orbital-*.toml scenarios found under crates/thresh-data/scenarios/" >&2
+            exit 1
+          fi
+
+  adsb-benchmark-gate:
+    # Same regression gate pattern as synth-benchmark-gate / orbital-benchmark-gate,
+    # but for ADS-B scenarios that need the `adsb` feature (reqwest + csv).
+    # All adsb-*.toml scenarios in the repo reference cached JSON state-vector
+    # fixtures so this job runs offline. The live-OpenSky fallback path in
+    # `run_adsb_benchmark` is exercised by the `--ignored` integration tests
+    # under `crates/thresh-data/tests/`.
+    name: ADS-B benchmark gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build thresh-data CLI with adsb feature
+        run: cargo build -p thresh-data --features adsb --bin thresh-data
+      - name: Run all ADS-B scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          any=0
+          for toml in crates/thresh-data/scenarios/adsb-*.toml; do
+            any=1
+            echo "=== $toml ==="
+            ./target/debug/thresh-data run "$toml"
+          done
+          if [ "$any" -eq 0 ]; then
+            echo "no adsb-*.toml scenarios found under crates/thresh-data/scenarios/" >&2
+            exit 1
+          fi

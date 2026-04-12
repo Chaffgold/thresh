@@ -1,0 +1,70 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * *" # nightly at 04:00 UTC
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-Dwarnings"
+
+jobs:
+  synthetic-benchmarks:
+    name: Synthetic benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run synthetic benchmark tests
+        run: cargo test -p thresh-data benchmark --release
+
+  network-benchmarks:
+    # Runs the `#[ignore]`-gated network-backed integration tests that
+    # exercise the real Space-Track / CelesTrak / OpenSky HTTP paths
+    # under `thresh-data`. These require live outbound HTTPS to
+    # www.space-track.org, celestrak.org, and opensky-network.org and
+    # optionally THRESH_SPACETRACK_USERNAME / _PASSWORD for the
+    # authenticated paths.
+    #
+    # The `|| true` guards let the job continue past individual network
+    # failures — this is a nightly "everything still connects?" canary
+    # rather than a blocking gate. The step summary captures stderr so
+    # a persistent outage can be traced back to the failing endpoint.
+    name: Network benchmarks (nightly)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: CelesTrak public TLE fetch
+        run: |
+          cargo test -p thresh-data --features orbital -- \
+            --ignored celestrak_fetch_gp celestrak_fetch_catnr_iss --nocapture \
+          || echo "::warning::CelesTrak network test failed — see logs"
+
+      - name: Space-Track authenticated TLE fetch
+        env:
+          THRESH_SPACETRACK_USERNAME: ${{ secrets.THRESH_SPACETRACK_USERNAME }}
+          THRESH_SPACETRACK_PASSWORD: ${{ secrets.THRESH_SPACETRACK_PASSWORD }}
+        run: |
+          if [ -z "${THRESH_SPACETRACK_USERNAME:-}" ] || [ -z "${THRESH_SPACETRACK_PASSWORD:-}" ]; then
+            echo "::warning::THRESH_SPACETRACK_USERNAME / _PASSWORD secrets not set — skipping Space-Track test"
+            exit 0
+          fi
+          cargo test -p thresh-data --features orbital -- \
+            --ignored spacetrack_fetch_tle --nocapture \
+          || echo "::warning::Space-Track network test failed — see logs"
+
+      - name: OpenSky live state fetch
+        run: |
+          cargo test -p thresh-data --features adsb -- \
+            --ignored integration_fetch_live_states --nocapture \
+          || echo "::warning::OpenSky network test failed — see logs"

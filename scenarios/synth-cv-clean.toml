@@ -1,0 +1,14 @@
+name = "synth-cv-clean"
+description = "5 constant-velocity targets, low noise, perfect detection probability"
+source = "Synthetic"
+
+[parameters]
+duration_s = 60.0
+dt = 1.0
+measurement_noise_sigma = 10.0
+gate_threshold = 50.0
+tracker_variant = "Enu"
+
+[baselines]
+mota = 0.8
+idf1 = 0.7

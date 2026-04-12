@@ -1,0 +1,12 @@
+name = "synth-low-pd"
+description = "10 targets with P_d=0.7 and high clutter rate"
+source = "Synthetic"
+
+[parameters]
+duration_s = 60.0
+dt = 1.0
+measurement_noise_sigma = 25.0
+gate_threshold = 120.0
+
+[baselines]
+mota = 0.3

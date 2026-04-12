@@ -1,0 +1,12 @@
+name = "synth-cv-clean"
+description = "5 constant-velocity targets, low measurement noise, perfect detection. Minimal baseline scenario for regression checking."
+source = "Synthetic"
+
+[parameters]
+duration_s = 30.0
+dt = 1.0
+measurement_noise_sigma = 50.0
+gate_threshold = 500.0
+
+[baselines]
+mota = 0.5

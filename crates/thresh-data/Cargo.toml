@@ -1,0 +1,37 @@
+[package]
+name = "thresh-data"
+description = "Test data pipeline and dataset adapters for thresh"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+adsb = ["reqwest", "csv"]
+orbital = ["sgp4", "reqwest"]
+nuscenes = ["pyo3"]
+
+[dependencies]
+thresh-core = { path = "../thresh-core" }
+thresh-synth = { path = "../thresh-synth" }
+thresh-tracker = { path = "../thresh-tracker" }
+thresh-eval = { path = "../thresh-eval" }
+nalgebra = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+rand = "0.9"
+rand_distr = "0.5"
+reqwest = { workspace = true, optional = true }
+csv = { workspace = true, optional = true }
+sgp4 = { workspace = true, optional = true }
+pyo3 = { version = "0.24", optional = true }
+
+# Benchmark scenario runner CLI. Always built (no feature gate) since the
+# synthetic scenario path only needs types from thresh-core / thresh-synth /
+# thresh-tracker that are already in the default build graph.
+[[bin]]
+name = "thresh-data"
+path = "src/bin/thresh_data.rs"
+
+[dev-dependencies]
+tempfile = "3"
