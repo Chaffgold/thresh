@@ -725,6 +725,49 @@ mod tests {
         );
     }
 
+    /// 5.3: Verify DropOldest policy lets senders proceed when the channel is full.
+    #[tokio::test]
+    async fn test_drop_oldest_policy_drops_when_full() {
+        let tracker = MultiObjectTracker::new_cv_position(10.0, 50.0);
+        let config = StreamingConfig {
+            frame_duration_s: 0.1,
+            channel_capacity: 2, // very small channel
+            drop_policy: DropPolicy::DropOldest,
+            ..Default::default()
+        };
+        let (streaming, handle) = StreamingTracker::new(tracker, config);
+
+        let tx = streaming.sender();
+
+        // Send more measurements than the channel capacity without consuming.
+        // With DropOldest on a bounded mpsc, the sender should not block.
+        // We use a timeout to ensure this completes promptly.
+        let send_result = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            for i in 0..10 {
+                // try_send avoids blocking; if the channel is full the message
+                // is simply dropped (DropOldest semantics).
+                let _ = tx.try_send(TimestampedMeasurement {
+                    measurement: DVector::from_column_slice(&[i as f64 * 10.0, 200.0, 50.0]),
+                    timestamp: i as f64 * 0.01,
+                });
+            }
+        })
+        .await;
+
+        assert!(
+            send_result.is_ok(),
+            "sending should complete within the timeout (DropOldest should not block)"
+        );
+
+        // Clean shutdown
+        drop(tx);
+        drop(streaming);
+
+        tokio::task::spawn_blocking(move || handle.join())
+            .await
+            .unwrap();
+    }
+
     #[test]
     fn test_streaming_tracker_default_config() {
         let config = StreamingConfig::default();

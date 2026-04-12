@@ -85,6 +85,18 @@ impl Track {
     }
 }
 
+impl From<&Track> for thresh_fusion::t2t::TrackExchange {
+    fn from(track: &Track) -> Self {
+        thresh_fusion::t2t::TrackExchange {
+            track_id: track.id.0,
+            state: track.state.clone(),
+            covariance: track.covariance.clone(),
+            timestamp: 0.0, // caller should set
+            source_id: 0,   // caller should set
+        }
+    }
+}
+
 impl crate::cost_matrix::LinearTrack for Track {
     fn is_alive(&self) -> bool {
         self.is_alive()
@@ -117,6 +129,19 @@ mod tests {
         assert_eq!(t.lifecycle, TrackState::Tentative);
         assert_eq!(t.hit_streak, 1);
         assert_eq!(t.coast_count, 0);
+    }
+
+    #[test]
+    fn test_track_exchange_from_track() {
+        let state = DVector::from_column_slice(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let cov = DMatrix::identity(6, 6) * 2.0;
+        let track = Track::new(state.clone(), cov.clone(), TargetClass::Aircraft);
+        let exchange: thresh_fusion::t2t::TrackExchange = (&track).into();
+        assert_eq!(exchange.track_id, track.id.0);
+        assert_eq!(exchange.state, state);
+        assert_eq!(exchange.covariance, cov);
+        assert_eq!(exchange.timestamp, 0.0);
+        assert_eq!(exchange.source_id, 0);
     }
 
     #[test]

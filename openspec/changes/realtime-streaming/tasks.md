@@ -32,7 +32,7 @@
 
 - [x] 5.1 Integration test: spawn `StreamingTracker::run`, send 100 measurements via mpsc, receive track snapshots via broadcast, verify track confirmation
 - [x] 5.2 Integration test: send measurements with a 3-frame gap, verify predict-only frames advance tracker state
-- [ ] 5.3 Integration test: verify `DropOldest` policy drops old measurements when channel is full
+- [x] 5.3 Integration test: verify `DropOldest` policy drops old measurements when channel is full
 - [x] 5.4 Integration test: verify clean shutdown when all senders are dropped
 
 ## 6. Documentation

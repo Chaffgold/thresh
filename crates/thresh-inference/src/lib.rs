@@ -5,6 +5,7 @@
 
 pub mod detection;
 pub mod pipeline;
+pub mod preprocess;
 
 #[cfg(feature = "onnx")]
 pub mod session;

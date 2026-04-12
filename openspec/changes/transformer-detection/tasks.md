@@ -4,19 +4,19 @@
 
 - [x] 1.1 Add `Detection3D` struct to `crates/thresh-core/src/detection.rs` wrapping `BoundingBox3D` with optional `embedding: Vec<f64>` and a `frame_id: u64` field
 - [x] 1.2 Implement `Detection3D::to_measurement() -> DVector<f64>` converting position (and optionally velocity) to a Kalman-filter-compatible measurement vector
-- [ ] 1.3 Add `SensorInput` enum (`PointCloud`, `ImageTensor`) to `crates/thresh-core/src/detection.rs`
-- [ ] 1.4 Add `DetectionError` enum to thresh-core covering model load, inference, and shape mismatch errors
+- [x] 1.3 Add `SensorInputType` enum (`PointCloud`, `ImageTensor`) to `crates/thresh-core/src/detection.rs`
+- [x] 1.4 Add `DetectionError` enum to thresh-core covering model load, inference, and shape mismatch errors
 
 ## 2. Detection pipeline trait
 
 - [x] 2.1 Define `DetectionPipeline` trait in `crates/thresh-inference/src/detection.rs` with `detect(&self, input: &SensorInput) -> Vec<Detection3D>`
-- [ ] 2.2 Add `OnnxDetectorConfig` struct with `model_path`, `confidence_threshold`, `nms_iou_threshold`, `voxel_size`, `max_points_per_voxel`
+- [x] 2.2 Add `OnnxDetectorConfig` struct with `model_path`, `confidence_threshold`, `nms_iou_threshold`, `voxel_size`, `max_points_per_voxel`
 
 ## 3. Pre-processing
 
-- [ ] 3.1 Implement point cloud voxelization: `voxelize(points: &[[f64; 4]], config: &OnnxDetectorConfig) -> ort::Value` in a new `crates/thresh-inference/src/preprocess.rs`
-- [ ] 3.2 Implement image normalization and resize for NCHW tensor input
-- [ ] 3.3 Unit test voxelization with known point distributions (uniform grid, single voxel, empty input)
+- [x] 3.1 Implement point cloud voxelization: `voxelize(points, voxel_size, max_per_voxel)` in `crates/thresh-inference/src/preprocess.rs`
+- [x] 3.2 Implement image normalization: `normalize_image(data, mean, std, channels)` in `crates/thresh-inference/src/preprocess.rs`
+- [x] 3.3 Unit test voxelization with known point distributions (uniform grid, single voxel, empty input)
 
 ## 4. ONNX inference
 
