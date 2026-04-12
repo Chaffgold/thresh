@@ -992,6 +992,66 @@ mod tests {
         }
     }
 
+    #[test]
+    fn adsb_source_defaults_fill_in_station_and_bbox() {
+        // Non-feature-gated test: SonarCloud's coverage job runs
+        // `cargo llvm-cov --workspace` without feature flags, so any
+        // #[cfg(feature = "adsb")]-gated tests are invisible to it.
+        // This test forces serde to invoke `default_adsb_ref_lat_deg`
+        // and `default_adsb_ref_lon_deg` by deserializing an AdsB
+        // manifest that omits those fields, so both defaults register
+        // as covered in the default-features LCOV report.
+        let toml = r#"
+            name = "adsb-defaults-test"
+            description = "parse test"
+            [source.AdsB]
+            region = "JFK"
+
+            [parameters]
+            duration_s = 1.0
+            dt = 1.0
+            measurement_noise_sigma = 10.0
+            gate_threshold = 100.0
+        "#;
+        let manifest: ScenarioManifest = toml::from_str(toml).expect("parse AdsB defaults");
+        let ScenarioSource::AdsB {
+            region,
+            state_file,
+            bbox,
+            ref_lat_deg,
+            ref_lon_deg,
+            ref_alt_m,
+        } = &manifest.source
+        else {
+            panic!("expected AdsB source");
+        };
+        assert_eq!(region, "JFK");
+        assert!(state_file.is_none());
+        assert!(bbox.is_none());
+        // The defaults should be the JFK-area pair the module ships.
+        assert!((*ref_lat_deg - 40.6413).abs() < 1e-6);
+        assert!((*ref_lon_deg - (-73.7781)).abs() < 1e-6);
+        assert_eq!(*ref_alt_m, 0.0);
+    }
+
+    #[test]
+    fn adsb_bounding_box_roundtrips() {
+        // Exercise the `AdsBBoundingBox` struct in the default feature
+        // set so its serde derive counts as covered too.
+        let bbox = AdsBBoundingBox {
+            lat_min: 40.0,
+            lat_max: 41.0,
+            lon_min: -74.0,
+            lon_max: -73.0,
+        };
+        let json = serde_json::to_string(&bbox).unwrap();
+        let parsed: AdsBBoundingBox = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.lat_min, 40.0);
+        assert_eq!(parsed.lat_max, 41.0);
+        assert_eq!(parsed.lon_min, -74.0);
+        assert_eq!(parsed.lon_max, -73.0);
+    }
+
     #[cfg(feature = "adsb")]
     #[test]
     fn run_adsb_benchmark_rejects_non_adsb_source() {
