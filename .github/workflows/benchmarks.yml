@@ -24,6 +24,23 @@ jobs:
       - name: Run synthetic benchmark tests
         run: cargo test -p thresh-data benchmark --release
 
+  criterion-benchmarks:
+    name: Criterion benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run criterion benchmarks
+        run: cargo bench --workspace -- --output-format bencher | tee benchmark-results.txt
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.sha }}
+          path: benchmark-results.txt
+          retention-days: 90
+
   network-benchmarks:
     # Runs the `#[ignore]`-gated network-backed integration tests that
     # exercise the real Space-Track / CelesTrak / OpenSky HTTP paths

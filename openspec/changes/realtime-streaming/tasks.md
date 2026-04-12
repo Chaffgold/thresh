@@ -13,14 +13,14 @@
 - [x] 2.2 Implement `TemporalBinner::push(&mut self, measurement: TimestampedMeasurement)` to accumulate measurements
 - [x] 2.3 Implement `TemporalBinner::flush(&mut self) -> Option<Frame>` that returns accumulated measurements when the frame window elapses, inserting predict-only frames for gaps
 - [x] 2.4 Unit test: measurements within one window are grouped; measurements spanning two windows produce two flushes
-- [ ] 2.5 Unit test: gap of 3x frame_duration produces two predict-only frames plus one detection frame
+- [x] 2.5 Unit test: gap of 3x frame_duration produces two predict-only frames plus one detection frame
 
 ## 3. StreamingTracker
 
 - [x] 3.1 Implement `StreamingTracker::new(config: StreamingConfig, tracker: MultiObjectTracker) -> (Self, mpsc::Sender<TimestampedMeasurement>, broadcast::Receiver<TrackSnapshot>)`
 - [x] 3.2 Implement `StreamingTracker::run(&mut self) -> Result<(), StreamingError>` async processing loop: receive -> bin -> step -> broadcast
 - [x] 3.3 Implement `capture_snapshot` that reads confirmed tracks from `MultiObjectTracker` and builds `TrackSnapshot`
-- [ ] 3.4 Implement latency management: detect when tracker falls behind `max_latency`, drop intermediate frames, predict forward
+- [x] 3.4 Implement latency management: detect when tracker falls behind `max_latency`, drop intermediate frames, predict forward
 
 ## 4. Feature gate and dependencies
 
@@ -31,11 +31,11 @@
 ## 5. Testing
 
 - [x] 5.1 Integration test: spawn `StreamingTracker::run`, send 100 measurements via mpsc, receive track snapshots via broadcast, verify track confirmation
-- [ ] 5.2 Integration test: send measurements with a 3-frame gap, verify predict-only frames advance tracker state
+- [x] 5.2 Integration test: send measurements with a 3-frame gap, verify predict-only frames advance tracker state
 - [ ] 5.3 Integration test: verify `DropOldest` policy drops old measurements when channel is full
-- [ ] 5.4 Integration test: verify clean shutdown when all senders are dropped
+- [x] 5.4 Integration test: verify clean shutdown when all senders are dropped
 
 ## 6. Documentation
 
 - [x] 6.1 Add module-level doc comment to `streaming.rs` with usage example showing channel creation, spawn, and subscription
-- [ ] 6.2 Add `streaming` feature documentation to `crates/thresh-tracker/Cargo.toml` metadata
+- [x] 6.2 Add `streaming` feature documentation to `crates/thresh-tracker/Cargo.toml` metadata
