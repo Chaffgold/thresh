@@ -1897,6 +1897,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "thresh-py"
+version = "0.1.0"
+dependencies = [
+ "nalgebra",
+ "pyo3",
+ "thresh-association",
+ "thresh-core",
+ "thresh-eval",
+ "thresh-filter",
+ "thresh-tracker",
+]
+
+[[package]]
 name = "thresh-synth"
 version = "0.1.0"
 dependencies = [

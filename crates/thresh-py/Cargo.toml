@@ -1,0 +1,19 @@
+[package]
+name = "thresh-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Python bindings for the thresh tracking framework"
+
+[lib]
+name = "thresh_py"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+thresh-core = { path = "../thresh-core" }
+thresh-filter = { path = "../thresh-filter" }
+thresh-tracker = { path = "../thresh-tracker" }
+thresh-eval = { path = "../thresh-eval" }
+thresh-association = { path = "../thresh-association" }
+nalgebra = { workspace = true }
+pyo3 = { version = "0.24", features = ["extension-module"] }

@@ -2,10 +2,10 @@
 
 ## 1. Crate setup
 
-- [ ] 1.1 Create `crates/thresh-py/Cargo.toml` with `crate-type = ["cdylib"]`, `pyo3` and `numpy` dependencies, and deps on `thresh-tracker`, `thresh-filter`, `thresh-eval`, `thresh-synth`
+- [x] 1.1 Create `crates/thresh-py/Cargo.toml` with `crate-type = ["cdylib"]`, `pyo3` and `numpy` dependencies, and deps on `thresh-tracker`, `thresh-filter`, `thresh-eval`, `thresh-synth`
 - [ ] 1.2 Create `crates/thresh-py/pyproject.toml` with maturin build backend, package name `thresh`, and minimum Python version 3.9
-- [ ] 1.3 Create `crates/thresh-py/src/lib.rs` with `#[pymodule]` entry point registering submodules
-- [ ] 1.4 Add `thresh-py` to workspace members in root `Cargo.toml`
+- [x] 1.3 Create `crates/thresh-py/src/lib.rs` with `#[pymodule]` entry point registering submodules
+- [x] 1.4 Add `thresh-py` to workspace members in root `Cargo.toml`
 
 ## 2. Conversion utilities
 
@@ -15,10 +15,10 @@
 
 ## 3. Tracker binding
 
-- [ ] 3.1 Implement `PyMultiObjectTracker` wrapper in `crates/thresh-py/src/tracker.rs` with `#[pyclass]`
-- [ ] 3.2 Implement `PyMultiObjectTracker::new(measurement_noise, gate_threshold)` constructor
-- [ ] 3.3 Implement `PyMultiObjectTracker::step(detections: PyArray2<f64>, dt: f64) -> Vec<PyDict>` method
-- [ ] 3.4 Implement `PyMultiObjectTracker::confirmed_count()` and `alive_count()` properties
+- [x] 3.1 Implement `PyMultiObjectTracker` wrapper in `crates/thresh-py/src/tracker.rs` with `#[pyclass]`
+- [x] 3.2 Implement `PyMultiObjectTracker::new(measurement_noise, gate_threshold)` constructor
+- [x] 3.3 Implement `PyMultiObjectTracker::step(detections: PyArray2<f64>, dt: f64) -> Vec<PyDict>` method
+- [x] 3.4 Implement `PyMultiObjectTracker::confirmed_count()` and `alive_count()` properties
 
 ## 4. Filter binding
 
@@ -28,7 +28,7 @@
 
 ## 5. Metrics and scenario bindings
 
-- [ ] 5.1 Implement `compute_mot_metrics` function in `crates/thresh-py/src/metrics.rs` accepting ground truth and hypothesis arrays, returning a dict of metric values
+- [x] 5.1 Implement `compute_mot_metrics` function in `crates/thresh-py/src/eval.rs` accepting ground truth and hypothesis arrays, returning (mota, motp, id_switches) tuple
 - [ ] 5.2 Implement `run_scenario` function in `crates/thresh-py/src/scenario.rs` accepting a config dict and returning track results
 
 ## 6. Error handling

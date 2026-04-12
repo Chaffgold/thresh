@@ -12,6 +12,7 @@ members = [
     "crates/thresh-eval",
     "crates/thresh",
     "crates/thresh-data",
+    "crates/thresh-py",
 ]
 
 [workspace.package]
