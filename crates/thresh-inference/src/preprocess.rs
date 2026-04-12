@@ -1,7 +1,23 @@
 //! Pre-processing utilities for detection pipelines.
 //!
-//! Provides voxelization for point-cloud inputs and image normalization for
-//! camera-based inputs.
+//! This module converts raw sensor data into the tensor formats expected by
+//! detection models.
+//!
+//! # Point-cloud voxelization
+//!
+//! [`voxelize`] buckets 3D points into a regular grid defined by
+//! `voxel_size`. Each bucket is capped at `max_per_voxel` points so the
+//! downstream model receives a fixed-size representation per voxel. This is
+//! the standard front-end for pillar-based and voxel-based 3D detectors
+//! (e.g. PointPillars, VoxelNet).
+//!
+//! # Image normalization
+//!
+//! [`normalize_image`] applies per-channel mean/std normalization to an image
+//! stored in CHW (channel-first) layout. This matches the preprocessing
+//! expected by most ImageNet-pretrained backbones (ResNet, Swin, RT-DETR
+//! encoder) and keeps the pipeline independent of any particular image
+//! decoding library.
 
 use std::collections::HashMap;
 

@@ -1,8 +1,36 @@
-//! Detection pipeline trait, NMS, and concrete detector implementations.
+//! Detection pipeline trait, NMS, confidence filtering, and concrete detector
+//! implementations.
+//!
+//! # Overview
 //!
 //! The [`DetectionPipeline`] trait defines the interface for all detection
-//! backends. `OnnxDetector` (behind the `onnx` feature) loads a pre-trained
-//! ONNX model; [`MockDetector`] returns pre-configured detections for testing.
+//! backends. A pipeline consumes a [`SensorInput`] (point cloud, image tensor,
+//! or other sensor frame) and produces a `Vec<Detection3D>`.
+//!
+//! Two concrete implementations are provided:
+//!
+//! * **[`MockDetector`]** — returns pre-configured detections; useful for unit
+//!   and integration tests without a real model.
+//! * **`OnnxDetector`** (behind the `onnx` feature gate) — loads a pre-trained
+//!   ONNX model via `ort::Session` and runs inference on each frame. In the
+//!   current release this is a placeholder that returns an empty detection list;
+//!   a real deployment supplies a trained RT-DETR (or similar) `.onnx` file.
+//!
+//! # Post-processing
+//!
+//! Raw model outputs go through two filtering stages before reaching the
+//! tracker:
+//!
+//! 1. **Confidence thresholding** ([`filter_by_confidence`]) — drop detections
+//!    below a score threshold.
+//! 2. **Non-maximum suppression** ([`nms_3d`]) — remove duplicate boxes using
+//!    axis-aligned 3D IoU.
+//!
+//! # Tracker bridge
+//!
+//! [`detections_to_tracker_input`] converts `Detection3D` positions into
+//! `DVector<f64>` measurement vectors consumed by the Kalman-filter-based
+//! `MultiObjectTracker::step` method.
 
 use thresh_core::detection::Detection3D;
 
@@ -142,6 +170,19 @@ pub fn nms_3d(detections: &mut Vec<Detection3D>, iou_threshold: f64) {
         idx += 1;
         k
     });
+}
+
+// ---------------------------------------------------------------------------
+// Confidence filtering
+// ---------------------------------------------------------------------------
+
+/// Remove detections whose confidence score is below the given threshold.
+///
+/// This is the standard first post-processing step after raw model output:
+/// discard anything the model is not sufficiently sure about before running
+/// NMS or feeding into the tracker.
+pub fn filter_by_confidence(detections: &mut Vec<Detection3D>, threshold: f64) {
+    detections.retain(|d| d.confidence >= threshold);
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +437,24 @@ mod tests {
         };
         assert_eq!(config.model_path, "/tmp/model.onnx");
         assert!((config.confidence_threshold - 0.8).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_filter_by_confidence() {
+        let mut dets = vec![
+            make_detection(0.0, 0.0, 0.0, 1.0, 0.3),
+            make_detection(1.0, 0.0, 0.0, 1.0, 0.5),
+            make_detection(2.0, 0.0, 0.0, 1.0, 0.7),
+            make_detection(3.0, 0.0, 0.0, 1.0, 0.9),
+            make_detection(4.0, 0.0, 0.0, 1.0, 0.1),
+        ];
+        filter_by_confidence(&mut dets, 0.5);
+        assert_eq!(
+            dets.len(),
+            3,
+            "should keep 3 detections with confidence >= 0.5"
+        );
+        assert!(dets.iter().all(|d| d.confidence >= 0.5));
     }
 
     #[test]

@@ -22,22 +22,22 @@
 
 - [x] 4.1 Implement `OnnxDetector` struct wrapping `ort::Session`, constructed via `OnnxDetector::load()`, gated behind `#[cfg(feature = "onnx")]`
 - [x] 4.2 Implement `DetectionPipeline` for `OnnxDetector`: placeholder implementation (returns empty detections)
-- [ ] 4.3 Create a tiny synthetic ONNX test model (< 1 MB, random weights, correct RT-DETR input/output shapes) under `test-data/models/`
+- [ ] 4.3 *(deferred — requires ONNX model artifact)* Create a tiny synthetic ONNX test model (< 1 MB, random weights, correct RT-DETR input/output shapes) under `test-data/models/`
 
 ## 5. Post-processing
 
-- [ ] 5.1 Implement confidence thresholding: filter raw model outputs below `confidence_threshold`
+- [x] 5.1 Implement confidence thresholding: filter raw model outputs below `confidence_threshold`
 - [x] 5.2 Implement axis-aligned 3D IoU computation between two `Detection3D` instances
 - [x] 5.3 Implement greedy NMS using 3D IoU in `crates/thresh-inference/src/detection.rs`
 - [x] 5.4 Unit test NMS with overlapping and non-overlapping box sets
 
 ## 6. Tracker integration
 
-- [ ] 6.1 Add `MultiObjectTracker::step_detections(&mut self, detections: &[Detection3D], dt: f64)` to `crates/thresh-tracker/src/tracker.rs`
-- [ ] 6.2 Integration test: synthetic detections through `step_detections` produce confirmed tracks
+- [x] 6.1 Add `MultiObjectTracker::step_detections(&mut self, detections: &[Detection3D], dt: f64)` to `crates/thresh-tracker/src/tracker.rs`
+- [x] 6.2 Integration test: synthetic detections through `step_detections` produce confirmed tracks
 
 ## 7. CI and documentation
 
-- [ ] 7.1 Add `onnx` feature gate to `crates/thresh-inference/Cargo.toml` controlling `ort` dependency
-- [ ] 7.2 CI job: run `cargo test -p thresh-inference --features onnx` on CPU with the synthetic test model
-- [ ] 7.3 Add doc comments and module-level documentation for the detection pipeline
+- [x] 7.1 Add `onnx` feature gate to `crates/thresh-inference/Cargo.toml` controlling `ort` dependency
+- [ ] 7.2 *(deferred — requires ORT binary in CI)* CI job: run `cargo test -p thresh-inference --features onnx` on CPU with the synthetic test model
+- [x] 7.3 Add doc comments and module-level documentation for the detection pipeline
