@@ -132,6 +132,23 @@ jobs:
             exit 1
           fi
 
+  python-tests:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Python deps
+        run: pip install maturin pytest numpy
+      - name: Build and install thresh-py
+        run: cd crates/thresh-py && maturin develop
+      - name: Run pytest
+        run: pytest tests/python/ -v
+
   adsb-benchmark-gate:
     # Same regression gate pattern as synth-benchmark-gate / orbital-benchmark-gate,
     # but for ADS-B scenarios that need the `adsb` feature (reqwest + csv).

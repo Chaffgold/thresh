@@ -38,8 +38,8 @@
 
 ## 7. Testing and CI
 
-- [ ] 7.1 Create `tests/python/test_tracker.py` with pytest tests: create tracker, step with numpy arrays, verify track output structure
-- [ ] 7.2 Create `tests/python/test_filter.py` with pytest tests: KF predict/update cycle, verify state dimensions
-- [ ] 7.3 Create `tests/python/test_metrics.py` with pytest tests: compute metrics on known ground truth, verify MOTA/MOTP values
-- [ ] 7.4 Add CI job: `maturin develop && pytest tests/python/`
-- [ ] 7.5 Add CI job: build wheels for Linux, macOS (x86_64 + ARM), Windows using `maturin build --release`
+- [x] 7.1 Create `tests/python/test_tracker.py` with pytest tests: create tracker, step with numpy arrays, verify track output structure
+- [x] 7.2 Create `tests/python/test_filter.py` with pytest tests: KF predict/update cycle, verify state dimensions
+- [x] 7.3 Create `tests/python/test_metrics.py` with pytest tests: compute metrics on known ground truth, verify MOTA/MOTP values
+- [x] 7.4 Add CI job: `maturin develop && pytest tests/python/`
+- [x] 7.5 Add CI job: build wheels for Linux, macOS (x86_64 + ARM), Windows using `maturin build --release`
