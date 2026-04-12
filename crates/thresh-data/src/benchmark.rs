@@ -957,4 +957,124 @@ mod tests {
             "Expected no failures, got: {failures:?}"
         );
     }
+
+    // ---------------------------------------------------------------------
+    // ADS-B runner unit tests (feature-gated) — these cover error branches
+    // that the CLI integration tests touch only indirectly, so SonarCloud
+    // / codecov register them as direct coverage of the runner module.
+    // ---------------------------------------------------------------------
+
+    #[cfg(feature = "adsb")]
+    fn adsb_manifest(state_file: Option<&str>) -> ScenarioManifest {
+        ScenarioManifest {
+            name: "adsb-test".into(),
+            description: "ADS-B unit test".into(),
+            source: ScenarioSource::AdsB {
+                region: "JFK".into(),
+                state_file: state_file.map(|s| s.to_string()),
+                bbox: None,
+                ref_lat_deg: 40.6413,
+                ref_lon_deg: -73.7781,
+                ref_alt_m: 0.0,
+            },
+            parameters: ScenarioParameters {
+                duration_s: 10.0,
+                dt: 1.0,
+                measurement_noise_sigma: 50.0,
+                gate_threshold: 500.0,
+                tracker_variant: None,
+            },
+            baselines: Some(Baselines {
+                mota: Some(-1.0),
+                hota: None,
+                idf1: None,
+            }),
+        }
+    }
+
+    #[cfg(feature = "adsb")]
+    #[test]
+    fn run_adsb_benchmark_rejects_non_adsb_source() {
+        let manifest = cv_clean_manifest();
+        let err = run_adsb_benchmark(&manifest, std::path::Path::new(".")).unwrap_err();
+        assert!(err.contains("non-AdsB"), "got: {err}");
+    }
+
+    #[cfg(feature = "adsb")]
+    #[test]
+    fn run_adsb_benchmark_errors_without_state_file() {
+        let manifest = adsb_manifest(None);
+        let err = run_adsb_benchmark(&manifest, std::path::Path::new(".")).unwrap_err();
+        assert!(err.contains("state_file"), "got: {err}");
+    }
+
+    #[cfg(feature = "adsb")]
+    #[test]
+    fn run_adsb_benchmark_errors_on_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = adsb_manifest(Some("does-not-exist.json"));
+        let err = run_adsb_benchmark(&manifest, dir.path()).unwrap_err();
+        assert!(
+            err.contains("does-not-exist") || err.contains("failed to read"),
+            "got: {err}"
+        );
+    }
+
+    #[cfg(feature = "adsb")]
+    #[test]
+    fn run_adsb_benchmark_errors_on_invalid_json() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("bad.json"), "not valid json").unwrap();
+        let manifest = adsb_manifest(Some("bad.json"));
+        let err = run_adsb_benchmark(&manifest, dir.path()).unwrap_err();
+        assert!(err.contains("JSON") || err.contains("parse"), "got: {err}");
+    }
+
+    #[cfg(feature = "adsb")]
+    #[test]
+    fn run_adsb_benchmark_errors_on_empty_state_vec() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("empty.json"), "[]").unwrap();
+        let manifest = adsb_manifest(Some("empty.json"));
+        let err = run_adsb_benchmark(&manifest, dir.path()).unwrap_err();
+        assert!(err.contains("no state vectors"), "got: {err}");
+    }
+
+    #[cfg(feature = "adsb")]
+    #[test]
+    fn run_adsb_benchmark_runs_on_valid_fixture() {
+        // Minimal valid fixture: 3 samples of 1 aircraft descending
+        // into JFK over 3 seconds. Just enough to exercise the happy
+        // path end-to-end through `extract_ground_truth` and the
+        // tracker step loop.
+        let json = r#"[
+            {"icao24":"abc123","callsign":"T1","origin_country":"US",
+             "time_position":1700000000.0,"last_contact":1700000000.0,
+             "longitude":-73.7,"latitude":40.70,"baro_altitude":1000.0,
+             "on_ground":false,"velocity":100.0,"true_track":260.0,
+             "vertical_rate":-5.0,"geo_altitude":1000.0},
+            {"icao24":"abc123","callsign":"T1","origin_country":"US",
+             "time_position":1700000001.0,"last_contact":1700000001.0,
+             "longitude":-73.75,"latitude":40.68,"baro_altitude":900.0,
+             "on_ground":false,"velocity":100.0,"true_track":260.0,
+             "vertical_rate":-100.0,"geo_altitude":900.0},
+            {"icao24":"abc123","callsign":"T1","origin_country":"US",
+             "time_position":1700000002.0,"last_contact":1700000002.0,
+             "longitude":-73.78,"latitude":40.65,"baro_altitude":800.0,
+             "on_ground":false,"velocity":100.0,"true_track":260.0,
+             "vertical_rate":-100.0,"geo_altitude":800.0}
+        ]"#;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("valid.json"), json).unwrap();
+        let manifest = adsb_manifest(Some("valid.json"));
+        let result =
+            run_adsb_benchmark(&manifest, dir.path()).expect("valid fixture must run end-to-end");
+        assert_eq!(result.scenario, "adsb-test");
+        // The runner always produces a duration, even on a tiny fixture.
+        // We don't assert on the metric values themselves because the
+        // tracker's M-of-N confirmation window is longer than the 3-sample
+        // fixture — the important thing is the pipeline completes and
+        // emits a BenchmarkResult struct.
+        assert!(result.id_switches == 0);
+    }
 }
