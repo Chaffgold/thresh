@@ -13,6 +13,21 @@ members = [
     "crates/thresh",
     "crates/thresh-data",
     "crates/thresh-py",
+    "crates/thresh-viz",
+]
+default-members = [
+    "crates/thresh-core",
+    "crates/thresh-filter",
+    "crates/thresh-association",
+    "crates/thresh-fusion",
+    "crates/thresh-inference",
+    "crates/thresh-tracker",
+    "crates/thresh-bridge",
+    "crates/thresh-synth",
+    "crates/thresh-eval",
+    "crates/thresh",
+    "crates/thresh-data",
+    "crates/thresh-py",
 ]
 
 [workspace.package]

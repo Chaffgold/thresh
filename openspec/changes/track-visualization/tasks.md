@@ -1,8 +1,8 @@
 ## 1. Crate Setup
 
-- [ ] 1.1 Create `crates/thresh-viz/Cargo.toml` with dependencies: `egui`, `eframe`, `egui_plot`, `serde`, `serde_json`, `thresh-tracker`, `thresh-core`, `thresh-eval`. Set `publish = false`.
-- [ ] 1.2 Add `thresh-viz` to workspace `[members]` but exclude from `[workspace.default-members]` so `cargo build --workspace` does not pull in GUI deps.
-- [ ] 1.3 Create `crates/thresh-viz/src/main.rs` with a basic eframe app skeleton that opens a window with the application title.
+- [x] 1.1 Create `crates/thresh-viz/Cargo.toml` with dependencies: `egui`, `eframe`, `egui_plot`, `serde`, `serde_json`, `thresh-tracker`, `thresh-core`, `thresh-eval`. Set `publish = false`.
+- [x] 1.2 Add `thresh-viz` to workspace `[members]` but exclude from `[workspace.default-members]` so `cargo build --workspace` does not pull in GUI deps.
+- [x] 1.3 Create `crates/thresh-viz/src/main.rs` with a basic eframe app skeleton that opens a window with the application title.
 - [ ] 1.4 Verify the crate builds and the window opens on the development platform: `cargo run -p thresh-viz`.
 
 ## 2. TrackSnapshot Type (thresh-tracker)
