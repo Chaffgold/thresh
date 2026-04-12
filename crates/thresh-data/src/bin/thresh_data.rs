@@ -132,7 +132,7 @@ fn default_scenario_dir() -> PathBuf {
 fn describe_source(src: &ScenarioSource) -> String {
     match src {
         ScenarioSource::Synthetic => "Synthetic".into(),
-        ScenarioSource::AdsB { region } => format!("AdsB(region={region})"),
+        ScenarioSource::AdsB { region, .. } => format!("AdsB(region={region})"),
         ScenarioSource::Orbital { norad_ids, .. } => {
             format!("Orbital({} satellites)", norad_ids.len())
         }
@@ -166,10 +166,7 @@ fn run_manifest(manifest: &ScenarioManifest, manifest_dir: &std::path::Path) -> 
             print_result(&result);
             check_and_report_regression(manifest, &result)
         }
-        ScenarioSource::AdsB { region } => Err(format!(
-            "ADS-B scenarios (region={region}) require fetching live data; \
-             run `thresh-data fetch` first (not yet implemented)"
-        )),
+        ScenarioSource::AdsB { .. } => run_adsb_dispatch(manifest, manifest_dir),
         ScenarioSource::Orbital { norad_ids, .. } => {
             run_orbital_dispatch(manifest, manifest_dir, norad_ids)
         }
@@ -201,6 +198,28 @@ fn run_orbital_dispatch(
          Rebuild with `cargo build -p thresh-data --features orbital --bin thresh-data`.",
         norad_ids.len()
     ))
+}
+
+/// Dispatch an ADS-B scenario to `run_adsb_benchmark` when the `adsb`
+/// feature is enabled; otherwise surface a "feature required" error.
+#[cfg(feature = "adsb")]
+fn run_adsb_dispatch(
+    manifest: &ScenarioManifest,
+    manifest_dir: &std::path::Path,
+) -> Result<(), String> {
+    let result = thresh_data::benchmark::run_adsb_benchmark(manifest, manifest_dir)?;
+    print_result(&result);
+    check_and_report_regression(manifest, &result)
+}
+
+#[cfg(not(feature = "adsb"))]
+fn run_adsb_dispatch(
+    _manifest: &ScenarioManifest,
+    _manifest_dir: &std::path::Path,
+) -> Result<(), String> {
+    Err("ADS-B scenarios require the `adsb` feature. \
+         Rebuild with `cargo build -p thresh-data --features adsb --bin thresh-data`."
+        .to_string())
 }
 
 fn print_result(result: &BenchmarkResult) {
@@ -247,7 +266,12 @@ mod tests {
         assert_eq!(describe_source(&ScenarioSource::Synthetic), "Synthetic");
         assert_eq!(
             describe_source(&ScenarioSource::AdsB {
-                region: "JFK".into()
+                region: "JFK".into(),
+                state_file: None,
+                bbox: None,
+                ref_lat_deg: 40.6413,
+                ref_lon_deg: -73.7781,
+                ref_alt_m: 0.0,
             }),
             "AdsB(region=JFK)"
         );

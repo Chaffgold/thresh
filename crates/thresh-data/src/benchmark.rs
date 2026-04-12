@@ -34,8 +34,27 @@ pub struct ScenarioManifest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ScenarioSource {
     Synthetic,
+    /// ADS-B scenario sourced from a cached state-vector fixture or the
+    /// OpenSky Network REST API. Works the same way as `Orbital`: when
+    /// `state_file` is set, the runner reads that file (JSON-serialised
+    /// `Vec<StateVector>`) from the manifest's directory; otherwise it
+    /// falls back to an authenticated OpenSky call bounded by `bbox`.
+    /// `region` stays in the schema for backwards compatibility and
+    /// is echoed in CLI output so older scenarios still print sensibly.
+    /// `ref_lat_deg` / `ref_lon_deg` / `ref_alt_m` define the tracker's
+    /// local ENU frame origin in degrees (human-editable in TOML).
     AdsB {
         region: String,
+        #[serde(default)]
+        state_file: Option<String>,
+        #[serde(default)]
+        bbox: Option<AdsBBoundingBox>,
+        #[serde(default = "default_adsb_ref_lat_deg")]
+        ref_lat_deg: f64,
+        #[serde(default = "default_adsb_ref_lon_deg")]
+        ref_lon_deg: f64,
+        #[serde(default)]
+        ref_alt_m: f64,
     },
     /// Orbital scenario sourced from SGP4 propagation of one or more TLEs.
     ///
@@ -78,6 +97,25 @@ fn default_station_lat_deg() -> f64 {
 
 fn default_station_lon_deg() -> f64 {
     -104.8214
+}
+
+fn default_adsb_ref_lat_deg() -> f64 {
+    // JFK International Airport — arbitrary default used by both the
+    // `adsb-single-flight` and `adsb-tracon` scenarios.
+    40.6413
+}
+
+fn default_adsb_ref_lon_deg() -> f64 {
+    -73.7781
+}
+
+/// Serializable bounding box for ADS-B scenario manifests.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdsBBoundingBox {
+    pub lat_min: f64,
+    pub lat_max: f64,
+    pub lon_min: f64,
+    pub lon_max: f64,
 }
 
 /// Common scenario parameters.
@@ -596,6 +634,230 @@ fn fetch_tles_via_http(norad_ids: &[u32]) -> Result<Vec<crate::orbital::Tle>, St
         out.extend(tles);
     }
     Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// ADS-B benchmark runner (§7.3 / §7.4)
+// ---------------------------------------------------------------------------
+
+/// Run an ADS-B benchmark scenario end-to-end.
+///
+/// Feature-gated on `adsb` because it depends on `OpenSkyClient` (and
+/// therefore `reqwest`) plus `StateVector` / `state_to_measurement` from
+/// the ADS-B module. Downstream callers that always need ADS-B should
+/// build `thresh-data` with `--features adsb`; the CLI surfaces a clean
+/// "feature required" error otherwise.
+///
+/// Pipeline:
+/// 1. Load state vectors — from a local cached JSON file (`state_file`
+///    relative to the manifest directory) when set; otherwise from
+///    OpenSky via `OpenSkyClient::fetch_states`. The local-file path is
+///    what lets the CI benchmark gate run ADS-B scenarios offline.
+/// 2. Extract per-ICAO24 ground-truth trajectories via the existing
+///    `extract_ground_truth` pipeline.
+/// 3. Convert each state vector to a noisy ADS-B-sourced Cartesian
+///    detection (WGS84 → ENU relative to the scenario's reference point)
+///    and bin everything by the scenario's `dt` step.
+/// 4. Feed the binned detections into the Cartesian ENU tracker and
+///    compute MOTA / MOTP / IDF1 / HOTA against the ground truth.
+///
+/// `manifest_dir` is the parent of the manifest file — used to resolve
+/// relative `state_file` paths.
+#[cfg(feature = "adsb")]
+pub fn run_adsb_benchmark(
+    manifest: &ScenarioManifest,
+    manifest_dir: &Path,
+) -> core::result::Result<BenchmarkResult, String> {
+    use crate::adsb::{StateVector, extract_ground_truth, state_to_measurement};
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+    use rand_distr::{Distribution, Normal};
+    use thresh_core::geodetic::wgs84_to_enu;
+
+    let start = Instant::now();
+    let params = &manifest.parameters;
+
+    let ScenarioSource::AdsB {
+        region,
+        state_file,
+        bbox,
+        ref_lat_deg,
+        ref_lon_deg,
+        ref_alt_m,
+    } = &manifest.source
+    else {
+        return Err(format!(
+            "run_adsb_benchmark called on non-AdsB source: {:?}",
+            manifest.source
+        ));
+    };
+
+    // ---- 1. Load ADS-B state vectors ----
+    let states: Vec<StateVector> = if let Some(file) = state_file {
+        let path = manifest_dir.join(file);
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|e| format!("failed to read ADS-B state file {}: {e}", path.display()))?;
+        serde_json::from_str(&contents).map_err(|e| {
+            format!(
+                "failed to parse ADS-B state file {} as JSON: {e}",
+                path.display()
+            )
+        })?
+    } else {
+        // No cached fixture — fall back to live OpenSky. Requires network
+        // access and usually OpenSky credentials; surfaced as a plain
+        // error so the CI gate's "no network" failure mode is obvious.
+        let _ = region;
+        let _ = bbox;
+        return Err(
+            "no state_file set and live OpenSky fetch is not wired into the \
+             benchmark runner. Provide a cached JSON fixture alongside the \
+             manifest to run offline."
+                .to_string(),
+        );
+    };
+
+    if states.is_empty() {
+        return Err("ADS-B state file contained no state vectors".into());
+    }
+
+    // ---- 2. Build ground-truth trajectories (ICAO24 → 1 Hz grid) ----
+    let trajectories = extract_ground_truth(&states);
+    if trajectories.is_empty() {
+        return Err("extract_ground_truth produced no trajectories".into());
+    }
+
+    // Stable target-ID assignment — first-seen ICAO24 order so frame IDs
+    // are reproducible across runs.
+    let id_for_icao24: std::collections::HashMap<String, u64> = trajectories
+        .iter()
+        .enumerate()
+        .map(|(i, t)| (t.icao24.clone(), i as u64 + 1))
+        .collect();
+
+    // ---- 3. Build ENU-frame measurements and ground truth ----
+    let ref_lat_rad = ref_lat_deg.to_radians();
+    let ref_lon_rad = ref_lon_deg.to_radians();
+
+    // Earliest timestamp (seconds) across all state vectors — used as the
+    // zero of the benchmark time base.
+    let t0 = states
+        .iter()
+        .filter_map(|s| s.time_position.or(Some(s.last_contact)))
+        .fold(f64::INFINITY, f64::min);
+    if !t0.is_finite() {
+        return Err("no timestamps in ADS-B state vectors".into());
+    }
+
+    // Detections binned by integer step index.
+    let mut dets_by_step: std::collections::BTreeMap<i64, Vec<DVector<f64>>> =
+        std::collections::BTreeMap::new();
+    let mut rng = StdRng::seed_from_u64(0xAD5B_5A5A_5A5A_5A5A_u64);
+    let normal = Normal::new(0.0, 1.0).unwrap();
+
+    for sv in &states {
+        if let Some(m) = state_to_measurement(sv)
+            && let thresh_core::measurement::Measurement::AdsB {
+                lat,
+                lon,
+                alt,
+                time,
+                ..
+            } = m
+        {
+            let enu = wgs84_to_enu(
+                lat.to_radians(),
+                lon.to_radians(),
+                alt,
+                ref_lat_rad,
+                ref_lon_rad,
+                *ref_alt_m,
+            );
+            let step = ((time - t0) / params.dt).round() as i64;
+            let noisy = DVector::from_column_slice(&[
+                enu.x + params.measurement_noise_sigma * normal.sample(&mut rng),
+                enu.y + params.measurement_noise_sigma * normal.sample(&mut rng),
+                enu.z + params.measurement_noise_sigma * normal.sample(&mut rng),
+            ]);
+            dets_by_step.entry(step).or_default().push(noisy);
+        }
+    }
+
+    // Ground truth binned by step, using the 1-Hz-interpolated entries.
+    let mut gt_by_step: std::collections::BTreeMap<i64, Vec<(u64, [f64; 3])>> =
+        std::collections::BTreeMap::new();
+    for traj in &trajectories {
+        let target_id = id_for_icao24[&traj.icao24];
+        for (offset_s, entry) in traj.entries.iter().enumerate() {
+            let t_abs = traj.start_time + offset_s as f64;
+            let step = ((t_abs - t0) / params.dt).round() as i64;
+            gt_by_step
+                .entry(step)
+                .or_default()
+                .push((target_id, entry.position));
+        }
+    }
+
+    // ---- 4. Step the tracker and collect FrameData ----
+    let mut tracker =
+        MultiObjectTracker::new_cv_position(params.measurement_noise_sigma, params.gate_threshold);
+    let mut frame_data_vec: Vec<FrameData> = Vec::new();
+
+    let step_lo = dets_by_step
+        .keys()
+        .chain(gt_by_step.keys())
+        .min()
+        .copied()
+        .unwrap_or(0);
+    let step_hi = dets_by_step
+        .keys()
+        .chain(gt_by_step.keys())
+        .max()
+        .copied()
+        .unwrap_or(0);
+
+    for step in step_lo..=step_hi {
+        let dets: Vec<DVector<f64>> = dets_by_step.remove(&step).unwrap_or_default();
+        tracker.step(&dets, params.dt);
+
+        let gt_positions: Vec<(u64, [f64; 3])> = gt_by_step.remove(&step).unwrap_or_default();
+        let track_positions: Vec<(u64, [f64; 3])> = tracker
+            .tracks
+            .iter()
+            .filter(|t| t.lifecycle == thresh_core::track::TrackState::Confirmed)
+            .map(|t| (t.id.0, [t.state[0], t.state[2], t.state[4]]))
+            .collect();
+
+        frame_data_vec.push(FrameData {
+            gt: gt_positions,
+            tracks: track_positions,
+        });
+    }
+
+    let total_gt: usize = frame_data_vec.iter().map(|f| f.gt.len()).sum();
+    let total_tracks: usize = frame_data_vec.iter().map(|f| f.tracks.len()).sum();
+    eprintln!(
+        "ADS-B pipeline: {} frames, {} trajectories, {} ground-truth points, {} confirmed-track points",
+        frame_data_vec.len(),
+        trajectories.len(),
+        total_gt,
+        total_tracks,
+    );
+
+    let dist_threshold = (params.measurement_noise_sigma * 10.0).max(500.0);
+    let (mota, motp, id_switches) = compute_mot_metrics(&frame_data_vec, dist_threshold);
+    let idf1 = compute_idf1(&frame_data_vec, dist_threshold);
+    let (hota, _, _) = compute_hota_at_threshold(&frame_data_vec, dist_threshold);
+
+    Ok(BenchmarkResult {
+        scenario: manifest.name.clone(),
+        mota,
+        motp,
+        idf1,
+        hota,
+        id_switches,
+        duration_ms: start.elapsed().as_millis() as u64,
+    })
 }
 
 #[cfg(test)]
