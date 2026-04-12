@@ -40,7 +40,7 @@
 
 ## 4. Orbital Data Ingestion
 
-- [ ] 4.1 Implement space-track.org REST client with session cookie auth — stub exists at `SpaceTrackClient::fetch_tle` returning an "HTTP client not yet implemented" error. Needs `reqwest` under the `orbital` feature and session-cookie handling.
+- [x] 4.1 `SpaceTrackClient` in `crates/thresh-data/src/orbital.rs` POSTs to `/ajaxauth/login`, captures the session cookie from the `Set-Cookie` response header into a hand-rolled jar (avoids pulling in reqwest's `cookies` feature and its `cookie_store` / `publicsuffix` transitive deps), and replays it on subsequent `/basicspacedata/query/class/gp/...` GETs. `fetch_tle(norad_id)` and `fetch_tles(&[u32])` both parse responses through the shared `parse_gp_json` path. Unit tests cover cookie parsing and the missing-credentials error path; the network-gated `spacetrack_fetch_tle` integration test now exercises the real HTTP pipeline.
 - [x] 4.2 `Tle::from_3le` and `Tle::from_2le` implement the two-line / three-line format parser.
 - [x] 4.3 `parse_gp_json` parses CelesTrak-style GP JSON arrays into `Tle` structs; covered by `parse_gp_json_basic` unit test.
 - [x] 4.4 `propagate_tle` integrates the `sgp4` crate to produce `TemeState` at arbitrary minutes-since-epoch.
@@ -48,10 +48,10 @@
 - [x] 4.6 `radar_measurements_from_enu` produces synthetic radar measurements from orbital positions given a ground-station configuration.
 - [x] 4.7 `predict_passes` computes rise / set / max-elevation for (station, object) pairs.
 - [x] 4.8 `OrbitalDataset` implements the `Dataset` trait.
-- [ ] 4.9 Implement CelesTrak TLE fetcher — stub exists at `CelestrakClient::fetch_gp_group` returning an "HTTP client not yet implemented" error. Needs `reqwest` under the `orbital` feature.
+- [x] 4.9 `CelestrakClient` in `crates/thresh-data/src/orbital.rs` fetches public GP JSON from `celestrak.org/NORAD/elements/gp.php`. Both `fetch_gp_group(name)` and `fetch_catnr(norad_id)` delegate to a shared `fetch_json` path that maps non-success HTTP to `OrbitalError::HttpStatus` and parses via `parse_gp_json`. Network-gated integration tests `celestrak_fetch_gp` and `celestrak_fetch_catnr_iss` now exercise the real pipeline.
 - [x] 4.10 `parse_3le_iss` / `parse_2le_iss` / `propagate_iss_position_reasonable` validate ISS TLE parsing and 10 km propagation accuracy.
 - [x] 4.11 `teme_to_ecef_to_enu_chain` checks the reference-frame chain against a known epoch.
-- [x] 4.12 `spacetrack_fetch_tle` and `celestrak_fetch_gp` are wired as `#[ignore]` integration tests — they will exercise live HTTP once §4.1 / §4.9 are implemented.
+- [x] 4.12 `spacetrack_fetch_tle`, `celestrak_fetch_gp`, and `celestrak_fetch_catnr_iss` are wired as `#[ignore]` integration tests — they now exercise the real HTTP pipeline against www.space-track.org and celestrak.org when run with `--ignored` and appropriate credentials / network access.
 
 ## 5. nuScenes Ingestion
 

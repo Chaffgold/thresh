@@ -7,7 +7,7 @@ license.workspace = true
 
 [features]
 adsb = ["reqwest", "csv"]
-orbital = ["sgp4"]
+orbital = ["sgp4", "reqwest"]
 nuscenes = ["pyo3"]
 
 [dependencies]
