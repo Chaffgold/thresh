@@ -27,6 +27,46 @@ pub struct BoundingBox3D {
     pub velocity: Option<[f64; 2]>,
 }
 
+/// High-level detection output combining a 3D bounding box with optional
+/// embedding features for re-identification and a frame identifier.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Detection3D {
+    /// Center position `[x, y, z]`.
+    pub position: [f64; 3],
+    /// Dimensions `[length, width, height]`.
+    pub dimensions: [f64; 3],
+    /// Heading angle in radians.
+    pub yaw: f64,
+    /// Predicted class index.
+    pub class_id: u32,
+    /// Detection confidence score in `[0, 1]`.
+    pub confidence: f64,
+}
+
+impl Detection3D {
+    /// Create a `Detection3D` from a [`BoundingBox3D`].
+    pub fn from_bbox(bbox: &BoundingBox3D) -> Self {
+        Self {
+            position: bbox.center(),
+            dimensions: [bbox.length, bbox.width, bbox.height],
+            yaw: bbox.yaw,
+            class_id: bbox.class_id,
+            confidence: bbox.score,
+        }
+    }
+
+    /// Convert to a [`nalgebra::DVector<f64>`] containing `[x, y, z]` for
+    /// use as a Kalman-filter measurement.
+    pub fn to_measurement(&self) -> nalgebra::DVector<f64> {
+        nalgebra::DVector::from_column_slice(&self.position)
+    }
+
+    /// Volume of the detection bounding box.
+    pub fn volume(&self) -> f64 {
+        self.dimensions[0] * self.dimensions[1] * self.dimensions[2]
+    }
+}
+
 impl BoundingBox3D {
     /// Volume of the bounding box.
     pub fn volume(&self) -> f64 {
