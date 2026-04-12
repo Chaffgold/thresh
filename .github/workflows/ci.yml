@@ -5,6 +5,9 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  schedule:
+    - cron: '0 6 * * 1'   # Weekly Monday 06:00 UTC
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -159,3 +162,22 @@ jobs:
             echo "no adsb-*.toml scenarios found under crates/thresh-data/scenarios/" >&2
             exit 1
           fi
+
+  onnx-tests:
+    # ONNX inference tests require ORT binaries which the ort crate
+    # auto-downloads during build. Gated to schedule/workflow_dispatch
+    # so it does not block every PR — ORT download can be slow and the
+    # binaries are not cached by rust-cache.
+    name: ONNX inference tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install ONNX Runtime
+        run: |
+          # ort crate auto-downloads ORT binaries on first build
+          echo "ORT will be fetched by the ort crate during build"
+      - name: Run inference tests
+        run: cargo test -p thresh-inference --features onnx
