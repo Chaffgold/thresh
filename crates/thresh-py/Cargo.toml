@@ -16,4 +16,7 @@ thresh-tracker = { path = "../thresh-tracker" }
 thresh-eval = { path = "../thresh-eval" }
 thresh-association = { path = "../thresh-association" }
 nalgebra = { workspace = true }
-pyo3 = { version = "0.24", features = ["extension-module"] }
+pyo3 = { version = "0.24" }
+
+[features]
+extension-module = ["pyo3/extension-module"]

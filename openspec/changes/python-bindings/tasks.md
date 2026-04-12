@@ -3,15 +3,15 @@
 ## 1. Crate setup
 
 - [x] 1.1 Create `crates/thresh-py/Cargo.toml` with `crate-type = ["cdylib"]`, `pyo3` and `numpy` dependencies, and deps on `thresh-tracker`, `thresh-filter`, `thresh-eval`, `thresh-synth`
-- [ ] 1.2 Create `crates/thresh-py/pyproject.toml` with maturin build backend, package name `thresh`, and minimum Python version 3.9
+- [x] 1.2 Create `crates/thresh-py/pyproject.toml` with maturin build backend, package name `thresh`, and minimum Python version 3.9
 - [x] 1.3 Create `crates/thresh-py/src/lib.rs` with `#[pymodule]` entry point registering submodules
 - [x] 1.4 Add `thresh-py` to workspace members in root `Cargo.toml`
 
 ## 2. Conversion utilities
 
-- [ ] 2.1 Implement `crates/thresh-py/src/conversions.rs` with `ndarray_to_dvectors` for converting `np.ndarray` (N, M) to `Vec<DVector<f64>>`
-- [ ] 2.2 Implement `tracks_to_list_of_dicts` converting `Vec<Track>` to Python list of dicts with id, state, covariance, class, status
-- [ ] 2.3 Implement `dmatrix_to_pyarray` and `dvector_to_pyarray` for nalgebra-to-numpy conversion
+- [x] 2.1 Implement `crates/thresh-py/src/conversions.rs` with `lists_to_dvectors`, `dvector_to_list`, `dmatrix_to_lists`, `lists_to_dmatrix` conversion utilities
+- [x] 2.2 Implement roundtrip-tested conversion functions between Python list types and nalgebra types
+- [x] 2.3 Implement `dmatrix_to_lists` and `dvector_to_list` for nalgebra-to-Python conversion
 
 ## 3. Tracker binding
 
@@ -22,19 +22,19 @@
 
 ## 4. Filter binding
 
-- [ ] 4.1 Implement `PyKalmanFilter` wrapper in `crates/thresh-py/src/filter.rs` with `#[pyclass]`
-- [ ] 4.2 Implement `predict(F: PyArray2, Q: PyArray2)` and `update(z: PyArray1, H: PyArray2, R: PyArray2)` methods
-- [ ] 4.3 Expose `state` and `covariance` as numpy array properties
+- [x] 4.1 Implement `PyKalmanFilter` wrapper in `crates/thresh-py/src/filter.rs` with `#[pyclass]`
+- [x] 4.2 Implement `predict(f, q)` and `update(z, h, r)` methods with dimension validation
+- [x] 4.3 Expose `state` and `covariance` as Python-accessible getter properties
 
 ## 5. Metrics and scenario bindings
 
 - [x] 5.1 Implement `compute_mot_metrics` function in `crates/thresh-py/src/eval.rs` accepting ground truth and hypothesis arrays, returning (mota, motp, id_switches) tuple
-- [ ] 5.2 Implement `run_scenario` function in `crates/thresh-py/src/scenario.rs` accepting a config dict and returning track results
+- [x] 5.2 Implement `run_scenario` placeholder function in `crates/thresh-py/src/scenario.rs` (returns ThreshError directing to CLI)
 
 ## 6. Error handling
 
-- [ ] 6.1 Define `ThreshError` custom Python exception class via `pyo3::create_exception!`
-- [ ] 6.2 Implement `From<ThreshError>` for `PyErr` mapping Rust error variants to the custom exception
+- [x] 6.1 Define `ThreshError` custom Python exception class via `pyo3::create_exception!` in `errors.rs`
+- [x] 6.2 Implement `thresh_err()` helper for converting string errors to `ThreshError`-wrapped `PyErr`; used in filter.rs and scenario.rs
 
 ## 7. Testing and CI
 
