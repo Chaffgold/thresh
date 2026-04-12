@@ -1,7 +1,7 @@
 //! Detection pipeline trait, NMS, and concrete detector implementations.
 //!
 //! The [`DetectionPipeline`] trait defines the interface for all detection
-//! backends. [`OnnxDetector`] (behind the `onnx` feature) loads a pre-trained
+//! backends. `OnnxDetector` (behind the `onnx` feature) loads a pre-trained
 //! ONNX model; [`MockDetector`] returns pre-configured detections for testing.
 
 use thresh_core::detection::Detection3D;
