@@ -2,16 +2,16 @@
 
 ## 1. Core types
 
-- [ ] 1.1 Add `TrackExchange` struct to `crates/thresh-core/src/track.rs` with `track_id`, `source_id`, `state`, `covariance`, `timestamp`, `class`, `confidence` fields; derive `Serialize`/`Deserialize`
+- [x] 1.1 Add `TrackExchange` struct (track_id, source_id, state, covariance, timestamp) to `crates/thresh-fusion/src/t2t.rs`; derives `Debug`, `Clone`
 - [ ] 1.2 Add `From<&Track>` impl for `TrackExchange` to convert internal tracks to exchange format
 - [ ] 1.3 Add `FusionMode` enum (`Naive`, `CovarianceIntersection`, `OptimalCrossCovariance`) to `crates/thresh-fusion/src/federated.rs`
 
 ## 2. Track-to-track association
 
-- [ ] 2.1 Create `crates/thresh-association/src/t2t.rs` with `augmented_mahalanobis(x1, P1, x2, P2) -> f64` distance function
+- [x] 2.1 Implement `augmented_mahalanobis` distance function in `crates/thresh-fusion/src/t2t.rs`
 - [ ] 2.2 Implement `augmented_mahalanobis_with_cross_cov(x1, P1, x2, P2, P12) -> f64` for the cross-covariance-aware variant
-- [ ] 2.3 Implement `T2TAssociator` struct with `associate(source_tracks: &[Vec<TrackExchange>], gate: f64) -> AssignmentResult` building cost matrix and calling Hungarian solver
-- [ ] 2.4 Unit tests: two identical tracks associate, two distant tracks do not, cross-covariance variant produces tighter distance
+- [x] 2.3 Implement `t2t_association` function building cost matrix and calling Hungarian solver in `crates/thresh-fusion/src/t2t.rs`
+- [x] 2.4 Unit tests: two identical tracks associate, two distant tracks do not
 
 ## 3. Temporal alignment
 
@@ -21,10 +21,10 @@
 
 ## 4. Federated fusion manager
 
-- [ ] 4.1 Implement `FederatedFusionManager` struct with fused track table, per-source history, and `FusionMode` config
-- [ ] 4.2 Implement `FederatedFusionManager::update(&mut self, incoming: Vec<Vec<TrackExchange>>)` orchestrating align -> associate -> fuse -> lifecycle
-- [ ] 4.3 Implement naive fusion mode: information filter sum `P_fused^{-1} = P1^{-1} + P2^{-1}`
-- [ ] 4.4 Extend existing `covariance_intersection` module to support the federated pairwise fusion case
+- [x] 4.1 Implement `FederatedFusionManager` struct with per-source track storage in `crates/thresh-fusion/src/t2t.rs`
+- [x] 4.2 Implement `FederatedFusionManager::fuse()` orchestrating associate -> fuse -> birth for all sites
+- [x] 4.3 Implement naive fusion mode: information filter sum `P_fused^{-1} = P1^{-1} + P2^{-1}` as `fuse_naive`
+- [x] 4.4 Implement `fuse_covariance_intersection` reusing existing CI module for pairwise T2T fusion
 - [ ] 4.5 Implement optimal fusion with cross-covariance bookkeeping (opt-in mode)
 
 ## 5. Lifecycle and output
@@ -37,4 +37,4 @@
 
 - [ ] 6.1 Integration test: two simulated radar sites tracking the same three targets, federated fusion produces three fused tracks
 - [ ] 6.2 Integration test: asynchronous updates (site A at 1 Hz, site B at 2 Hz) produce temporally coherent fused output
-- [ ] 6.3 Add module to `crates/thresh-fusion/src/lib.rs`: `pub mod federated;` and `pub mod temporal;`
+- [x] 6.3 Add module to `crates/thresh-fusion/src/lib.rs`: `pub mod t2t;`
