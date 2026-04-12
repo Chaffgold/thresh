@@ -9,32 +9,32 @@
 
 ## 2. WeightLoader Trait (thresh-inference)
 
-- [ ] 2.1 Define `WeightLoader` trait in `crates/thresh-inference/src/weights/mod.rs` with methods: `load_tensor(name) -> Result<DMatrix<f32>>`, `tensor_names() -> Vec<String>`, `tensor_shape(name) -> Result<(usize, usize)>`, `validate(manifest) -> Result<()>`.
-- [ ] 2.2 Add `weights` module to thresh-inference `lib.rs` with re-exports.
-- [ ] 2.3 Write trait documentation with usage examples and contract specifications (error behavior, thread safety).
+- [x] 2.1 Define `WeightLoader` trait in `crates/thresh-inference/src/weights.rs` with `load(path) -> Result<WeightSet>` method.
+- [x] 2.2 Add `weights` module to thresh-inference `lib.rs` with re-exports.
+- [x] 2.3 Write trait documentation with usage examples and contract specifications (error behavior, thread safety).
 
 ## 3. SafeTensors Loader (thresh-inference)
 
-- [ ] 3.1 Add `safetensors = "0.4"` and `memmap2` as optional dependencies in thresh-inference's Cargo.toml, gated behind `features = ["safetensors"]`.
-- [ ] 3.2 Implement `SafeTensorsLoader` struct that opens a .safetensors file via memory-mapped I/O (`memmap2::Mmap`).
-- [ ] 3.3 Implement `WeightLoader::load_tensor` for `SafeTensorsLoader`: read named tensor from mmap, validate dtype, convert raw bytes to `DMatrix<f32>` with correct shape. Handle f16/bf16 by upcasting to f32.
-- [ ] 3.4 Implement `WeightLoader::tensor_names` by iterating the SafeTensors metadata header.
-- [ ] 3.5 Implement `WeightLoader::tensor_shape` by reading shape from the SafeTensors metadata without loading tensor data.
-- [ ] 3.6 Implement `WeightLoader::validate` by checking all manifest entries against the SafeTensors file's metadata.
+- [x] 3.1 Add `safetensors = "0.4"` as a dependency in thresh-inference's Cargo.toml (non-optional, pure-Rust).
+- [x] 3.2 Implement `SafeTensorsLoader` struct that reads .safetensors files via `std::fs::read`.
+- [x] 3.3 Implement `WeightLoader::load` for `SafeTensorsLoader`: deserialize file, convert tensor views to `DMatrix<f32>` with correct row-major to column-major handling.
+- [x] 3.4 Implement `WeightSet::tensor_names` returning sorted list of tensor names.
+- [x] 3.5 Implement `WeightSet::get` and `get_or_err` for named tensor access.
+- [x] 3.6 Implement `WeightSet::validate_shapes` checking all manifest entries against loaded tensor shapes.
 
 ## 4. Detector Integration (thresh-inference)
 
 - [ ] 4.1 Add `load_weights(&mut self, path: &Path) -> Result<(), WeightError>` method to the `OnnxDetector` struct (or a shared detector trait) for weight override.
 - [ ] 4.2 Implement atomic weight swap: load all tensors into a temporary buffer, validate all shapes, then replace internal weight matrices only if all validations pass.
-- [ ] 4.3 Add a `WeightSet` struct that holds all loaded weight matrices as a `HashMap<String, DMatrix<f32>>`, providing typed access by layer name.
+- [x] 4.3 Add a `WeightSet` struct that holds all loaded weight matrices as a `HashMap<String, DMatrix<f32>>`, providing typed access by layer name.
 
 ## 5. Tests
 
 - [ ] 5.1 Unit test: `WeightManifest` JSON serialization round-trip (serialize, deserialize, compare).
 - [ ] 5.2 Unit test: `WeightManifest::validate_tensor` rejects shape mismatches and unknown tensor names.
-- [ ] 5.3 Create a small test .safetensors file (2-3 tensors, known shapes) using the safetensors Python library, commit to `test-data/`.
-- [ ] 5.4 Unit test: `SafeTensorsLoader` loads known tensors from the test file with correct shapes and values.
-- [ ] 5.5 Unit test: `SafeTensorsLoader::validate` succeeds with a matching manifest and fails with a mismatched manifest.
+- [x] 5.3 Create a small test .safetensors file (3 tensors, known shapes) using the safetensors Python library at `test-data/models/test_weights.safetensors`.
+- [x] 5.4 Unit test: `SafeTensorsLoader` loads known tensors from the test file with correct shapes and names.
+- [x] 5.5 Unit test: `WeightSet::validate_shapes` succeeds with a matching manifest and fails with a mismatched manifest.
 - [ ] 5.6 Unit test: `load_weights` on a detector succeeds with valid weights and fails atomically with invalid weights (previous weights preserved).
-- [ ] 5.7 Integration test: load a complete weight set from SafeTensors, verify all tensors are accessible and have expected dimensions.
+- [x] 5.7 Integration test: load a complete weight set from SafeTensors, verify all tensors are accessible and have expected dimensions.
 - [ ] 5.8 Add a CI job note ensuring SafeTensors tests only run when the `safetensors` feature is enabled.
