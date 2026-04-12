@@ -133,7 +133,9 @@ fn describe_source(src: &ScenarioSource) -> String {
     match src {
         ScenarioSource::Synthetic => "Synthetic".into(),
         ScenarioSource::AdsB { region } => format!("AdsB(region={region})"),
-        ScenarioSource::Orbital { norad_ids } => format!("Orbital({} satellites)", norad_ids.len()),
+        ScenarioSource::Orbital { norad_ids, .. } => {
+            format!("Orbital({} satellites)", norad_ids.len())
+        }
     }
 }
 
@@ -147,10 +149,17 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         .map(PathBuf::from)
         .ok_or_else(|| "run requires a scenario .toml path".to_string())?;
     let manifest = load_scenario(&path)?;
-    run_manifest(&manifest)
+    // Resolve the manifest's parent so `tle_file` entries with relative
+    // paths are looked up next to the `.toml` file, matching the
+    // convention documented on `ScenarioSource::Orbital`.
+    let manifest_dir = path
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    run_manifest(&manifest, &manifest_dir)
 }
 
-fn run_manifest(manifest: &ScenarioManifest) -> Result<(), String> {
+fn run_manifest(manifest: &ScenarioManifest, manifest_dir: &std::path::Path) -> Result<(), String> {
     match &manifest.source {
         ScenarioSource::Synthetic => {
             let result = run_synthetic_benchmark(manifest);
@@ -161,13 +170,37 @@ fn run_manifest(manifest: &ScenarioManifest) -> Result<(), String> {
             "ADS-B scenarios (region={region}) require fetching live data; \
              run `thresh-data fetch` first (not yet implemented)"
         )),
-        ScenarioSource::Orbital { norad_ids } => Err(format!(
-            "Orbital scenarios ({} satellites) require TLE fetch from \
-             space-track/CelesTrak; HTTP clients not yet wired under the \
-             `orbital` feature",
-            norad_ids.len()
-        )),
+        ScenarioSource::Orbital { norad_ids, .. } => {
+            run_orbital_dispatch(manifest, manifest_dir, norad_ids)
+        }
     }
+}
+
+/// Dispatch an orbital scenario to `run_orbital_benchmark` when the
+/// `orbital` feature is enabled; otherwise surface a clear "feature
+/// required" error so the failure mode is actionable.
+#[cfg(feature = "orbital")]
+fn run_orbital_dispatch(
+    manifest: &ScenarioManifest,
+    manifest_dir: &std::path::Path,
+    _norad_ids: &[u32],
+) -> Result<(), String> {
+    let result = thresh_data::benchmark::run_orbital_benchmark(manifest, manifest_dir)?;
+    print_result(&result);
+    check_and_report_regression(manifest, &result)
+}
+
+#[cfg(not(feature = "orbital"))]
+fn run_orbital_dispatch(
+    _manifest: &ScenarioManifest,
+    _manifest_dir: &std::path::Path,
+    norad_ids: &[u32],
+) -> Result<(), String> {
+    Err(format!(
+        "Orbital scenarios ({} satellites) require the `orbital` feature. \
+         Rebuild with `cargo build -p thresh-data --features orbital --bin thresh-data`.",
+        norad_ids.len()
+    ))
 }
 
 fn print_result(result: &BenchmarkResult) {
@@ -220,7 +253,12 @@ mod tests {
         );
         assert_eq!(
             describe_source(&ScenarioSource::Orbital {
-                norad_ids: vec![25544, 48274]
+                norad_ids: vec![25544, 48274],
+                tle_file: None,
+                station_lat_deg: 0.0,
+                station_lon_deg: 0.0,
+                station_alt_m: 0.0,
+                time_step_s: None,
             }),
             "Orbital(2 satellites)"
         );

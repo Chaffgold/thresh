@@ -42,10 +42,21 @@ measurement_noise_sigma = 50.0
 gate_threshold = 500.0
 "#;
 
-const ORBITAL_TOML: &str = r#"
+/// Orbital scenario that references NO cached TLE file and real NORAD IDs
+/// that no offline test environment can fetch. Used by `run_orbital_errors_out`
+/// to verify that the CLI exits non-zero when the orbital runner cannot
+/// source any TLEs. This is the expected failure mode with both binary
+/// builds — without `orbital` it errors with "feature required"; with
+/// `orbital` it errors with the HTTP fetch failure surfaced by
+/// `CelestrakClient` in a sandboxed environment.
+const ORBITAL_TOML_NO_TLE: &str = r#"
 name = "test-orbital"
 description = "Orbital scenario (should error out)"
-source = { Orbital = { norad_ids = [25544, 48274] } }
+[source.Orbital]
+norad_ids = [25544, 48274]
+station_lat_deg = 38.8339
+station_lon_deg = -104.8214
+station_alt_m = 1885.0
 
 [parameters]
 duration_s = 10.0
@@ -262,16 +273,32 @@ fn run_adsb_errors_out() {
 }
 
 #[test]
-fn run_orbital_errors_out() {
+fn run_orbital_errors_out_without_tle_or_network() {
+    // With no `tle_file` set and no cached TLEs on disk, the orbital
+    // runner must exit non-zero regardless of whether the binary was
+    // built with `--features orbital`:
+    //   - Without the feature: errors with "feature required".
+    //   - With the feature: errors when `CelestrakClient` can't reach
+    //     the network (sandbox-friendly assumption).
     let dir = tempfile::tempdir().unwrap();
-    let path = write_scenario(dir.path(), "orbital.toml", ORBITAL_TOML);
+    let path = write_scenario(dir.path(), "orbital.toml", ORBITAL_TOML_NO_TLE);
     let out = Command::new(bin_path())
         .arg("run")
         .arg(&path)
         .output()
         .expect("spawn thresh-data");
     assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("Orbital"));
+    // Accept any of the expected error phrases so this test is agnostic
+    // to which feature flags the binary was built with.
+    let stderr = String::from_utf8_lossy(&out.stderr).to_lowercase();
+    assert!(
+        stderr.contains("orbital")
+            || stderr.contains("feature required")
+            || stderr.contains("celestrak")
+            || stderr.contains("http")
+            || stderr.contains("fetch"),
+        "unexpected stderr: {stderr}"
+    );
 }
 
 #[test]
@@ -292,4 +319,64 @@ fn run_nonexistent_file_errors() {
         .output()
         .expect("spawn thresh-data");
     assert!(!out.status.success());
+}
+
+// ---------------------------------------------------------------------------
+// Orbital end-to-end (feature-gated)
+// ---------------------------------------------------------------------------
+
+/// When the binary is built with `--features orbital` and the scenario
+/// references a cached TLE file, the orbital runner must complete
+/// successfully with the full pipeline (SGP4 → ENU → measurement →
+/// tracker → metrics) and exit 0. Runs offline because the TLE is
+/// checked into the repo under `crates/thresh-data/scenarios/`.
+#[cfg(feature = "orbital")]
+#[test]
+fn run_orbital_iss_cached_tle_end_to_end() {
+    // Scenario manifest lives alongside its cached TLE in the repo; we
+    // point the CLI at the committed file directly so the test is
+    // effectively the same regression the `orbital-benchmark-gate` CI
+    // job runs.
+    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scenarios")
+        .join("orbital-iss.toml");
+    assert!(manifest.exists(), "fixture {} missing", manifest.display());
+    let out = Command::new(bin_path())
+        .arg("run")
+        .arg(&manifest)
+        .output()
+        .expect("spawn thresh-data");
+    assert!(
+        out.status.success(),
+        "orbital-iss scenario exited non-zero. stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("scenario:    orbital-iss"));
+    assert!(stdout.contains("MOTA:"));
+    assert!(stdout.contains("regression: OK"));
+}
+
+#[cfg(feature = "orbital")]
+#[test]
+fn run_orbital_starlink_train_cached_tle_end_to_end() {
+    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scenarios")
+        .join("orbital-starlink-train.toml");
+    assert!(manifest.exists(), "fixture missing");
+    let out = Command::new(bin_path())
+        .arg("run")
+        .arg(&manifest)
+        .output()
+        .expect("spawn thresh-data");
+    assert!(
+        out.status.success(),
+        "starlink-train scenario exited non-zero. stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("scenario:    orbital-starlink-train"));
+    assert!(stdout.contains("regression: OK"));
 }
