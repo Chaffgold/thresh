@@ -570,6 +570,68 @@ mod tests {
     }
 
     #[test]
+    fn generate_sample_recording() {
+        let mut rec = Recording::new("sample");
+        for i in 0..50 {
+            let t = i as f64 * 0.5;
+            rec.push_frame(VizFrame {
+                timestamp: t,
+                tracks: vec![
+                    VizTrack {
+                        id: 1,
+                        position: [100.0 + t * 20.0, 200.0 + t * 5.0, 0.0],
+                        velocity: [20.0, 5.0, 0.0],
+                        covariance_diag: [1.0; 6],
+                        is_confirmed: true,
+                        class_label: Some("aircraft".into()),
+                    },
+                    VizTrack {
+                        id: 2,
+                        position: [500.0 - t * 15.0, 300.0 + t * 10.0, 0.0],
+                        velocity: [-15.0, 10.0, 0.0],
+                        covariance_diag: [1.0; 6],
+                        is_confirmed: true,
+                        class_label: None,
+                    },
+                ],
+                detections: vec![
+                    VizDetection {
+                        position: [100.0 + t * 20.0 + 5.0, 200.0 + t * 5.0 - 3.0, 0.0],
+                        sensor_id: 0,
+                    },
+                    VizDetection {
+                        position: [500.0 - t * 15.0 + 8.0, 300.0 + t * 10.0 + 2.0, 0.0],
+                        sensor_id: 0,
+                    },
+                ],
+                ground_truth: vec![
+                    VizGroundTruth {
+                        id: 1,
+                        position: [100.0 + t * 20.0, 200.0 + t * 5.0, 0.0],
+                    },
+                    VizGroundTruth {
+                        id: 2,
+                        position: [500.0 - t * 15.0, 300.0 + t * 10.0, 0.0],
+                    },
+                ],
+            });
+        }
+
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test-data");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sample_recording.json");
+        rec.save_json(path.to_str().unwrap()).unwrap();
+
+        // Verify round-trip.
+        let loaded = Recording::load_json(path.to_str().unwrap()).unwrap();
+        assert_eq!(rec, loaded);
+        assert_eq!(loaded.frame_count(), 50);
+        assert_eq!(loaded.frames[0].tracks.len(), 2);
+        assert_eq!(loaded.frames[0].detections.len(), 2);
+        assert_eq!(loaded.frames[0].ground_truth.len(), 2);
+    }
+
+    #[test]
     fn test_viz_track_serialization() {
         let track = VizTrack {
             id: 42,

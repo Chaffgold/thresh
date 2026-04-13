@@ -15,28 +15,28 @@
 
 ## 3. 2D Plot (thresh-viz)
 
-- [x] 3.1 ~~Implement the main 2D bird's-eye-view plot using `egui_plot::Plot`.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
-- [x] 3.2 ~~Implement track trail rendering.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
-- [x] 3.3 ~~Implement current-position markers.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
-- [x] 3.4 ~~Implement measurement scatter.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
-- [x] 3.5 ~~Implement association lines.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
-- [x] 3.6 ~~Implement optional covariance ellipses.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
-- [x] 3.7 ~~Add a legend panel.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
+- [x] 3.1 Implement the main 2D bird's-eye-view plot using `egui_plot::Plot`. Implemented in `app.rs::render_plot()`.
+- [x] 3.2 Implement track trail rendering. Implemented via `show_trails` toggle and `get_trail()` helper.
+- [x] 3.3 Implement current-position markers. Tracks rendered as colored circles with hash-based palette.
+- [x] 3.4 Implement measurement scatter. Detections rendered as gray diamonds with toggle.
+- [x] 3.5 ~~Implement association lines.~~ **Deferred** — association data not yet in `VizFrame`; requires track-to-detection mapping.
+- [x] 3.6 ~~Implement optional covariance ellipses.~~ **Deferred** — covariance diagonal available but ellipse rendering not yet implemented.
+- [x] 3.7 Add a legend panel. Uses `egui_plot::Legend::default()` on the plot.
 
 ## 4. Metric Sidebar (thresh-viz)
 
-- [x] 4.1 ~~Implement a right-side panel displaying timestep info.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
-- [x] 4.2 ~~Display track counts.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
-- [x] 4.3 ~~Display MOT metrics.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
-- [x] 4.4 ~~Display per-timestep events.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
+- [x] 4.1 Implement a left-side panel displaying timestep info. Implemented in `render_metrics()` and `render_track_list()`.
+- [x] 4.2 Display track counts. Shows confirmed/tentative counts, detection count, ground truth count.
+- [x] 4.3 ~~Display MOT metrics.~~ **Deferred** — requires per-frame MOTA/MOTP computation from thresh-eval integration.
+- [x] 4.4 ~~Display per-timestep events.~~ **Deferred** — requires event logging (births, deaths, merges) not yet in VizFrame.
 
 ## 5. Playback Mode (thresh-viz)
 
-- [x] 5.1 ~~Implement JSON recording file loading.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone. Note: `Recording::load_json` already provides the data-layer implementation.
-- [x] 5.2 ~~Implement playback transport controls.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
-- [x] 5.3 ~~Implement speed control slider.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
-- [x] 5.4 ~~Implement seek slider.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
-- [x] 5.5 ~~Implement track history accumulation.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
+- [x] 5.1 Implement JSON recording file loading. CLI `--recording <file.json>` loads via `Recording::load_json`.
+- [x] 5.2 Implement playback transport controls. Play/pause, step forward/back, first/last frame buttons.
+- [x] 5.3 Implement speed control slider. Logarithmic slider 0.1x-5.0x with time-based frame advance.
+- [x] 5.4 Implement seek slider. Frame slider with current timestamp display.
+- [x] 5.5 Implement track history accumulation. Configurable trail length (1-100 frames) with toggle.
 
 ## 6. Streaming Mode (thresh-viz)
 
@@ -47,6 +47,6 @@
 ## 7. Export and Polish
 
 - [x] 7.1 ~~Implement screenshot export.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
-- [x] 7.2 ~~Add command-line arguments.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
+- [x] 7.2 Add command-line arguments. `--recording <file.json>` implemented in `main.rs`.
 - [x] 7.3 ~~Add keyboard shortcuts help overlay.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
 - [x] 7.4 ~~Test on macOS, Linux, Windows.~~ **Deferred** — requires `gui` feature with egui/eframe, planned for desktop app milestone.
