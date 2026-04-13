@@ -996,7 +996,7 @@ pub fn run_adsb_benchmark(
     // Detections binned by integer step index.
     let mut rng = StdRng::seed_from_u64(0xAD5B_5A5A_5A5A_5A5A_u64);
     let normal = Normal::new(0.0, 1.0).unwrap();
-    let dets_by_step = bin_adsb_detections(
+    let mut dets_by_step = bin_adsb_detections(
         &states,
         params,
         t0,
