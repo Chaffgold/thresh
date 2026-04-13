@@ -472,57 +472,57 @@ fn parse_track_response(body: &str) -> Result<Vec<TrackPoint>> {
 ///             callsign,alt,speed,track,lat,lon,vert_rate,...
 pub fn parse_sbs_line(line: &str) -> Option<SbsMessage> {
     let fields: Vec<&str> = line.split(',').collect();
-    if fields.len() < 11 {
-        return None;
-    }
-    if fields[0] != "MSG" {
-        return None;
-    }
+    let (transmission_type, icao24) = validate_sbs_header(&fields)?;
 
+    Some(SbsMessage {
+        transmission_type,
+        icao24,
+        callsign: parse_optional_string(&fields, 10),
+        altitude: parse_optional_f64(&fields, 11),
+        ground_speed: parse_optional_f64(&fields, 12),
+        track: parse_optional_f64(&fields, 13),
+        latitude: parse_optional_f64(&fields, 14),
+        longitude: parse_optional_f64(&fields, 15),
+        vertical_rate: parse_optional_f64(&fields, 16),
+        timestamp: parse_sbs_timestamp(&fields),
+    })
+}
+
+/// Validate the SBS header fields and extract transmission type and ICAO24.
+fn validate_sbs_header(fields: &[&str]) -> Option<(u8, String)> {
+    if fields.len() < 11 || fields[0] != "MSG" {
+        return None;
+    }
     let transmission_type: u8 = fields[1].trim().parse().ok()?;
     let icao24 = fields[4].trim().to_string();
     if icao24.is_empty() {
         return None;
     }
+    Some((transmission_type, icao24))
+}
 
-    let callsign = {
-        let s = fields.get(10).map(|s| s.trim().to_string());
-        s.filter(|s| !s.is_empty())
-    };
+/// Parse an optional f64 field at the given index.
+fn parse_optional_f64(fields: &[&str], idx: usize) -> Option<f64> {
+    fields.get(idx).and_then(|s| s.trim().parse::<f64>().ok())
+}
 
-    let altitude = fields.get(11).and_then(|s| s.trim().parse::<f64>().ok());
-    let ground_speed = fields.get(12).and_then(|s| s.trim().parse::<f64>().ok());
-    let track = fields.get(13).and_then(|s| s.trim().parse::<f64>().ok());
-    let latitude = fields.get(14).and_then(|s| s.trim().parse::<f64>().ok());
-    let longitude = fields.get(15).and_then(|s| s.trim().parse::<f64>().ok());
-    let vertical_rate = fields.get(16).and_then(|s| s.trim().parse::<f64>().ok());
+/// Parse an optional non-empty string field at the given index.
+fn parse_optional_string(fields: &[&str], idx: usize) -> Option<String> {
+    fields
+        .get(idx)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
 
-    // Combine date and time fields.
-    let timestamp = match (fields.get(6), fields.get(7)) {
-        (Some(date), Some(time)) => {
-            let d = date.trim();
-            let t = time.trim();
-            if d.is_empty() && t.is_empty() {
-                None
-            } else {
-                Some(format!("{d} {t}"))
-            }
-        }
-        _ => None,
-    };
-
-    Some(SbsMessage {
-        transmission_type,
-        icao24,
-        callsign,
-        altitude,
-        ground_speed,
-        track,
-        latitude,
-        longitude,
-        vertical_rate,
-        timestamp,
-    })
+/// Combine SBS date (field 6) and time (field 7) into a timestamp string.
+fn parse_sbs_timestamp(fields: &[&str]) -> Option<String> {
+    let d = fields.get(6)?.trim();
+    let t = fields.get(7)?.trim();
+    if d.is_empty() && t.is_empty() {
+        None
+    } else {
+        Some(format!("{d} {t}"))
+    }
 }
 
 /// Parse an entire SBS BaseStation file.
@@ -731,53 +731,13 @@ fn interpolate_trajectory_to_grid(
     icao24: String,
     svs: &[&StateVector],
 ) -> Option<GroundTruthTrajectory> {
-    let first = svs.first()?;
-    let last = svs.last()?;
-    let t_start = first.time_position.unwrap_or(first.last_contact);
-    let t_end = last.time_position.unwrap_or(last.last_contact);
-
+    let (t_start, t_end) = trajectory_time_bounds(svs)?;
     if (t_end - t_start) < 1.0 {
         return None;
     }
 
     let target_id = u64::from_str_radix(&icao24, 16).unwrap_or(0);
-    let mut entries = Vec::new();
-
-    let mut t = t_start;
-    let mut idx = 0;
-    while t <= t_end {
-        // Advance index to bracket t.
-        while idx + 1 < svs.len() {
-            let t_next = svs[idx + 1]
-                .time_position
-                .unwrap_or(svs[idx + 1].last_contact);
-            if t_next >= t {
-                break;
-            }
-            idx += 1;
-        }
-
-        if idx + 1 >= svs.len() {
-            break;
-        }
-
-        let sv0 = svs[idx];
-        let sv1 = svs[idx + 1];
-        let t0 = sv0.time_position.unwrap_or(sv0.last_contact);
-        let t1 = sv1.time_position.unwrap_or(sv1.last_contact);
-
-        if (t1 - t0).abs() < 1e-9 {
-            t += 1.0;
-            continue;
-        }
-
-        let alpha = (t - t0) / (t1 - t0);
-        if let Some(entry) = interpolate_entry(target_id, sv0, sv1, alpha) {
-            entries.push(entry);
-        }
-
-        t += 1.0;
-    }
+    let entries = interpolate_entries_on_grid(svs, target_id, t_start, t_end);
 
     if entries.is_empty() {
         None
@@ -788,6 +748,66 @@ fn interpolate_trajectory_to_grid(
             entries,
         })
     }
+}
+
+/// Extract the time bounds (start, end) from sorted state vectors.
+fn trajectory_time_bounds(svs: &[&StateVector]) -> Option<(f64, f64)> {
+    let first = svs.first()?;
+    let last = svs.last()?;
+    let t_start = first.time_position.unwrap_or(first.last_contact);
+    let t_end = last.time_position.unwrap_or(last.last_contact);
+    Some((t_start, t_end))
+}
+
+/// Walk through a 1-second grid from `t_start` to `t_end`, interpolating
+/// entries from the bracketing state vectors.
+fn interpolate_entries_on_grid(
+    svs: &[&StateVector],
+    target_id: u64,
+    t_start: f64,
+    t_end: f64,
+) -> Vec<GroundTruthEntry> {
+    let mut entries = Vec::new();
+    let mut t = t_start;
+    let mut idx = 0;
+
+    while t <= t_end {
+        idx = advance_bracket_index(svs, idx, t);
+
+        if idx + 1 >= svs.len() {
+            break;
+        }
+
+        let sv0 = svs[idx];
+        let sv1 = svs[idx + 1];
+        let t0 = sv0.time_position.unwrap_or(sv0.last_contact);
+        let t1 = sv1.time_position.unwrap_or(sv1.last_contact);
+
+        if (t1 - t0).abs() >= 1e-9 {
+            let alpha = (t - t0) / (t1 - t0);
+            if let Some(entry) = interpolate_entry(target_id, sv0, sv1, alpha) {
+                entries.push(entry);
+            }
+        }
+
+        t += 1.0;
+    }
+
+    entries
+}
+
+/// Advance the bracket index so `svs[idx]` and `svs[idx+1]` bracket time `t`.
+fn advance_bracket_index(svs: &[&StateVector], mut idx: usize, t: f64) -> usize {
+    while idx + 1 < svs.len() {
+        let t_next = svs[idx + 1]
+            .time_position
+            .unwrap_or(svs[idx + 1].last_contact);
+        if t_next >= t {
+            break;
+        }
+        idx += 1;
+    }
+    idx
 }
 
 /// Linearly interpolate between two optional values.

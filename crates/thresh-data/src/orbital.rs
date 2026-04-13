@@ -565,20 +565,30 @@ pub fn predict_passes(
     let enu_positions =
         propagate_to_enu(tle, &times, station.lat_rad, station.lon_rad, station.alt_m)?;
 
-    // Find contiguous above-horizon segments
+    let passes = extract_passes(&enu_positions, min_elevation_rad);
+    Ok(passes)
+}
+
+/// Compute elevation angle from an ENU position.
+fn enu_elevation(pos: &EnuPosition) -> f64 {
+    let range = (pos.east * pos.east + pos.north * pos.north + pos.up * pos.up).sqrt();
+    if range > 0.0 {
+        (pos.up / range).asin()
+    } else {
+        0.0
+    }
+}
+
+/// Extract contiguous above-horizon pass segments from a sequence of ENU positions.
+fn extract_passes(enu_positions: &[EnuPosition], min_elevation_rad: f64) -> Vec<Pass> {
     let mut passes = Vec::new();
     let mut in_pass = false;
     let mut pass_start = 0.0_f64;
     let mut max_el = 0.0_f64;
     let mut max_el_time = 0.0_f64;
 
-    for pos in &enu_positions {
-        let range = (pos.east * pos.east + pos.north * pos.north + pos.up * pos.up).sqrt();
-        let elevation = if range > 0.0 {
-            (pos.up / range).asin()
-        } else {
-            0.0
-        };
+    for pos in enu_positions {
+        let elevation = enu_elevation(pos);
 
         if elevation > 0.0 {
             if !in_pass {
@@ -592,7 +602,6 @@ pub fn predict_passes(
                 max_el_time = pos.time_since_epoch_min;
             }
         } else if in_pass {
-            // End of pass
             if max_el >= min_elevation_rad {
                 passes.push(Pass {
                     start_time_min: pass_start,
@@ -606,19 +615,18 @@ pub fn predict_passes(
     }
 
     // Handle pass that extends to end of search window
-    if in_pass
-        && max_el >= min_elevation_rad
-        && let Some(last) = enu_positions.last()
-    {
-        passes.push(Pass {
-            start_time_min: pass_start,
-            end_time_min: last.time_since_epoch_min,
-            max_elevation_rad: max_el,
-            max_elevation_time_min: max_el_time,
-        });
+    if in_pass && max_el >= min_elevation_rad {
+        if let Some(last) = enu_positions.last() {
+            passes.push(Pass {
+                start_time_min: pass_start,
+                end_time_min: last.time_since_epoch_min,
+                max_elevation_rad: max_el,
+                max_elevation_time_min: max_el_time,
+            });
+        }
     }
 
-    Ok(passes)
+    passes
 }
 
 // ---------------------------------------------------------------------------

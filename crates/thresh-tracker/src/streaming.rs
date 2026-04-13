@@ -326,22 +326,13 @@ fn run_loop_blocking(
     while let Some(measurement) = rx.blocking_recv() {
         let ts = measurement.timestamp;
         if let Some(frame) = binner.push(measurement) {
-            // Check if we've fallen behind: if the measurement timestamp is
-            // far ahead of the binner's current frame start, skip frames.
-            if let Some(frame_start) = binner.current_frame_start {
-                let lag = ts - frame_start;
-                if lag > max_latency_s {
-                    // Calculate how many frames to skip
-                    let frames_to_skip = ((lag - max_latency_s) / frame_duration_s).floor() as u64;
-                    for _ in 0..frames_to_skip {
-                        tracker.step(&[], frame_duration_s);
-                        total_frames_dropped += 1;
-                    }
-                    // Advance binner's frame start past the skipped frames
-                    binner.current_frame_start =
-                        Some(frame_start + frames_to_skip as f64 * frame_duration_s);
-                }
-            }
+            total_frames_dropped += skip_lagging_frames(
+                &mut tracker,
+                &mut binner,
+                ts,
+                max_latency_s,
+                frame_duration_s,
+            );
             step_and_broadcast(
                 &mut tracker,
                 &frame,
@@ -352,15 +343,54 @@ fn run_loop_blocking(
             );
         }
     }
-    // Channel closed — flush remaining measurements.
+    flush_remaining(
+        &mut tracker,
+        &mut binner,
+        &broadcast_tx,
+        frame_duration_s,
+        total_frames_dropped,
+    );
+}
+
+/// Issue predict-only steps for lagging frames, returning the count skipped.
+fn skip_lagging_frames(
+    tracker: &mut MultiObjectTracker,
+    binner: &mut TemporalBinner,
+    ts: f64,
+    max_latency_s: f64,
+    frame_duration_s: f64,
+) -> u64 {
+    let Some(frame_start) = binner.current_frame_start else {
+        return 0;
+    };
+    let lag = ts - frame_start;
+    if lag <= max_latency_s {
+        return 0;
+    }
+    let frames_to_skip = ((lag - max_latency_s) / frame_duration_s).floor() as u64;
+    for _ in 0..frames_to_skip {
+        tracker.step(&[], frame_duration_s);
+    }
+    binner.current_frame_start = Some(frame_start + frames_to_skip as f64 * frame_duration_s);
+    frames_to_skip
+}
+
+/// Flush any remaining buffered measurements when the channel closes.
+fn flush_remaining(
+    tracker: &mut MultiObjectTracker,
+    binner: &mut TemporalBinner,
+    broadcast_tx: &broadcast::Sender<TrackSnapshot>,
+    frame_duration_s: f64,
+    total_frames_dropped: u64,
+) {
     if let Some(frame) = binner.flush() {
         let ts = binner.current_frame_start.unwrap_or(0.0);
         step_and_broadcast(
-            &mut tracker,
+            tracker,
             &frame,
             frame_duration_s,
             ts,
-            &broadcast_tx,
+            broadcast_tx,
             total_frames_dropped,
         );
     }
@@ -385,48 +415,50 @@ fn capture_snapshot(
     timestamp: f64,
     frames_dropped: u64,
 ) -> TrackSnapshot {
-    use thresh_core::track::TrackState as Lifecycle;
-
     let tracks = tracker
         .tracks
         .iter()
         .filter(|t| t.is_alive())
-        .map(|t| {
-            let s = &t.state;
-            let dim = s.len();
-            // State layout: [x, vx, y, vy, z, vz]
-            let position = [
-                if dim > 0 { s[0] } else { 0.0 },
-                if dim > 2 { s[2] } else { 0.0 },
-                if dim > 4 { s[4] } else { 0.0 },
-            ];
-            let velocity = [
-                if dim > 1 { s[1] } else { 0.0 },
-                if dim > 3 { s[3] } else { 0.0 },
-                if dim > 5 { s[5] } else { 0.0 },
-            ];
-
-            let cov = &t.covariance;
-            let cov_dim = cov.nrows().min(cov.ncols());
-            let mut covariance_diag = [0.0; 6];
-            for i in 0..6.min(cov_dim) {
-                covariance_diag[i] = cov[(i, i)];
-            }
-
-            TrackState {
-                id: t.id.0,
-                position,
-                velocity,
-                covariance_diag,
-                is_confirmed: t.lifecycle == Lifecycle::Confirmed,
-            }
-        })
+        .map(convert_track_to_snapshot)
         .collect();
 
     TrackSnapshot {
         timestamp,
         tracks,
         frames_dropped,
+    }
+}
+
+/// Convert a single tracker track to a [`TrackState`] snapshot.
+fn convert_track_to_snapshot(t: &crate::track::Track) -> TrackState {
+    use thresh_core::track::TrackState as Lifecycle;
+
+    let s = &t.state;
+    let dim = s.len();
+    let position = [
+        if dim > 0 { s[0] } else { 0.0 },
+        if dim > 2 { s[2] } else { 0.0 },
+        if dim > 4 { s[4] } else { 0.0 },
+    ];
+    let velocity = [
+        if dim > 1 { s[1] } else { 0.0 },
+        if dim > 3 { s[3] } else { 0.0 },
+        if dim > 5 { s[5] } else { 0.0 },
+    ];
+
+    let cov = &t.covariance;
+    let cov_dim = cov.nrows().min(cov.ncols());
+    let mut covariance_diag = [0.0; 6];
+    for i in 0..6.min(cov_dim) {
+        covariance_diag[i] = cov[(i, i)];
+    }
+
+    TrackState {
+        id: t.id.0,
+        position,
+        velocity,
+        covariance_diag,
+        is_confirmed: t.lifecycle == Lifecycle::Confirmed,
     }
 }
 

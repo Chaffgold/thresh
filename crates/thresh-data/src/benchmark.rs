@@ -748,40 +748,14 @@ pub fn run_orbital_benchmark(
 
     for step in 0..n_steps {
         let t_min = step as f64 * step_s / 60.0;
-
-        // Collect noisy detections for every visible satellite at this step.
-        let mut detections: Vec<DVector<f64>> = Vec::new();
-        let mut gt_positions: Vec<(u64, [f64; 3])> = Vec::new();
-
-        for ((id, enu), (_, measurements)) in trajectories.iter().zip(measurements_by_sat.iter()) {
-            if let Some(pos) = enu
-                .iter()
-                .find(|p| (p.time_since_epoch_min - t_min).abs() < 1e-6)
-                && pos.up > 0.0
-            {
-                gt_positions.push((u64::from(*id), [pos.east, pos.north, pos.up]));
-            }
-            if let Some(m) = measurements.iter().find(|m| match m {
-                thresh_core::measurement::Measurement::Radar { time, .. } => {
-                    (time - t_min * 60.0).abs() < 1e-6
-                }
-                _ => false,
-            }) && let thresh_core::measurement::Measurement::Radar {
-                range,
-                azimuth,
-                elevation,
-                ..
-            } = m
-            {
-                let noisy_range = range + noise.range_sigma_m * normal.sample(&mut rng);
-                let noisy_az = azimuth + noise.azimuth_sigma_rad * normal.sample(&mut rng);
-                let noisy_el = elevation + noise.elevation_sigma_rad * normal.sample(&mut rng);
-                let x = noisy_range * noisy_el.cos() * noisy_az.cos();
-                let y = noisy_range * noisy_el.cos() * noisy_az.sin();
-                let z = noisy_range * noisy_el.sin();
-                detections.push(DVector::from_column_slice(&[x, y, z]));
-            }
-        }
+        let (detections, gt_positions) = collect_orbital_step_data(
+            &trajectories,
+            &measurements_by_sat,
+            &noise,
+            &normal,
+            &mut rng,
+            t_min,
+        );
 
         tracker.step(&detections, step_s);
 
@@ -809,6 +783,83 @@ pub fn run_orbital_benchmark(
         dist_threshold,
         start,
     ))
+}
+
+/// Collect ground-truth positions and noisy radar detections for a single
+/// orbital benchmark step.
+#[cfg(feature = "orbital")]
+fn collect_orbital_step_data(
+    trajectories: &[(u32, Vec<crate::orbital::EnuPosition>)],
+    measurements_by_sat: &[(u32, Vec<thresh_core::measurement::Measurement>)],
+    noise: &crate::orbital::RadarNoiseConfig,
+    normal: &rand_distr::Normal<f64>,
+    rng: &mut impl rand::Rng,
+    t_min: f64,
+) -> (Vec<DVector<f64>>, Vec<(u64, [f64; 3])>) {
+    use rand_distr::Distribution;
+
+    let mut detections: Vec<DVector<f64>> = Vec::new();
+    let mut gt_positions: Vec<(u64, [f64; 3])> = Vec::new();
+
+    for ((id, enu), (_, measurements)) in trajectories.iter().zip(measurements_by_sat.iter()) {
+        collect_gt_for_step(enu, *id, t_min, &mut gt_positions);
+        collect_noisy_detection(measurements, noise, normal, rng, t_min, &mut detections);
+    }
+
+    (detections, gt_positions)
+}
+
+/// Append the ground-truth position for this satellite at `t_min` if visible.
+#[cfg(feature = "orbital")]
+fn collect_gt_for_step(
+    enu: &[crate::orbital::EnuPosition],
+    id: u32,
+    t_min: f64,
+    gt_positions: &mut Vec<(u64, [f64; 3])>,
+) {
+    if let Some(pos) = enu
+        .iter()
+        .find(|p| (p.time_since_epoch_min - t_min).abs() < 1e-6)
+    {
+        if pos.up > 0.0 {
+            gt_positions.push((u64::from(id), [pos.east, pos.north, pos.up]));
+        }
+    }
+}
+
+/// Convert a radar measurement at `t_min` to a noisy Cartesian detection.
+#[cfg(feature = "orbital")]
+fn collect_noisy_detection(
+    measurements: &[thresh_core::measurement::Measurement],
+    noise: &crate::orbital::RadarNoiseConfig,
+    normal: &rand_distr::Normal<f64>,
+    rng: &mut impl rand::Rng,
+    t_min: f64,
+    detections: &mut Vec<DVector<f64>>,
+) {
+    use rand_distr::Distribution;
+
+    let m = measurements.iter().find(|m| match m {
+        thresh_core::measurement::Measurement::Radar { time, .. } => {
+            (time - t_min * 60.0).abs() < 1e-6
+        }
+        _ => false,
+    });
+    if let Some(thresh_core::measurement::Measurement::Radar {
+        range,
+        azimuth,
+        elevation,
+        ..
+    }) = m
+    {
+        let noisy_range = range + noise.range_sigma_m * normal.sample(rng);
+        let noisy_az = azimuth + noise.azimuth_sigma_rad * normal.sample(rng);
+        let noisy_el = elevation + noise.elevation_sigma_rad * normal.sample(rng);
+        let x = noisy_range * noisy_el.cos() * noisy_az.cos();
+        let y = noisy_range * noisy_el.cos() * noisy_az.sin();
+        let z = noisy_range * noisy_el.sin();
+        detections.push(DVector::from_column_slice(&[x, y, z]));
+    }
 }
 
 /// Fetch TLEs for the given NORAD IDs via HTTP, trying CelesTrak first
@@ -943,38 +994,18 @@ pub fn run_adsb_benchmark(
     }
 
     // Detections binned by integer step index.
-    let mut dets_by_step: std::collections::BTreeMap<i64, Vec<DVector<f64>>> =
-        std::collections::BTreeMap::new();
     let mut rng = StdRng::seed_from_u64(0xAD5B_5A5A_5A5A_5A5A_u64);
     let normal = Normal::new(0.0, 1.0).unwrap();
-
-    for sv in &states {
-        if let Some(m) = state_to_measurement(sv)
-            && let thresh_core::measurement::Measurement::AdsB {
-                lat,
-                lon,
-                alt,
-                time,
-                ..
-            } = m
-        {
-            let enu = wgs84_to_enu(
-                lat.to_radians(),
-                lon.to_radians(),
-                alt,
-                ref_lat_rad,
-                ref_lon_rad,
-                *ref_alt_m,
-            );
-            let step = ((time - t0) / params.dt).round() as i64;
-            let noisy = DVector::from_column_slice(&[
-                enu.x + params.measurement_noise_sigma * normal.sample(&mut rng),
-                enu.y + params.measurement_noise_sigma * normal.sample(&mut rng),
-                enu.z + params.measurement_noise_sigma * normal.sample(&mut rng),
-            ]);
-            dets_by_step.entry(step).or_default().push(noisy);
-        }
-    }
+    let dets_by_step = bin_adsb_detections(
+        &states,
+        params,
+        t0,
+        ref_lat_rad,
+        ref_lon_rad,
+        *ref_alt_m,
+        &normal,
+        &mut rng,
+    );
 
     // Ground truth binned by step, using the 1-Hz-interpolated entries.
     let mut gt_by_step: std::collections::BTreeMap<i64, Vec<(u64, [f64; 3])>> =
@@ -1036,6 +1067,55 @@ pub fn run_adsb_benchmark(
         (params.measurement_noise_sigma * 10.0).max(500.0),
         start,
     ))
+}
+
+/// Bin ADS-B state vectors into per-step noisy ENU detection vectors.
+#[cfg(feature = "adsb")]
+fn bin_adsb_detections(
+    states: &[crate::adsb::StateVector],
+    params: &ScenarioParameters,
+    t0: f64,
+    ref_lat_rad: f64,
+    ref_lon_rad: f64,
+    ref_alt_m: f64,
+    normal: &rand_distr::Normal<f64>,
+    rng: &mut impl rand::Rng,
+) -> std::collections::BTreeMap<i64, Vec<DVector<f64>>> {
+    use crate::adsb::state_to_measurement;
+    use rand_distr::Distribution;
+    use thresh_core::geodetic::wgs84_to_enu;
+
+    let mut dets_by_step: std::collections::BTreeMap<i64, Vec<DVector<f64>>> =
+        std::collections::BTreeMap::new();
+
+    for sv in states {
+        if let Some(thresh_core::measurement::Measurement::AdsB {
+            lat,
+            lon,
+            alt,
+            time,
+            ..
+        }) = state_to_measurement(sv)
+        {
+            let enu = wgs84_to_enu(
+                lat.to_radians(),
+                lon.to_radians(),
+                alt,
+                ref_lat_rad,
+                ref_lon_rad,
+                ref_alt_m,
+            );
+            let step = ((time - t0) / params.dt).round() as i64;
+            let noisy = DVector::from_column_slice(&[
+                enu.x + params.measurement_noise_sigma * normal.sample(rng),
+                enu.y + params.measurement_noise_sigma * normal.sample(rng),
+                enu.z + params.measurement_noise_sigma * normal.sample(rng),
+            ]);
+            dets_by_step.entry(step).or_default().push(noisy);
+        }
+    }
+
+    dets_by_step
 }
 
 // ---------------------------------------------------------------------------
