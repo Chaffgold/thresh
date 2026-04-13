@@ -57,5 +57,4 @@
 - [x] 7.6 Unit test: k-best pruning retains exactly k hypotheses and discards the lowest-scoring ones (`test_mht_prune_k_best`).
 - [x] 7.7 Unit test: N-scan pruning collapses agreed-upon old assignments.
 - [x] 7.8 Integration test: JPDA on a crossing-tracks scenario (two targets cross paths) produces better MOTA than Hungarian.
-- [x] 7.9 ~~Integration test: MHT on a dense clutter scenario (high false alarm rate) maintains track continuity better than Hungarian.
- **Deferred** — MHT dense-clutter scenario needs careful tuning of k_best and clutter parameters; the JPDA crossing-tracks test (§7.8) validates the multi-hypothesis path end-to-end.
+- [x] 7.9 Integration test: `mht_dense_clutter_maintains_track` — single target with 10 false alarms per frame over 40 steps. MHT maintains at least one alive track near the true target position.

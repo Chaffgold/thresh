@@ -255,6 +255,33 @@ impl OnnxDetector {
     pub fn session(&self) -> &ort::Session {
         &self.session
     }
+
+    /// Re-create the ONNX session with weights overridden from a SafeTensors file.
+    ///
+    /// This is **not** a hot-swap — the old session is dropped and a new one is
+    /// created. ORT does not support direct weight injection into an existing
+    /// session.
+    ///
+    /// # Current status
+    ///
+    /// This is a documented stub. A real implementation would:
+    /// 1. Load SafeTensors weights via [`crate::weights::SafeTensorsLoader`].
+    /// 2. Modify the ONNX model's protobuf initializers in-memory.
+    /// 3. Create a new `ort::Session` from the modified model bytes.
+    ///
+    /// For production use, prefer [`crate::native_detector::NativeDetector`]
+    /// with SafeTensors weights — it supports direct weight injection without
+    /// protobuf manipulation.
+    pub fn reload_with_weights(
+        _config: &OnnxDetectorConfig,
+        _weight_path: &str,
+    ) -> Result<Self, crate::weights::WeightError> {
+        // ORT doesn't support direct weight injection into an existing session.
+        // Real implementation would require onnx-protobuf manipulation.
+        Err(crate::weights::WeightError::Io(
+            "ONNX weight replacement not yet implemented — use NativeDetector with SafeTensors instead".into(),
+        ))
+    }
 }
 
 #[cfg(feature = "onnx")]
@@ -455,6 +482,44 @@ mod tests {
             "should keep 3 detections with confidence >= 0.5"
         );
         assert!(dets.iter().all(|d| d.confidence >= 0.5));
+    }
+
+    /// §5.6 Verify the SafeTensorsLoader can load test weights and that
+    /// the WeightSet API works for detector-style access patterns.
+    /// This test is non-feature-gated and exercises the SafeTensors path
+    /// without requiring the `onnx` feature.
+    #[test]
+    fn test_safetensors_weight_loading_for_detector_integration() {
+        use crate::weights::{SafeTensorsLoader, WeightLoader};
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let path = format!("{manifest_dir}/../../test-data/models/test_weights.safetensors");
+        let weights = SafeTensorsLoader.load(&path).unwrap();
+        assert!(
+            weights.get("encoder.layer.0.weight").is_some(),
+            "encoder weight tensor should be present"
+        );
+        assert!(
+            weights.get("decoder.head.weight").is_some(),
+            "decoder head weight tensor should be present"
+        );
+        // Verify shapes are correct for detector use
+        let enc = weights.get("encoder.layer.0.weight").unwrap();
+        assert_eq!(enc.nrows(), 256);
+        assert_eq!(enc.ncols(), 4);
+        let dec = weights.get("decoder.head.weight").unwrap();
+        assert_eq!(dec.nrows(), 7);
+        assert_eq!(dec.ncols(), 256);
+    }
+
+    /// §4.1/4.2 OnnxDetector::reload_with_weights returns a documented error
+    /// since ORT doesn't support runtime weight replacement.
+    #[test]
+    #[cfg(feature = "onnx")]
+    #[ignore] // Requires ORT binary which is not available in CI
+    fn test_onnx_reload_with_weights_returns_stub_error() {
+        let config = OnnxDetectorConfig::default();
+        let result = OnnxDetector::reload_with_weights(&config, "dummy.safetensors");
+        assert!(result.is_err(), "should return an error (stub)");
     }
 
     #[test]
