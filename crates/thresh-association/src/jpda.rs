@@ -272,6 +272,78 @@ pub fn jpda_associate_and_update(
         .collect()
 }
 
+/// Partition tracks into independent clusters based on shared gated detections.
+///
+/// Two tracks are in the same cluster if they gate on at least one common detection.
+/// This is equivalent to finding connected components of the bipartite gating graph.
+///
+/// # Arguments
+///
+/// * `n_tracks` — number of tracks.
+/// * `n_dets` — number of detections.
+/// * `gated` — `gated[i][j]` is `true` if track `i` gates detection `j`.
+///
+/// # Returns
+///
+/// A list of clusters, each containing `(track_indices, detection_indices)`.
+pub fn cluster_tracks(
+    n_tracks: usize,
+    n_dets: usize,
+    gated: &[Vec<bool>],
+) -> Vec<(Vec<usize>, Vec<usize>)> {
+    // Union-find on tracks: merge tracks that share a detection.
+    let mut parent: Vec<usize> = (0..n_tracks).collect();
+
+    fn find(parent: &mut [usize], mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]]; // path compression
+            x = parent[x];
+        }
+        x
+    }
+
+    fn union(parent: &mut [usize], a: usize, b: usize) {
+        let ra = find(parent, a);
+        let rb = find(parent, b);
+        if ra != rb {
+            parent[rb] = ra;
+        }
+    }
+
+    // For each detection, find all tracks that gate on it and union them.
+    for j in 0..n_dets {
+        let mut first_track: Option<usize> = None;
+        for (i, gated_row) in gated.iter().enumerate().take(n_tracks) {
+            if gated_row[j] {
+                if let Some(ft) = first_track {
+                    union(&mut parent, ft, i);
+                } else {
+                    first_track = Some(i);
+                }
+            }
+        }
+    }
+
+    // Group tracks by their root.
+    let mut cluster_map: std::collections::HashMap<usize, Vec<usize>> =
+        std::collections::HashMap::new();
+    for i in 0..n_tracks {
+        let root = find(&mut parent, i);
+        cluster_map.entry(root).or_default().push(i);
+    }
+
+    // For each cluster, collect the corresponding detections.
+    let mut clusters: Vec<(Vec<usize>, Vec<usize>)> = Vec::new();
+    for (_, track_indices) in cluster_map {
+        let det_indices: Vec<usize> = (0..n_dets)
+            .filter(|&j| track_indices.iter().any(|&ti| gated[ti][j]))
+            .collect();
+        clusters.push((track_indices, det_indices));
+    }
+
+    clusters
+}
+
 /// Evaluate the multivariate Gaussian PDF: N(z; mu, S).
 ///
 /// Uses log-space internally to avoid underflow/overflow.
@@ -536,5 +608,49 @@ mod tests {
         for (i, &ev) in eigenvalues.iter().enumerate() {
             assert!(ev > -1e-10, "eigenvalue[{i}] = {ev} should be non-negative");
         }
+    }
+
+    #[test]
+    fn test_cluster_tracks_independent() {
+        // 3 tracks, 3 detections. Track 0 gates det 0, track 1 gates det 1,
+        // track 2 gates det 2. No shared detections -> 3 clusters.
+        let gated = vec![
+            vec![true, false, false],
+            vec![false, true, false],
+            vec![false, false, true],
+        ];
+        let clusters = cluster_tracks(3, 3, &gated);
+        assert_eq!(clusters.len(), 3, "should have 3 independent clusters");
+    }
+
+    #[test]
+    fn test_cluster_tracks_shared_detection() {
+        // 2 tracks, 2 detections. Both tracks gate detection 0.
+        // They should be in the same cluster.
+        let gated = vec![vec![true, false], vec![true, true]];
+        let clusters = cluster_tracks(2, 2, &gated);
+        assert_eq!(
+            clusters.len(),
+            1,
+            "shared detection should merge into 1 cluster"
+        );
+        let (ref tracks, ref dets) = clusters[0];
+        assert_eq!(tracks.len(), 2);
+        assert!(dets.contains(&0));
+        assert!(dets.contains(&1));
+    }
+
+    #[test]
+    fn test_cluster_tracks_two_clusters() {
+        // 4 tracks, 4 detections.
+        // Tracks 0,1 share det 0; tracks 2,3 share det 3. -> 2 clusters.
+        let gated = vec![
+            vec![true, true, false, false],
+            vec![true, false, false, false],
+            vec![false, false, true, true],
+            vec![false, false, false, true],
+        ];
+        let clusters = cluster_tracks(4, 4, &gated);
+        assert_eq!(clusters.len(), 2, "should have 2 clusters");
     }
 }
