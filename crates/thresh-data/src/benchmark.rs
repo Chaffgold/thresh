@@ -912,11 +912,10 @@ pub fn run_adsb_benchmark(
     manifest: &ScenarioManifest,
     manifest_dir: &Path,
 ) -> core::result::Result<BenchmarkResult, String> {
-    use crate::adsb::{StateVector, extract_ground_truth, state_to_measurement};
+    use crate::adsb::{StateVector, extract_ground_truth};
     use rand::SeedableRng;
     use rand::rngs::StdRng;
-    use rand_distr::{Distribution, Normal};
-    use thresh_core::geodetic::wgs84_to_enu;
+    use rand_distr::Normal;
 
     let start = Instant::now();
     let params = &manifest.parameters;
