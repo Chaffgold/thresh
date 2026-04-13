@@ -1,0 +1,4355 @@
+{
+  "name": "sample",
+  "frames": [
+    {
+      "timestamp": 0.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            100.0,
+            200.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            500.0,
+            300.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            105.0,
+            197.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            508.0,
+            302.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            100.0,
+            200.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            500.0,
+            300.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 0.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            110.0,
+            202.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            492.5,
+            305.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            115.0,
+            199.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            500.5,
+            307.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            110.0,
+            202.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            492.5,
+            305.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 1.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            120.0,
+            205.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            485.0,
+            310.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            125.0,
+            202.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            493.0,
+            312.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            120.0,
+            205.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            485.0,
+            310.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 1.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            130.0,
+            207.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            477.5,
+            315.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            135.0,
+            204.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            485.5,
+            317.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            130.0,
+            207.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            477.5,
+            315.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 2.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            140.0,
+            210.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            470.0,
+            320.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            145.0,
+            207.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            478.0,
+            322.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            140.0,
+            210.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            470.0,
+            320.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 2.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            150.0,
+            212.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            462.5,
+            325.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            155.0,
+            209.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            470.5,
+            327.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            150.0,
+            212.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            462.5,
+            325.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 3.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            160.0,
+            215.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            455.0,
+            330.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            165.0,
+            212.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            463.0,
+            332.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            160.0,
+            215.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            455.0,
+            330.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 3.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            170.0,
+            217.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            447.5,
+            335.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            175.0,
+            214.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            455.5,
+            337.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            170.0,
+            217.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            447.5,
+            335.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 4.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            180.0,
+            220.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            440.0,
+            340.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            185.0,
+            217.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            448.0,
+            342.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            180.0,
+            220.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            440.0,
+            340.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 4.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            190.0,
+            222.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            432.5,
+            345.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            195.0,
+            219.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            440.5,
+            347.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            190.0,
+            222.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            432.5,
+            345.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 5.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            200.0,
+            225.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            425.0,
+            350.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            205.0,
+            222.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            433.0,
+            352.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            200.0,
+            225.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            425.0,
+            350.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 5.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            210.0,
+            227.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            417.5,
+            355.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            215.0,
+            224.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            425.5,
+            357.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            210.0,
+            227.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            417.5,
+            355.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 6.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            220.0,
+            230.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            410.0,
+            360.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            225.0,
+            227.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            418.0,
+            362.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            220.0,
+            230.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            410.0,
+            360.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 6.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            230.0,
+            232.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            402.5,
+            365.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            235.0,
+            229.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            410.5,
+            367.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            230.0,
+            232.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            402.5,
+            365.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 7.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            240.0,
+            235.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            395.0,
+            370.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            245.0,
+            232.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            403.0,
+            372.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            240.0,
+            235.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            395.0,
+            370.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 7.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            250.0,
+            237.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            387.5,
+            375.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            255.0,
+            234.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            395.5,
+            377.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            250.0,
+            237.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            387.5,
+            375.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 8.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            260.0,
+            240.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            380.0,
+            380.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            265.0,
+            237.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            388.0,
+            382.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            260.0,
+            240.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            380.0,
+            380.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 8.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            270.0,
+            242.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            372.5,
+            385.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            275.0,
+            239.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            380.5,
+            387.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            270.0,
+            242.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            372.5,
+            385.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 9.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            280.0,
+            245.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            365.0,
+            390.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            285.0,
+            242.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            373.0,
+            392.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            280.0,
+            245.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            365.0,
+            390.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 9.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            290.0,
+            247.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            357.5,
+            395.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            295.0,
+            244.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            365.5,
+            397.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            290.0,
+            247.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            357.5,
+            395.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 10.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            300.0,
+            250.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            350.0,
+            400.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            305.0,
+            247.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            358.0,
+            402.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            300.0,
+            250.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            350.0,
+            400.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 10.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            310.0,
+            252.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            342.5,
+            405.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            315.0,
+            249.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            350.5,
+            407.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            310.0,
+            252.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            342.5,
+            405.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 11.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            320.0,
+            255.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            335.0,
+            410.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            325.0,
+            252.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            343.0,
+            412.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            320.0,
+            255.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            335.0,
+            410.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 11.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            330.0,
+            257.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            327.5,
+            415.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            335.0,
+            254.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            335.5,
+            417.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            330.0,
+            257.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            327.5,
+            415.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 12.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            340.0,
+            260.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            320.0,
+            420.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            345.0,
+            257.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            328.0,
+            422.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            340.0,
+            260.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            320.0,
+            420.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 12.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            350.0,
+            262.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            312.5,
+            425.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            355.0,
+            259.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            320.5,
+            427.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            350.0,
+            262.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            312.5,
+            425.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 13.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            360.0,
+            265.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            305.0,
+            430.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            365.0,
+            262.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            313.0,
+            432.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            360.0,
+            265.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            305.0,
+            430.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 13.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            370.0,
+            267.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            297.5,
+            435.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            375.0,
+            264.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            305.5,
+            437.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            370.0,
+            267.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            297.5,
+            435.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 14.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            380.0,
+            270.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            290.0,
+            440.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            385.0,
+            267.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            298.0,
+            442.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            380.0,
+            270.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            290.0,
+            440.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 14.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            390.0,
+            272.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            282.5,
+            445.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            395.0,
+            269.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            290.5,
+            447.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            390.0,
+            272.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            282.5,
+            445.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 15.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            400.0,
+            275.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            275.0,
+            450.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            405.0,
+            272.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            283.0,
+            452.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            400.0,
+            275.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            275.0,
+            450.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 15.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            410.0,
+            277.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            267.5,
+            455.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            415.0,
+            274.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            275.5,
+            457.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            410.0,
+            277.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            267.5,
+            455.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 16.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            420.0,
+            280.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            260.0,
+            460.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            425.0,
+            277.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            268.0,
+            462.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            420.0,
+            280.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            260.0,
+            460.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 16.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            430.0,
+            282.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            252.5,
+            465.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            435.0,
+            279.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            260.5,
+            467.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            430.0,
+            282.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            252.5,
+            465.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 17.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            440.0,
+            285.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            245.0,
+            470.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            445.0,
+            282.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            253.0,
+            472.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            440.0,
+            285.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            245.0,
+            470.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 17.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            450.0,
+            287.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            237.5,
+            475.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            455.0,
+            284.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            245.5,
+            477.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            450.0,
+            287.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            237.5,
+            475.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 18.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            460.0,
+            290.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            230.0,
+            480.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            465.0,
+            287.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            238.0,
+            482.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            460.0,
+            290.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            230.0,
+            480.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 18.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            470.0,
+            292.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            222.5,
+            485.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            475.0,
+            289.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            230.5,
+            487.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            470.0,
+            292.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            222.5,
+            485.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 19.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            480.0,
+            295.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            215.0,
+            490.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            485.0,
+            292.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            223.0,
+            492.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            480.0,
+            295.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            215.0,
+            490.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 19.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            490.0,
+            297.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            207.5,
+            495.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            495.0,
+            294.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            215.5,
+            497.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            490.0,
+            297.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            207.5,
+            495.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 20.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            500.0,
+            300.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            200.0,
+            500.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            505.0,
+            297.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            208.0,
+            502.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            500.0,
+            300.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            200.0,
+            500.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 20.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            510.0,
+            302.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            192.5,
+            505.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            515.0,
+            299.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            200.5,
+            507.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            510.0,
+            302.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            192.5,
+            505.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 21.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            520.0,
+            305.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            185.0,
+            510.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            525.0,
+            302.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            193.0,
+            512.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            520.0,
+            305.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            185.0,
+            510.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 21.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            530.0,
+            307.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            177.5,
+            515.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            535.0,
+            304.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            185.5,
+            517.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            530.0,
+            307.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            177.5,
+            515.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 22.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            540.0,
+            310.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            170.0,
+            520.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            545.0,
+            307.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            178.0,
+            522.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            540.0,
+            310.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            170.0,
+            520.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 22.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            550.0,
+            312.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            162.5,
+            525.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            555.0,
+            309.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            170.5,
+            527.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            550.0,
+            312.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            162.5,
+            525.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 23.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            560.0,
+            315.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            155.0,
+            530.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            565.0,
+            312.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            163.0,
+            532.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            560.0,
+            315.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            155.0,
+            530.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 23.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            570.0,
+            317.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            147.5,
+            535.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            575.0,
+            314.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            155.5,
+            537.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            570.0,
+            317.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            147.5,
+            535.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 24.0,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            580.0,
+            320.0,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            140.0,
+            540.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            585.0,
+            317.0,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            148.0,
+            542.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            580.0,
+            320.0,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            140.0,
+            540.0,
+            0.0
+          ]
+        }
+      ]
+    },
+    {
+      "timestamp": 24.5,
+      "tracks": [
+        {
+          "id": 1,
+          "position": [
+            590.0,
+            322.5,
+            0.0
+          ],
+          "velocity": [
+            20.0,
+            5.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": "aircraft"
+        },
+        {
+          "id": 2,
+          "position": [
+            132.5,
+            545.0,
+            0.0
+          ],
+          "velocity": [
+            -15.0,
+            10.0,
+            0.0
+          ],
+          "covariance_diag": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "is_confirmed": true,
+          "class_label": null
+        }
+      ],
+      "detections": [
+        {
+          "position": [
+            595.0,
+            319.5,
+            0.0
+          ],
+          "sensor_id": 0
+        },
+        {
+          "position": [
+            140.5,
+            547.0,
+            0.0
+          ],
+          "sensor_id": 0
+        }
+      ],
+      "ground_truth": [
+        {
+          "id": 1,
+          "position": [
+            590.0,
+            322.5,
+            0.0
+          ]
+        },
+        {
+          "id": 2,
+          "position": [
+            132.5,
+            545.0,
+            0.0
+          ]
+        }
+      ]
+    }
+  ]
+}
