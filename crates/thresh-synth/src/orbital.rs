@@ -182,72 +182,96 @@ impl OrbitalState {
         let r_mag = self.radius();
         let v2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
 
-        // Specific angular momentum h = r × v
-        let h = [
-            r[1] * v[2] - r[2] * v[1],
-            r[2] * v[0] - r[0] * v[2],
-            r[0] * v[1] - r[1] * v[0],
-        ];
-        let h_mag = (h[0] * h[0] + h[1] * h[1] + h[2] * h[2]).sqrt();
+        let h = cross3(&r, &v);
+        let h_mag = mag3(&h);
 
-        // Node vector n = k × h
         let n = [-h[1], h[0], 0.0];
         let n_mag = (n[0] * n[0] + n[1] * n[1]).sqrt();
 
-        // Eccentricity vector
-        let rdotv = r[0] * v[0] + r[1] * v[1] + r[2] * v[2];
-        let e_vec = [
-            (v2 - GM_EARTH / r_mag) * r[0] / GM_EARTH - rdotv * v[0] / GM_EARTH,
-            (v2 - GM_EARTH / r_mag) * r[1] / GM_EARTH - rdotv * v[1] / GM_EARTH,
-            (v2 - GM_EARTH / r_mag) * r[2] / GM_EARTH - rdotv * v[2] / GM_EARTH,
-        ];
-        let ecc = (e_vec[0] * e_vec[0] + e_vec[1] * e_vec[1] + e_vec[2] * e_vec[2]).sqrt();
+        let rdotv = dot3(&r, &v);
+        let e_vec = eccentricity_vector(&r, &v, r_mag, v2, rdotv);
+        let ecc = mag3(&e_vec);
 
-        // Semi-major axis
         let sma = 1.0 / (2.0 / r_mag - v2 / GM_EARTH);
-
-        // Inclination
         let inc = (h[2] / h_mag).acos();
-
-        // RAAN
-        let raan = if n_mag > 1e-12 {
-            let val = (n[0] / n_mag).acos();
-            if n[1] >= 0.0 {
-                val
-            } else {
-                std::f64::consts::TAU - val
-            }
-        } else {
-            0.0
-        };
-
-        // Argument of periapsis
-        let argp = if n_mag > 1e-12 && ecc > 1e-12 {
-            let ndote = (n[0] * e_vec[0] + n[1] * e_vec[1]) / (n_mag * ecc);
-            let val = ndote.clamp(-1.0, 1.0).acos();
-            if e_vec[2] >= 0.0 {
-                val
-            } else {
-                std::f64::consts::TAU - val
-            }
-        } else {
-            0.0
-        };
-
-        // True anomaly
-        let true_anom = if ecc > 1e-12 {
-            let edotr = (e_vec[0] * r[0] + e_vec[1] * r[1] + e_vec[2] * r[2]) / (ecc * r_mag);
-            let val = edotr.clamp(-1.0, 1.0).acos();
-            if rdotv >= 0.0 {
-                val
-            } else {
-                std::f64::consts::TAU - val
-            }
-        } else {
-            0.0
-        };
+        let raan = compute_raan(&n, n_mag);
+        let argp = compute_argp(&n, n_mag, &e_vec, ecc);
+        let true_anom = compute_true_anomaly(&e_vec, ecc, &r, r_mag, rdotv);
 
         (sma, ecc, inc, raan, argp, true_anom)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Vector helpers for Keplerian conversion
+// ---------------------------------------------------------------------------
+
+/// Cross product of two 3-element arrays.
+fn cross3(a: &[f64; 3], b: &[f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// Dot product of two 3-element arrays.
+fn dot3(a: &[f64; 3], b: &[f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+/// Euclidean magnitude of a 3-element array.
+fn mag3(v: &[f64; 3]) -> f64 {
+    (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
+}
+
+/// Compute the eccentricity vector from position, velocity, and derived scalars.
+fn eccentricity_vector(r: &[f64; 3], v: &[f64; 3], r_mag: f64, v2: f64, rdotv: f64) -> [f64; 3] {
+    [
+        (v2 - GM_EARTH / r_mag) * r[0] / GM_EARTH - rdotv * v[0] / GM_EARTH,
+        (v2 - GM_EARTH / r_mag) * r[1] / GM_EARTH - rdotv * v[1] / GM_EARTH,
+        (v2 - GM_EARTH / r_mag) * r[2] / GM_EARTH - rdotv * v[2] / GM_EARTH,
+    ]
+}
+
+/// Compute right ascension of the ascending node from the node vector.
+fn compute_raan(n: &[f64; 3], n_mag: f64) -> f64 {
+    if n_mag <= 1e-12 {
+        return 0.0;
+    }
+    let val = (n[0] / n_mag).acos();
+    if n[1] >= 0.0 {
+        val
+    } else {
+        std::f64::consts::TAU - val
+    }
+}
+
+/// Compute argument of periapsis from node vector and eccentricity vector.
+fn compute_argp(n: &[f64; 3], n_mag: f64, e_vec: &[f64; 3], ecc: f64) -> f64 {
+    if n_mag <= 1e-12 || ecc <= 1e-12 {
+        return 0.0;
+    }
+    let ndote = (n[0] * e_vec[0] + n[1] * e_vec[1]) / (n_mag * ecc);
+    let val = ndote.clamp(-1.0, 1.0).acos();
+    if e_vec[2] >= 0.0 {
+        val
+    } else {
+        std::f64::consts::TAU - val
+    }
+}
+
+/// Compute true anomaly from eccentricity vector and position.
+fn compute_true_anomaly(e_vec: &[f64; 3], ecc: f64, r: &[f64; 3], r_mag: f64, rdotv: f64) -> f64 {
+    if ecc <= 1e-12 {
+        return 0.0;
+    }
+    let edotr = (e_vec[0] * r[0] + e_vec[1] * r[1] + e_vec[2] * r[2]) / (ecc * r_mag);
+    let val = edotr.clamp(-1.0, 1.0).acos();
+    if rdotv >= 0.0 {
+        val
+    } else {
+        std::f64::consts::TAU - val
     }
 }
 

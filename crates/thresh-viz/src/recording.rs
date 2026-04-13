@@ -208,58 +208,10 @@ impl VizFrame {
             .tracks
             .iter()
             .filter(|t| t.is_alive())
-            .map(|t| {
-                let s = &t.state;
-                let state_dim = s.len();
-                // State layout: [x, vx, y, vy, z, vz]
-                let position = [
-                    if state_dim > 0 { s[0] } else { 0.0 },
-                    if state_dim > 2 { s[2] } else { 0.0 },
-                    if state_dim > 4 { s[4] } else { 0.0 },
-                ];
-                let velocity = [
-                    if state_dim > 1 { s[1] } else { 0.0 },
-                    if state_dim > 3 { s[3] } else { 0.0 },
-                    if state_dim > 5 { s[5] } else { 0.0 },
-                ];
-
-                let cov = &t.covariance;
-                let cov_rows = cov.nrows();
-                let mut covariance_diag = [0.0; 6];
-                for i in 0..6.min(cov_rows) {
-                    covariance_diag[i] = cov[(i, i)];
-                }
-
-                let class_label = match t.class {
-                    thresh_core::track::TargetClass::Unknown => None,
-                    other => Some(format!("{other:?}")),
-                };
-
-                VizTrack {
-                    id: t.id.0,
-                    position,
-                    velocity,
-                    covariance_diag,
-                    is_confirmed: t.lifecycle == CoreTrackState::Confirmed,
-                    class_label,
-                }
-            })
+            .map(convert_track_to_viz)
             .collect();
 
-        let viz_detections = detections
-            .iter()
-            .map(|d| {
-                let pos = [
-                    if !d.is_empty() { d[0] } else { 0.0 },
-                    if d.len() > 1 { d[1] } else { 0.0 },
-                    if d.len() > 2 { d[2] } else { 0.0 },
-                ];
-                VizDetection {
-                    position: pos,
-                    sensor_id: 0,
-                }
-            })
-            .collect();
+        let viz_detections = detections.iter().map(convert_detection_to_viz).collect();
 
         let viz_gt = ground_truth
             .iter()
@@ -275,6 +227,66 @@ impl VizFrame {
             detections: viz_detections,
             ground_truth: viz_gt,
         }
+    }
+}
+
+/// Extract position from a 6D state vector `[x, vx, y, vy, z, vz]`.
+fn extract_position(state: &nalgebra::DVector<f64>) -> [f64; 3] {
+    let n = state.len();
+    [
+        if n > 0 { state[0] } else { 0.0 },
+        if n > 2 { state[2] } else { 0.0 },
+        if n > 4 { state[4] } else { 0.0 },
+    ]
+}
+
+/// Extract velocity from a 6D state vector `[x, vx, y, vy, z, vz]`.
+fn extract_velocity(state: &nalgebra::DVector<f64>) -> [f64; 3] {
+    let n = state.len();
+    [
+        if n > 1 { state[1] } else { 0.0 },
+        if n > 3 { state[3] } else { 0.0 },
+        if n > 5 { state[5] } else { 0.0 },
+    ]
+}
+
+/// Extract the leading diagonal entries from a covariance matrix.
+fn extract_covariance_diag(cov: &nalgebra::DMatrix<f64>) -> [f64; 6] {
+    let cov_rows = cov.nrows();
+    let mut diag = [0.0; 6];
+    for i in 0..6.min(cov_rows) {
+        diag[i] = cov[(i, i)];
+    }
+    diag
+}
+
+/// Convert a tracker track to a visualization track snapshot.
+fn convert_track_to_viz(t: &thresh_tracker::track::Track) -> VizTrack {
+    let class_label = match t.class {
+        thresh_core::track::TargetClass::Unknown => None,
+        other => Some(format!("{other:?}")),
+    };
+
+    VizTrack {
+        id: t.id.0,
+        position: extract_position(&t.state),
+        velocity: extract_velocity(&t.state),
+        covariance_diag: extract_covariance_diag(&t.covariance),
+        is_confirmed: t.lifecycle == CoreTrackState::Confirmed,
+        class_label,
+    }
+}
+
+/// Convert a detection measurement vector to a visualization detection.
+fn convert_detection_to_viz(d: &nalgebra::DVector<f64>) -> VizDetection {
+    let pos = [
+        if !d.is_empty() { d[0] } else { 0.0 },
+        if d.len() > 1 { d[1] } else { 0.0 },
+        if d.len() > 2 { d[2] } else { 0.0 },
+    ];
+    VizDetection {
+        position: pos,
+        sensor_id: 0,
     }
 }
 

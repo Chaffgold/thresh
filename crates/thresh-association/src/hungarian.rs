@@ -222,6 +222,22 @@ impl HungarianSolver {
 
     /// BFS augmenting path from `start_row` on the flat buffer.
     fn try_augment_from_flat(&mut self, start_row: usize, dim: usize) -> bool {
+        self.init_bfs_state(dim);
+        self.queue.push(start_row);
+
+        let terminal_col = self.bfs_find_free_column(dim);
+
+        match terminal_col {
+            Some(col) => {
+                self.flip_augmenting_path(col);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Reset BFS visited/parent buffers for a new augmenting-path search.
+    fn init_bfs_state(&mut self, dim: usize) {
         for v in &mut self.visited_col[..dim] {
             *v = false;
         }
@@ -229,9 +245,10 @@ impl HungarianSolver {
             *v = None;
         }
         self.queue.clear();
-        self.queue.push(start_row);
-        let mut terminal_col: Option<usize> = None;
+    }
 
+    /// BFS from enqueued rows, looking for a free (unassigned) column.
+    fn bfs_find_free_column(&mut self, dim: usize) -> Option<usize> {
         while let Some(r) = self.queue.pop() {
             for j in 0..dim {
                 if self.visited_col[j] || self.cost_buf[r * dim + j].abs() >= ZERO_EPS {
@@ -240,32 +257,26 @@ impl HungarianSolver {
                 self.visited_col[j] = true;
                 self.parent_row_for_col[j] = Some(r);
                 match self.col_assign[j] {
-                    None => {
-                        terminal_col = Some(j);
-                        break;
-                    }
+                    None => return Some(j),
                     Some(next_row) => self.queue.push(next_row),
                 }
             }
-            if terminal_col.is_some() {
-                break;
-            }
         }
+        None
+    }
 
-        if let Some(mut j) = terminal_col {
-            loop {
-                let r = self.parent_row_for_col[j].expect("augmenting path parent must be set");
-                let prev_col = self.row_assign[r];
-                self.col_assign[j] = Some(r);
-                self.row_assign[r] = Some(j);
-                match prev_col {
-                    None => break,
-                    Some(pc) => j = pc,
-                }
+    /// Flip edges along the augmenting path ending at `terminal_col`.
+    fn flip_augmenting_path(&mut self, terminal_col: usize) {
+        let mut j = terminal_col;
+        loop {
+            let r = self.parent_row_for_col[j].expect("augmenting path parent must be set");
+            let prev_col = self.row_assign[r];
+            self.col_assign[j] = Some(r);
+            self.row_assign[r] = Some(j);
+            match prev_col {
+                None => break,
+                Some(pc) => j = pc,
             }
-            true
-        } else {
-            false
         }
     }
 
@@ -274,63 +285,81 @@ impl HungarianSolver {
         self.augment_matching_flat(dim);
 
         loop {
-            let n_assigned = self.row_assign[..dim]
-                .iter()
-                .filter(|a| a.is_some())
-                .count();
-            if n_assigned == dim {
+            if self.is_fully_assigned(dim) {
                 return;
             }
 
-            // mark_cover on flat buffer
             self.mark_cover_flat(dim);
 
-            let covered_count = self.row_covered[..dim].iter().filter(|&&f| f).count()
-                + self.col_covered[..dim].iter().filter(|&&f| f).count();
-            if covered_count >= dim {
+            if self.is_fully_covered(dim) {
                 return;
             }
 
-            // min uncovered value
-            let mut min_val = f64::INFINITY;
-            for i in 0..dim {
-                if self.row_covered[i] {
-                    continue;
-                }
-                for j in 0..dim {
-                    if !self.col_covered[j] {
-                        let v = self.cost_buf[i * dim + j];
-                        if v < min_val {
-                            min_val = v;
-                        }
-                    }
-                }
-            }
+            let min_val = self.min_uncovered_value_flat(dim);
             if !min_val.is_finite() || min_val.abs() < 1e-15 {
                 return;
             }
 
-            // update labels
-            for i in 0..dim {
-                for j in 0..dim {
-                    let idx = i * dim + j;
-                    if !self.row_covered[i] && !self.col_covered[j] {
-                        self.cost_buf[idx] -= min_val;
-                    } else if self.row_covered[i] && self.col_covered[j] {
-                        self.cost_buf[idx] += min_val;
-                    }
-                }
-            }
-
-            // Re-run greedy + augment
+            self.update_labels_flat(dim, min_val);
             self.greedy_zero_flat(dim);
             self.augment_matching_flat(dim);
         }
     }
 
+    /// Check whether all rows have been assigned.
+    fn is_fully_assigned(&self, dim: usize) -> bool {
+        self.row_assign[..dim].iter().all(|a| a.is_some())
+    }
+
+    /// Check whether the cover count meets or exceeds `dim`.
+    fn is_fully_covered(&self, dim: usize) -> bool {
+        let covered = self.row_covered[..dim].iter().filter(|&&f| f).count()
+            + self.col_covered[..dim].iter().filter(|&&f| f).count();
+        covered >= dim
+    }
+
+    /// Find the smallest uncovered entry in the flat cost buffer.
+    fn min_uncovered_value_flat(&self, dim: usize) -> f64 {
+        let mut min_val = f64::INFINITY;
+        for i in 0..dim {
+            if self.row_covered[i] {
+                continue;
+            }
+            for j in 0..dim {
+                if !self.col_covered[j] {
+                    let v = self.cost_buf[i * dim + j];
+                    if v < min_val {
+                        min_val = v;
+                    }
+                }
+            }
+        }
+        min_val
+    }
+
+    /// Subtract `min_val` from uncovered entries, add to doubly-covered entries.
+    fn update_labels_flat(&mut self, dim: usize, min_val: f64) {
+        for i in 0..dim {
+            for j in 0..dim {
+                let idx = i * dim + j;
+                if !self.row_covered[i] && !self.col_covered[j] {
+                    self.cost_buf[idx] -= min_val;
+                } else if self.row_covered[i] && self.col_covered[j] {
+                    self.cost_buf[idx] += min_val;
+                }
+            }
+        }
+    }
+
     /// Compute minimum vertex cover (König marking) on the flat buffer.
     fn mark_cover_flat(&mut self, dim: usize) {
-        // Initialize: mark all unassigned rows.
+        self.init_marking(dim);
+        self.propagate_marking(dim);
+        self.finalize_cover(dim);
+    }
+
+    /// Initialize marking: mark all unassigned rows, clear column marks.
+    fn init_marking(&mut self, dim: usize) {
         self.unmarked_rows.clear();
         for i in 0..dim {
             if self.row_assign[i].is_none() {
@@ -343,35 +372,53 @@ impl HungarianSolver {
         for v in &mut self.col_covered[..dim] {
             *v = false;
         }
-        // col_marked is stored in col_covered for this phase.
+    }
+
+    /// Propagate marks: alternately mark columns with zeros in marked rows,
+    /// then mark rows assigned to newly marked columns.
+    fn propagate_marking(&mut self, dim: usize) {
         let mut changed = true;
         while changed {
             changed = false;
-            // Mark columns with zeros in marked rows.
-            for &r in &self.unmarked_rows {
-                for j in 0..dim {
-                    if !self.col_covered[j] && self.cost_buf[r * dim + j].abs() < ZERO_EPS {
-                        self.col_covered[j] = true;
-                        changed = true;
-                    }
-                }
-            }
-            // Mark rows assigned to marked columns.
-            let mut new_rows = Vec::new();
+            changed |= self.mark_cols_from_marked_rows(dim);
+            changed |= self.mark_rows_from_marked_cols(dim);
+        }
+    }
+
+    /// Mark columns that have a zero entry in any marked row.
+    fn mark_cols_from_marked_rows(&mut self, dim: usize) -> bool {
+        let mut changed = false;
+        for &r in &self.unmarked_rows {
             for j in 0..dim {
-                if let Some(r) = self.col_assign[j]
-                    && self.col_covered[j]
-                    && !self.row_marked[r]
-                {
-                    self.row_marked[r] = true;
-                    new_rows.push(r);
+                if !self.col_covered[j] && self.cost_buf[r * dim + j].abs() < ZERO_EPS {
+                    self.col_covered[j] = true;
                     changed = true;
                 }
             }
-            self.unmarked_rows.extend_from_slice(&new_rows);
         }
+        changed
+    }
 
-        // row_covered = !row_marked; col_covered stays as col_marked.
+    /// Mark rows assigned to marked columns and extend the unmarked_rows list.
+    fn mark_rows_from_marked_cols(&mut self, dim: usize) -> bool {
+        let mut changed = false;
+        let mut new_rows = Vec::new();
+        for j in 0..dim {
+            if let Some(r) = self.col_assign[j]
+                && self.col_covered[j]
+                && !self.row_marked[r]
+            {
+                self.row_marked[r] = true;
+                new_rows.push(r);
+                changed = true;
+            }
+        }
+        self.unmarked_rows.extend_from_slice(&new_rows);
+        changed
+    }
+
+    /// Convert marking to cover: row_covered = !row_marked.
+    fn finalize_cover(&mut self, dim: usize) {
         for i in 0..dim {
             self.row_covered[i] = !self.row_marked[i];
         }

@@ -359,66 +359,80 @@ impl FederatedFusionManager {
             return Vec::new();
         }
 
-        // Seed with first site
+        let mut fused = self.seed_from_first_site();
+
+        for (_source_id, incoming) in self.site_tracks.iter().skip(1) {
+            fused = self.incorporate_site(&fused, incoming, gate);
+        }
+
+        self.prune_timed_out(&mut fused);
+        self.fused_tracks = fused.clone();
+        fused
+    }
+
+    /// Clone the first site's tracks as the initial fused set.
+    fn seed_from_first_site(&self) -> Vec<TrackExchange> {
         let mut fused: Vec<TrackExchange> = self.site_tracks[0].1.clone();
-        // Mark fused source_id = 0
         for t in &mut fused {
             t.source_id = 0;
         }
+        fused
+    }
 
-        // Sequentially incorporate each additional site
-        for (_source_id, incoming) in self.site_tracks.iter().skip(1) {
-            let matches = t2t_association(&fused, incoming, gate);
+    /// Incorporate a single site's tracks into the current fused set.
+    fn incorporate_site(
+        &self,
+        fused: &[TrackExchange],
+        incoming: &[TrackExchange],
+        gate: f64,
+    ) -> Vec<TrackExchange> {
+        let matches = t2t_association(fused, incoming, gate);
 
-            let mut matched_fused: Vec<bool> = vec![false; fused.len()];
-            let mut matched_incoming: Vec<bool> = vec![false; incoming.len()];
-            let mut new_fused = Vec::new();
+        let mut matched_fused = vec![false; fused.len()];
+        let mut matched_incoming = vec![false; incoming.len()];
+        let mut new_fused = Vec::new();
 
-            // Fuse matched pairs using the configured mode
-            for &(fi, ii) in &matches {
-                matched_fused[fi] = true;
-                matched_incoming[ii] = true;
-                let fused_pair = match self.mode {
-                    FusionMode::Naive => fuse_naive(&fused[fi], &incoming[ii]),
-                    FusionMode::CovarianceIntersection => {
-                        fuse_covariance_intersection(&fused[fi], &incoming[ii])
-                    }
-                    FusionMode::OptimalWithCrossCovariance => {
-                        if let Some(p12) =
-                            self.get_cross_covariance(fused[fi].track_id, incoming[ii].track_id)
-                        {
-                            let p12 = p12.clone();
-                            fuse_optimal(&fused[fi], &incoming[ii], &p12).unwrap_or_else(|| {
-                                fuse_covariance_intersection(&fused[fi], &incoming[ii])
-                            })
-                        } else {
-                            fuse_covariance_intersection(&fused[fi], &incoming[ii])
-                        }
-                    }
-                };
-                new_fused.push(fused_pair);
-            }
-
-            // Keep unmatched fused tracks (coasting)
-            for (i, track) in fused.iter().enumerate() {
-                if !matched_fused[i] {
-                    new_fused.push(track.clone());
-                }
-            }
-
-            // Birth unmatched incoming tracks
-            for (i, track) in incoming.iter().enumerate() {
-                if !matched_incoming[i] {
-                    let mut t = track.clone();
-                    t.source_id = 0; // now part of fused picture
-                    new_fused.push(t);
-                }
-            }
-
-            fused = new_fused;
+        for &(fi, ii) in &matches {
+            matched_fused[fi] = true;
+            matched_incoming[ii] = true;
+            new_fused.push(self.fuse_pair(&fused[fi], &incoming[ii]));
         }
 
-        // Prune fused tracks that have timed out.
+        for (i, track) in fused.iter().enumerate() {
+            if !matched_fused[i] {
+                new_fused.push(track.clone());
+            }
+        }
+
+        for (i, track) in incoming.iter().enumerate() {
+            if !matched_incoming[i] {
+                let mut t = track.clone();
+                t.source_id = 0;
+                new_fused.push(t);
+            }
+        }
+
+        new_fused
+    }
+
+    /// Fuse a single matched pair using the configured fusion mode.
+    fn fuse_pair(&self, a: &TrackExchange, b: &TrackExchange) -> TrackExchange {
+        match self.mode {
+            FusionMode::Naive => fuse_naive(a, b),
+            FusionMode::CovarianceIntersection => fuse_covariance_intersection(a, b),
+            FusionMode::OptimalWithCrossCovariance => {
+                if let Some(p12) = self.get_cross_covariance(a.track_id, b.track_id) {
+                    let p12 = p12.clone();
+                    fuse_optimal(a, b, &p12).unwrap_or_else(|| fuse_covariance_intersection(a, b))
+                } else {
+                    fuse_covariance_intersection(a, b)
+                }
+            }
+        }
+    }
+
+    /// Remove fused tracks older than the configured timeout.
+    fn prune_timed_out(&self, fused: &mut Vec<TrackExchange>) {
         if let Some(timeout) = self.fused_track_timeout_s {
             let latest_time = fused
                 .iter()
@@ -426,11 +440,6 @@ impl FederatedFusionManager {
                 .fold(f64::NEG_INFINITY, f64::max);
             fused.retain(|t| latest_time - t.timestamp <= timeout);
         }
-
-        // Persist for `get_fused_tracks()`.
-        self.fused_tracks = fused.clone();
-
-        fused
     }
 }
 

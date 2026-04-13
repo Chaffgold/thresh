@@ -170,38 +170,54 @@ impl MultiObjectTracker {
 
     /// Run one tracking cycle: predict all tracks, associate with detections, update.
     pub fn step(&mut self, detections: &[DVector<f64>], dt: f64) {
-        let is_imm = self.imm_config_factory.is_some();
+        self.predict_all_tracks(dt);
+        let (associated_tracks, associated_dets) = self.associate_and_update(detections);
+        self.apply_lifecycle(&associated_tracks);
+        self.birth_unassigned(detections, &associated_dets);
+        self.remove_deleted_tracks();
+    }
 
-        // 1. Predict all tracks
-        if is_imm {
-            // IMM predict: interaction + predict + combine for each track
-            for track in &mut self.tracks {
-                if !track.is_alive() {
-                    continue;
-                }
-                if let Some(key) = track.imm_key
-                    && let Some(imm) = self.imm_filters.get_mut(&key)
-                {
-                    let (state, cov) = imm.predict(dt);
-                    track.state = state;
-                    track.covariance = cov;
-                }
-            }
+    /// Predict all alive tracks forward by `dt`.
+    fn predict_all_tracks(&mut self, dt: f64) {
+        if self.imm_config_factory.is_some() {
+            self.predict_imm(dt);
         } else {
-            let model = ConstantVelocity::new(5.0);
-            let f = model.transition_matrix(dt);
-            let q = model.process_noise(dt);
-            #[cfg(feature = "parallel")]
-            predict_all_parallel(&mut self.tracks, &f, &q);
-            #[cfg(not(feature = "parallel"))]
-            predict_all(&mut self.tracks, &f, &q);
+            self.predict_single_model(dt);
         }
+    }
 
-        // 2-4. Associate and update based on strategy.
+    /// IMM predict: interaction + predict + combine for each alive track.
+    fn predict_imm(&mut self, dt: f64) {
+        for track in &mut self.tracks {
+            if !track.is_alive() {
+                continue;
+            }
+            if let Some(key) = track.imm_key
+                && let Some(imm) = self.imm_filters.get_mut(&key)
+            {
+                let (state, cov) = imm.predict(dt);
+                track.state = state;
+                track.covariance = cov;
+            }
+        }
+    }
+
+    /// Single-model (CV) predict for all alive tracks.
+    fn predict_single_model(&mut self, dt: f64) {
+        let model = ConstantVelocity::new(5.0);
+        let f = model.transition_matrix(dt);
+        let q = model.process_noise(dt);
+        #[cfg(feature = "parallel")]
+        predict_all_parallel(&mut self.tracks, &f, &q);
+        #[cfg(not(feature = "parallel"))]
+        predict_all(&mut self.tracks, &f, &q);
+    }
+
+    /// Associate detections with tracks and apply measurement updates.
+    ///
+    /// Returns `(associated_tracks, associated_dets)` boolean flags.
+    fn associate_and_update(&mut self, detections: &[DVector<f64>]) -> (Vec<bool>, Vec<bool>) {
         let alive = alive_indices(&self.tracks);
-        let h = &self.observation_matrix;
-        let r = &self.measurement_noise;
-
         let mut associated_tracks = vec![false; alive.len()];
         let mut associated_dets = vec![false; detections.len()];
 
@@ -212,72 +228,14 @@ impl MultiObjectTracker {
             } => {
                 let p_d = *detection_prob;
                 let clutter = *clutter_density;
-
-                // Build JpdaTrack list from alive tracks.
-                let jpda_tracks: Vec<JpdaTrack> = alive
-                    .iter()
-                    .map(|&ti| {
-                        let pred_z = h * &self.tracks[ti].state;
-                        let s = h * &self.tracks[ti].covariance * h.transpose() + r;
-                        JpdaTrack {
-                            predicted_measurement: pred_z,
-                            innovation_covariance: s,
-                        }
-                    })
-                    .collect();
-
-                let states: Vec<DVector<f64>> = alive
-                    .iter()
-                    .map(|&ti| self.tracks[ti].state.clone())
-                    .collect();
-                let covariances: Vec<DMatrix<f64>> = alive
-                    .iter()
-                    .map(|&ti| self.tracks[ti].covariance.clone())
-                    .collect();
-
-                let results = jpda_associate_and_update(
-                    &jpda_tracks,
-                    &states,
-                    &covariances,
+                self.step_jpda(
                     detections,
-                    h,
-                    self.gate_threshold,
+                    &alive,
                     p_d,
                     clutter,
+                    &mut associated_tracks,
+                    &mut associated_dets,
                 );
-
-                // Apply JPDA results back to tracks.
-                for (ai, update) in results.iter().enumerate() {
-                    let ti = alive[ai];
-                    self.tracks[ti].state = update.state.clone();
-                    self.tracks[ti].covariance = update.covariance.clone();
-
-                    // Track is considered "hit" if miss probability < 0.5.
-                    if update.miss_probability < 0.5 {
-                        associated_tracks[ai] = true;
-                    }
-                }
-
-                // For JPDA, a detection is considered "associated" if at least one
-                // track has a significant association probability for it.
-                // We check if any track pulled strongly toward each detection.
-                // Use a simpler heuristic: a detection is associated if it was
-                // within the gate of any track that was marked as hit.
-                for (dj, det) in detections.iter().enumerate() {
-                    for (ai, jpda_track) in jpda_tracks.iter().enumerate() {
-                        if associated_tracks[ai] {
-                            let d2 = mahalanobis_squared(
-                                det,
-                                &jpda_track.predicted_measurement,
-                                &jpda_track.innovation_covariance,
-                            );
-                            if d2 <= self.gate_threshold {
-                                associated_dets[dj] = true;
-                                break;
-                            }
-                        }
-                    }
-                }
             }
             AssociationStrategy::Mht {
                 detection_prob,
@@ -286,125 +244,259 @@ impl MultiObjectTracker {
             } => {
                 let p_d = *detection_prob;
                 let clutter = *clutter_density;
-                let n_tracks = alive.len();
-                let n_dets = detections.len();
-
-                // Build log-likelihood matrix from Mahalanobis distances.
-                let mut likelihoods = vec![vec![f64::NEG_INFINITY; n_dets]; n_tracks];
-                for (ai, &ti) in alive.iter().enumerate() {
-                    let pred_z = h * &self.tracks[ti].state;
-                    let s = h * &self.tracks[ti].covariance * h.transpose() + r;
-                    for (dj, det) in detections.iter().enumerate() {
-                        let d2 = mahalanobis_squared(det, &pred_z, &s);
-                        if d2 <= self.gate_threshold {
-                            // Log-likelihood: log(p_d * N(z; z_hat, S))
-                            let m = det.nrows() as f64;
-                            let det_s = s.determinant();
-                            if det_s > 0.0 {
-                                let log_norm =
-                                    -0.5 * (m * (2.0 * std::f64::consts::PI).ln() + det_s.ln());
-                                let log_exp = -0.5 * d2;
-                                likelihoods[ai][dj] = p_d.ln() + log_norm + log_exp;
-                            }
-                        }
-                    }
-                }
-
-                // Expand hypothesis tree and prune.
-                let gate = clutter.ln(); // log-likelihood threshold
-                let tree = self
-                    .mht_tree
-                    .get_or_insert_with(|| HypothesisTree::new(100, 3));
-                tree.expand(n_tracks, n_dets, &likelihoods, gate);
-                tree.prune_k_best();
-
-                // Extract best hypothesis for hard assignment.
-                let assignments = tree.consistent_track_assignments();
-
-                // Apply assignments like Hungarian: matched pairs get KF update.
-                for (track_idx, det_idx) in &assignments {
-                    if let Some(dj) = det_idx
-                        && *track_idx < n_tracks
-                        && *dj < n_dets
-                    {
-                        associated_tracks[*track_idx] = true;
-                        associated_dets[*dj] = true;
-
-                        let ti = alive[*track_idx];
-                        if is_imm {
-                            if let Some(key) = self.tracks[ti].imm_key
-                                && let Some(imm) = self.imm_filters.get_mut(&key)
-                            {
-                                let result = imm.update_with_measurement(&detections[*dj], h, r);
-                                self.tracks[ti].state = result.state;
-                                self.tracks[ti].covariance = result.covariance;
-                                self.tracks[ti].dominant_mode = Some(result.dominant_mode);
-                                self.tracks[ti].mode_probabilities =
-                                    Some(result.mode_probabilities);
-                            }
-                        } else {
-                            let track = &self.tracks[ti];
-                            let mut kf =
-                                KalmanFilter::new(track.state.clone(), track.covariance.clone());
-                            kf.update(&detections[*dj], h, r);
-                            self.tracks[ti].state = kf.x;
-                            self.tracks[ti].covariance = kf.p;
-                        }
-                    }
-                }
+                self.step_mht(
+                    detections,
+                    &alive,
+                    p_d,
+                    clutter,
+                    &mut associated_tracks,
+                    &mut associated_dets,
+                );
             }
             AssociationStrategy::Hungarian => {
-                // Existing Hungarian path.
-                #[cfg(feature = "parallel")]
-                let cost_matrix = build_track_cost_matrix_parallel(
-                    &self.tracks,
-                    &alive,
-                    h,
-                    r,
+                self.step_hungarian(
                     detections,
-                    self.gate_threshold,
-                );
-                #[cfg(not(feature = "parallel"))]
-                let cost_matrix = build_track_cost_matrix(
-                    &self.tracks,
                     &alive,
-                    h,
-                    r,
-                    detections,
-                    self.gate_threshold,
+                    &mut associated_tracks,
+                    &mut associated_dets,
                 );
+            }
+        }
 
-                let result = hungarian_assignment(&cost_matrix, self.gate_threshold);
+        (associated_tracks, associated_dets)
+    }
 
-                for &(ai, dj) in &result.matches {
-                    associated_tracks[ai] = true;
-                    associated_dets[dj] = true;
+    /// JPDA association and update path.
+    fn step_jpda(
+        &mut self,
+        detections: &[DVector<f64>],
+        alive: &[usize],
+        p_d: f64,
+        clutter: f64,
+        associated_tracks: &mut [bool],
+        associated_dets: &mut [bool],
+    ) {
+        let h = &self.observation_matrix;
+        let r = &self.measurement_noise;
 
-                    let ti = alive[ai];
+        let jpda_tracks: Vec<JpdaTrack> = alive
+            .iter()
+            .map(|&ti| {
+                let pred_z = h * &self.tracks[ti].state;
+                let s = h * &self.tracks[ti].covariance * h.transpose() + r;
+                JpdaTrack {
+                    predicted_measurement: pred_z,
+                    innovation_covariance: s,
+                }
+            })
+            .collect();
 
-                    if is_imm {
-                        if let Some(key) = self.tracks[ti].imm_key
-                            && let Some(imm) = self.imm_filters.get_mut(&key)
-                        {
-                            let result = imm.update_with_measurement(&detections[dj], h, r);
-                            self.tracks[ti].state = result.state;
-                            self.tracks[ti].covariance = result.covariance;
-                            self.tracks[ti].dominant_mode = Some(result.dominant_mode);
-                            self.tracks[ti].mode_probabilities = Some(result.mode_probabilities);
-                        }
-                    } else {
-                        let track = &self.tracks[ti];
-                        let mut kf =
-                            KalmanFilter::new(track.state.clone(), track.covariance.clone());
-                        kf.update(&detections[dj], h, r);
-                        self.tracks[ti].state = kf.x;
-                        self.tracks[ti].covariance = kf.p;
+        let states: Vec<DVector<f64>> = alive
+            .iter()
+            .map(|&ti| self.tracks[ti].state.clone())
+            .collect();
+        let covariances: Vec<DMatrix<f64>> = alive
+            .iter()
+            .map(|&ti| self.tracks[ti].covariance.clone())
+            .collect();
+
+        let results = jpda_associate_and_update(
+            &jpda_tracks,
+            &states,
+            &covariances,
+            detections,
+            h,
+            self.gate_threshold,
+            p_d,
+            clutter,
+        );
+
+        for (ai, update) in results.iter().enumerate() {
+            let ti = alive[ai];
+            self.tracks[ti].state = update.state.clone();
+            self.tracks[ti].covariance = update.covariance.clone();
+            if update.miss_probability < 0.5 {
+                associated_tracks[ai] = true;
+            }
+        }
+
+        self.mark_jpda_associated_dets(
+            detections,
+            &jpda_tracks,
+            associated_tracks,
+            associated_dets,
+        );
+    }
+
+    /// Mark detections as associated if they are within the gate of any hit track.
+    fn mark_jpda_associated_dets(
+        &self,
+        detections: &[DVector<f64>],
+        jpda_tracks: &[JpdaTrack],
+        associated_tracks: &[bool],
+        associated_dets: &mut [bool],
+    ) {
+        for (dj, det) in detections.iter().enumerate() {
+            for (ai, jpda_track) in jpda_tracks.iter().enumerate() {
+                if associated_tracks[ai] {
+                    let d2 = mahalanobis_squared(
+                        det,
+                        &jpda_track.predicted_measurement,
+                        &jpda_track.innovation_covariance,
+                    );
+                    if d2 <= self.gate_threshold {
+                        associated_dets[dj] = true;
+                        break;
                     }
                 }
             }
         }
+    }
 
-        // 5. Lifecycle updates
+    /// MHT association and update path.
+    fn step_mht(
+        &mut self,
+        detections: &[DVector<f64>],
+        alive: &[usize],
+        p_d: f64,
+        clutter: f64,
+        associated_tracks: &mut [bool],
+        associated_dets: &mut [bool],
+    ) {
+        let is_imm = self.imm_config_factory.is_some();
+        let n_tracks = alive.len();
+        let n_dets = detections.len();
+
+        let likelihoods = self.build_mht_likelihoods(alive, detections, p_d);
+
+        let gate = clutter.ln();
+        let tree = self
+            .mht_tree
+            .get_or_insert_with(|| HypothesisTree::new(100, 3));
+        tree.expand(n_tracks, n_dets, &likelihoods, gate);
+        tree.prune_k_best();
+
+        let assignments = tree.consistent_track_assignments();
+        let h = self.observation_matrix.clone();
+        let r = self.measurement_noise.clone();
+
+        for (track_idx, det_idx) in &assignments {
+            if let Some(dj) = det_idx
+                && *track_idx < n_tracks
+                && *dj < n_dets
+            {
+                associated_tracks[*track_idx] = true;
+                associated_dets[*dj] = true;
+                let ti = alive[*track_idx];
+                self.apply_measurement_update(ti, &detections[*dj], &h, &r, is_imm);
+            }
+        }
+    }
+
+    /// Build MHT log-likelihood matrix from Mahalanobis distances.
+    fn build_mht_likelihoods(
+        &self,
+        alive: &[usize],
+        detections: &[DVector<f64>],
+        p_d: f64,
+    ) -> Vec<Vec<f64>> {
+        let h = &self.observation_matrix;
+        let r = &self.measurement_noise;
+        let n_dets = detections.len();
+        let n_tracks = alive.len();
+
+        let mut likelihoods = vec![vec![f64::NEG_INFINITY; n_dets]; n_tracks];
+        for (ai, &ti) in alive.iter().enumerate() {
+            let pred_z = h * &self.tracks[ti].state;
+            let s = h * &self.tracks[ti].covariance * h.transpose() + r;
+            for (dj, det) in detections.iter().enumerate() {
+                let d2 = mahalanobis_squared(det, &pred_z, &s);
+                if d2 <= self.gate_threshold {
+                    let m = det.nrows() as f64;
+                    let det_s = s.determinant();
+                    if det_s > 0.0 {
+                        let log_norm = -0.5 * (m * (2.0 * std::f64::consts::PI).ln() + det_s.ln());
+                        let log_exp = -0.5 * d2;
+                        likelihoods[ai][dj] = p_d.ln() + log_norm + log_exp;
+                    }
+                }
+            }
+        }
+        likelihoods
+    }
+
+    /// Hungarian association and update path.
+    fn step_hungarian(
+        &mut self,
+        detections: &[DVector<f64>],
+        alive: &[usize],
+        associated_tracks: &mut [bool],
+        associated_dets: &mut [bool],
+    ) {
+        let is_imm = self.imm_config_factory.is_some();
+
+        #[cfg(feature = "parallel")]
+        let cost_matrix = build_track_cost_matrix_parallel(
+            &self.tracks,
+            alive,
+            &self.observation_matrix,
+            &self.measurement_noise,
+            detections,
+            self.gate_threshold,
+        );
+        #[cfg(not(feature = "parallel"))]
+        let cost_matrix = build_track_cost_matrix(
+            &self.tracks,
+            alive,
+            &self.observation_matrix,
+            &self.measurement_noise,
+            detections,
+            self.gate_threshold,
+        );
+
+        let result = hungarian_assignment(&cost_matrix, self.gate_threshold);
+        let h = self.observation_matrix.clone();
+        let r = self.measurement_noise.clone();
+
+        for &(ai, dj) in &result.matches {
+            associated_tracks[ai] = true;
+            associated_dets[dj] = true;
+            let ti = alive[ai];
+            self.apply_measurement_update(ti, &detections[dj], &h, &r, is_imm);
+        }
+    }
+
+    /// Apply a single measurement update to a track (IMM or KF).
+    fn apply_measurement_update(
+        &mut self,
+        ti: usize,
+        detection: &DVector<f64>,
+        h: &DMatrix<f64>,
+        r: &DMatrix<f64>,
+        is_imm: bool,
+    ) {
+        if is_imm {
+            if let Some(key) = self.tracks[ti].imm_key
+                && let Some(imm) = self.imm_filters.get_mut(&key)
+            {
+                let result = imm.update_with_measurement(detection, h, r);
+                self.tracks[ti].state = result.state;
+                self.tracks[ti].covariance = result.covariance;
+                self.tracks[ti].dominant_mode = Some(result.dominant_mode);
+                self.tracks[ti].mode_probabilities = Some(result.mode_probabilities);
+            }
+        } else {
+            let track = &self.tracks[ti];
+            let mut kf = KalmanFilter::new(track.state.clone(), track.covariance.clone());
+            kf.update(detection, h, r);
+            self.tracks[ti].state = kf.x;
+            self.tracks[ti].covariance = kf.p;
+        }
+    }
+
+    /// Apply lifecycle updates to all alive tracks based on association results.
+    fn apply_lifecycle(&mut self, associated_tracks: &[bool]) {
+        let alive = alive_indices(&self.tracks);
         let heads = self.heads.clone();
         for (ai, &ti) in alive.iter().enumerate() {
             let was_associated = associated_tracks[ai];
@@ -416,15 +508,19 @@ impl MultiObjectTracker {
                 &head.deletion,
             );
         }
+    }
 
-        // 6. Birth new tracks from unassigned detections
+    /// Birth new tracks from unassigned detections.
+    fn birth_unassigned(&mut self, detections: &[DVector<f64>], associated_dets: &[bool]) {
         for (dj, det) in detections.iter().enumerate() {
             if !associated_dets[dj] {
                 self.birth_track(det, TargetClass::Unknown);
             }
         }
+    }
 
-        // 7. Remove deleted tracks — also clean up IMM filters for deleted tracks
+    /// Remove deleted tracks and clean up their IMM filters.
+    fn remove_deleted_tracks(&mut self) {
         let imm_filters = &mut self.imm_filters;
         self.tracks.retain(|t| {
             if t.lifecycle == TrackState::Deleted {

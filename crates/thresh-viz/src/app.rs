@@ -204,72 +204,105 @@ impl ThreshVizApp {
             .data_aspect(1.0)
             .legend(Legend::default())
             .show(ui, |plot_ui| {
-                // Confirmed tracks as colored circles.
-                for track in &frame.tracks {
-                    let color = id_to_color(track.id);
-                    let radius = if self.selected_track == Some(track.id) {
-                        9.0
-                    } else {
-                        6.0
-                    };
-                    plot_ui.points(
-                        Points::new(vec![[track.position[0], track.position[1]]])
-                            .radius(radius)
-                            .color(color)
-                            .name(format!("Track {}", track.id)),
-                    );
-                }
-
-                // Track trails (previous N frames).
-                if self.show_trails {
-                    for track in &frame.tracks {
-                        let trail = self.get_trail(track.id, recording);
-                        if trail.len() >= 2 {
-                            plot_ui.line(
-                                Line::new(PlotPoints::new(trail))
-                                    .color(id_to_color(track.id))
-                                    .width(1.5),
-                            );
-                        }
-                    }
-                }
-
-                // Detections as gray diamonds.
-                if self.show_detections {
-                    let det_points: Vec<[f64; 2]> = frame
-                        .detections
-                        .iter()
-                        .map(|d| [d.position[0], d.position[1]])
-                        .collect();
-                    if !det_points.is_empty() {
-                        plot_ui.points(
-                            Points::new(det_points)
-                                .radius(4.0)
-                                .color(egui::Color32::GRAY)
-                                .shape(MarkerShape::Diamond)
-                                .name("Detections"),
-                        );
-                    }
-                }
-
-                // Ground truth as green crosses.
-                if self.show_ground_truth {
-                    let gt_points: Vec<[f64; 2]> = frame
-                        .ground_truth
-                        .iter()
-                        .map(|g| [g.position[0], g.position[1]])
-                        .collect();
-                    if !gt_points.is_empty() {
-                        plot_ui.points(
-                            Points::new(gt_points)
-                                .radius(5.0)
-                                .color(egui::Color32::GREEN)
-                                .shape(MarkerShape::Cross)
-                                .name("Ground Truth"),
-                        );
-                    }
-                }
+                self.render_track_markers(plot_ui, frame);
+                self.render_trail_lines(plot_ui, frame, recording);
+                self.render_detection_markers(plot_ui, frame);
+                self.render_ground_truth_markers(plot_ui, frame);
             });
+    }
+
+    /// Draw colored circle markers for each track.
+    fn render_track_markers(
+        &self,
+        plot_ui: &mut egui_plot::PlotUi,
+        frame: &crate::recording::VizFrame,
+    ) {
+        for track in &frame.tracks {
+            let color = id_to_color(track.id);
+            let radius = if self.selected_track == Some(track.id) {
+                9.0
+            } else {
+                6.0
+            };
+            plot_ui.points(
+                Points::new(vec![[track.position[0], track.position[1]]])
+                    .radius(radius)
+                    .color(color)
+                    .name(format!("Track {}", track.id)),
+            );
+        }
+    }
+
+    /// Draw trail lines for each track across recent frames.
+    fn render_trail_lines(
+        &self,
+        plot_ui: &mut egui_plot::PlotUi,
+        frame: &crate::recording::VizFrame,
+        recording: &Recording,
+    ) {
+        if !self.show_trails {
+            return;
+        }
+        for track in &frame.tracks {
+            let trail = self.get_trail(track.id, recording);
+            if trail.len() >= 2 {
+                plot_ui.line(
+                    Line::new(PlotPoints::new(trail))
+                        .color(id_to_color(track.id))
+                        .width(1.5),
+                );
+            }
+        }
+    }
+
+    /// Draw gray diamond markers for detections.
+    fn render_detection_markers(
+        &self,
+        plot_ui: &mut egui_plot::PlotUi,
+        frame: &crate::recording::VizFrame,
+    ) {
+        if !self.show_detections {
+            return;
+        }
+        let det_points: Vec<[f64; 2]> = frame
+            .detections
+            .iter()
+            .map(|d| [d.position[0], d.position[1]])
+            .collect();
+        if !det_points.is_empty() {
+            plot_ui.points(
+                Points::new(det_points)
+                    .radius(4.0)
+                    .color(egui::Color32::GRAY)
+                    .shape(MarkerShape::Diamond)
+                    .name("Detections"),
+            );
+        }
+    }
+
+    /// Draw green cross markers for ground truth positions.
+    fn render_ground_truth_markers(
+        &self,
+        plot_ui: &mut egui_plot::PlotUi,
+        frame: &crate::recording::VizFrame,
+    ) {
+        if !self.show_ground_truth {
+            return;
+        }
+        let gt_points: Vec<[f64; 2]> = frame
+            .ground_truth
+            .iter()
+            .map(|g| [g.position[0], g.position[1]])
+            .collect();
+        if !gt_points.is_empty() {
+            plot_ui.points(
+                Points::new(gt_points)
+                    .radius(5.0)
+                    .color(egui::Color32::GREEN)
+                    .shape(MarkerShape::Cross)
+                    .name("Ground Truth"),
+            );
+        }
     }
 }
 
