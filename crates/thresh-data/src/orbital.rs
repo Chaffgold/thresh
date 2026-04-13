@@ -617,7 +617,7 @@ impl PassAccumulator {
     /// End the current pass and return it if it exceeds the elevation threshold.
     fn end_pass(&mut self, end_time_min: f64, min_elevation_rad: f64) -> Option<Pass> {
         self.in_pass = false;
-        (self.max_el >= min_elevation_rad).then(|| Pass {
+        (self.max_el >= min_elevation_rad).then_some(Pass {
             start_time_min: self.pass_start,
             end_time_min,
             max_elevation_rad: self.max_el,
@@ -637,20 +637,19 @@ fn extract_passes(enu_positions: &[EnuPosition], min_elevation_rad: f64) -> Vec<
                 acc.begin_pass(pos.time_since_epoch_min, elevation);
             }
             acc.update_max(pos.time_since_epoch_min, elevation);
-        } else if acc.in_pass {
-            if let Some(pass) = acc.end_pass(pos.time_since_epoch_min, min_elevation_rad) {
-                passes.push(pass);
-            }
+        } else if acc.in_pass
+            && let Some(pass) = acc.end_pass(pos.time_since_epoch_min, min_elevation_rad)
+        {
+            passes.push(pass);
         }
     }
 
     // Handle pass extending to end of search window.
-    if acc.in_pass {
-        if let Some(last) = enu_positions.last() {
-            if let Some(pass) = acc.end_pass(last.time_since_epoch_min, min_elevation_rad) {
-                passes.push(pass);
-            }
-        }
+    if acc.in_pass
+        && let Some(last) = enu_positions.last()
+        && let Some(pass) = acc.end_pass(last.time_since_epoch_min, min_elevation_rad)
+    {
+        passes.push(pass);
     }
 
     passes

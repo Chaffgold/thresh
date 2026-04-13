@@ -633,7 +633,7 @@ pub fn run_orbital_benchmark(
     };
     use rand::SeedableRng;
     use rand::rngs::StdRng;
-    use rand_distr::{Distribution, Normal};
+    use rand_distr::Normal;
 
     let start = Instant::now();
     let params = &manifest.parameters;
@@ -785,6 +785,10 @@ pub fn run_orbital_benchmark(
     ))
 }
 
+/// Detections + ground truth for a single benchmark step.
+#[cfg(feature = "orbital")]
+type StepData = (Vec<DVector<f64>>, Vec<(u64, [f64; 3])>);
+
 /// Collect ground-truth positions and noisy radar detections for a single
 /// orbital benchmark step.
 #[cfg(feature = "orbital")]
@@ -795,9 +799,7 @@ fn collect_orbital_step_data(
     normal: &rand_distr::Normal<f64>,
     rng: &mut impl rand::Rng,
     t_min: f64,
-) -> (Vec<DVector<f64>>, Vec<(u64, [f64; 3])>) {
-    use rand_distr::Distribution;
-
+) -> StepData {
     let mut detections: Vec<DVector<f64>> = Vec::new();
     let mut gt_positions: Vec<(u64, [f64; 3])> = Vec::new();
 
@@ -820,10 +822,9 @@ fn collect_gt_for_step(
     if let Some(pos) = enu
         .iter()
         .find(|p| (p.time_since_epoch_min - t_min).abs() < 1e-6)
+        && pos.up > 0.0
     {
-        if pos.up > 0.0 {
-            gt_positions.push((u64::from(id), [pos.east, pos.north, pos.up]));
-        }
+        gt_positions.push((u64::from(id), [pos.east, pos.north, pos.up]));
     }
 }
 
