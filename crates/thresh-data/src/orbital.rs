@@ -580,49 +580,76 @@ fn enu_elevation(pos: &EnuPosition) -> f64 {
 }
 
 /// Extract contiguous above-horizon pass segments from a sequence of ENU positions.
-fn extract_passes(enu_positions: &[EnuPosition], min_elevation_rad: f64) -> Vec<Pass> {
-    let mut passes = Vec::new();
-    let mut in_pass = false;
-    let mut pass_start = 0.0_f64;
-    let mut max_el = 0.0_f64;
-    let mut max_el_time = 0.0_f64;
+/// Mutable state accumulated while scanning ENU positions for satellite passes.
+struct PassAccumulator {
+    in_pass: bool,
+    pass_start: f64,
+    max_el: f64,
+    max_el_time: f64,
+}
 
-    for pos in enu_positions {
-        let elevation = enu_elevation(pos);
-
-        if elevation > 0.0 {
-            if !in_pass {
-                in_pass = true;
-                pass_start = pos.time_since_epoch_min;
-                max_el = elevation;
-                max_el_time = pos.time_since_epoch_min;
-            }
-            if elevation > max_el {
-                max_el = elevation;
-                max_el_time = pos.time_since_epoch_min;
-            }
-        } else if in_pass {
-            if max_el >= min_elevation_rad {
-                passes.push(Pass {
-                    start_time_min: pass_start,
-                    end_time_min: pos.time_since_epoch_min,
-                    max_elevation_rad: max_el,
-                    max_elevation_time_min: max_el_time,
-                });
-            }
-            in_pass = false;
+impl PassAccumulator {
+    fn new() -> Self {
+        Self {
+            in_pass: false,
+            pass_start: 0.0,
+            max_el: 0.0,
+            max_el_time: 0.0,
         }
     }
 
-    // Handle pass that extends to end of search window
-    if in_pass && max_el >= min_elevation_rad {
+    /// Start a new pass at the given position.
+    fn begin_pass(&mut self, time_min: f64, elevation: f64) {
+        self.in_pass = true;
+        self.pass_start = time_min;
+        self.max_el = elevation;
+        self.max_el_time = time_min;
+    }
+
+    /// Update the running maximum elevation if this sample is higher.
+    fn update_max(&mut self, time_min: f64, elevation: f64) {
+        if elevation > self.max_el {
+            self.max_el = elevation;
+            self.max_el_time = time_min;
+        }
+    }
+
+    /// End the current pass and return it if it exceeds the elevation threshold.
+    fn end_pass(&mut self, end_time_min: f64, min_elevation_rad: f64) -> Option<Pass> {
+        self.in_pass = false;
+        (self.max_el >= min_elevation_rad).then(|| Pass {
+            start_time_min: self.pass_start,
+            end_time_min,
+            max_elevation_rad: self.max_el,
+            max_elevation_time_min: self.max_el_time,
+        })
+    }
+}
+
+fn extract_passes(enu_positions: &[EnuPosition], min_elevation_rad: f64) -> Vec<Pass> {
+    let mut passes = Vec::new();
+    let mut acc = PassAccumulator::new();
+
+    for pos in enu_positions {
+        let elevation = enu_elevation(pos);
+        if elevation > 0.0 {
+            if !acc.in_pass {
+                acc.begin_pass(pos.time_since_epoch_min, elevation);
+            }
+            acc.update_max(pos.time_since_epoch_min, elevation);
+        } else if acc.in_pass {
+            if let Some(pass) = acc.end_pass(pos.time_since_epoch_min, min_elevation_rad) {
+                passes.push(pass);
+            }
+        }
+    }
+
+    // Handle pass extending to end of search window.
+    if acc.in_pass {
         if let Some(last) = enu_positions.last() {
-            passes.push(Pass {
-                start_time_min: pass_start,
-                end_time_min: last.time_since_epoch_min,
-                max_elevation_rad: max_el,
-                max_elevation_time_min: max_el_time,
-            });
+            if let Some(pass) = acc.end_pass(last.time_since_epoch_min, min_elevation_rad) {
+                passes.push(pass);
+            }
         }
     }
 

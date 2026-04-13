@@ -99,58 +99,73 @@ fn registration_from_config(cfg: &OthrConfig) -> OthrSensorRegistration {
     }
 }
 
+fn generate_stereo_detection(
+    wp: &Waypoint,
+    cfg: &OthrConfig,
+    reg: &OthrSensorRegistration,
+    center: (f64, f64),
+    rng: &mut StdRng,
+) -> Vec<DVector<f64>> {
+    if let Some(m) = generate_othr(wp, cfg, 12.0, rng)
+        && let Some(det) = othr_to_stereographic(&m, reg, wp.position[2], center.0, center.1)
+    {
+        vec![det]
+    } else {
+        vec![]
+    }
+}
+
+fn stereo_truth_position(
+    wp: &Waypoint,
+    reg: &OthrSensorRegistration,
+    center: (f64, f64),
+) -> (f64, f64) {
+    let truth_range = (wp.position[0].powi(2) + wp.position[1].powi(2)).sqrt();
+    let truth_az = wp.position[0].atan2(wp.position[1]);
+    let (truth_lat, truth_lon) = vincenty_direct(
+        reg.transmitter_lat_rad,
+        reg.transmitter_lon_rad,
+        truth_az,
+        truth_range,
+    );
+    stereographic_project(truth_lat, truth_lon, center.0, center.1)
+}
+
+fn min_alive_track_error(
+    tracker: &MultiObjectTrackerStereographic,
+    tx: f64,
+    ty: f64,
+) -> Option<f64> {
+    tracker
+        .tracks
+        .iter()
+        .filter(|t| t.lifecycle != thresh_core::track::TrackState::Deleted)
+        .map(|t| {
+            let dx = t.state[0] - tx;
+            let dy = t.state[2] - ty;
+            (dx * dx + dy * dy).sqrt()
+        })
+        .reduce(f64::min)
+}
+
 #[test]
 fn stereographic_tracker_tracks_across_othr_coverage() {
     let mut cfg = OthrConfig::rothr();
     cfg.base_p_detection = 1.0;
     let reg = registration_from_config(&cfg);
-
     let center = recommended_center(&[(reg.transmitter_lat_rad, reg.transmitter_lon_rad)]);
-
-    // Target starts at 1200 km and moves to ~3000 km — full coverage sweep.
     let waypoints = radial_waypoints(250.0, 1.0, 1_200_000.0, 3_000_000.0);
 
     let mut tracker = MultiObjectTrackerStereographic::new(center.0, center.1, 15.0, 100.0);
     let mut rng = StdRng::seed_from_u64(17);
-
     let mut errors_m: Vec<f64> = Vec::new();
 
     for wp in &waypoints {
-        // Generate synthetic OTHR measurement in the transmitter-local ENU.
-        let mut dets: Vec<DVector<f64>> = Vec::new();
-        if let Some(m) = generate_othr(wp, &cfg, 12.0, &mut rng)
-            && let Some(det) = othr_to_stereographic(&m, &reg, wp.position[2], center.0, center.1)
-        {
-            dets.push(det);
-        }
+        let dets = generate_stereo_detection(wp, &cfg, &reg, center, &mut rng);
         tracker.step(&dets, 1.0);
 
-        // Evaluate the best track against the projected ground truth.
-        // Ground truth in the stereographic plane: propagate the ideal
-        // waypoint through Vincenty from the transmitter and project.
-        let truth_range = (wp.position[0].powi(2) + wp.position[1].powi(2)).sqrt();
-        let truth_az = wp.position[0].atan2(wp.position[1]);
-        let (truth_lat, truth_lon) = vincenty_direct(
-            reg.transmitter_lat_rad,
-            reg.transmitter_lon_rad,
-            truth_az,
-            truth_range,
-        );
-        let (tx, ty) = stereographic_project(truth_lat, truth_lon, center.0, center.1);
-
-        if let Some(err) = tracker
-            .tracks
-            .iter()
-            .filter(|t| t.lifecycle != thresh_core::track::TrackState::Deleted)
-            .map(|t| {
-                let dx = t.state[0] - tx;
-                let dy = t.state[2] - ty;
-                (dx * dx + dy * dy).sqrt()
-            })
-            .fold(None::<f64>, |acc, e| {
-                Some(acc.map_or(e, |a| if e.total_cmp(&a).is_lt() { e } else { a }))
-            })
-        {
+        let (tx, ty) = stereo_truth_position(wp, &reg, center);
+        if let Some(err) = min_alive_track_error(&tracker, tx, ty) {
             errors_m.push(err);
         }
     }
@@ -161,11 +176,8 @@ fn stereographic_tracker_tracks_across_othr_coverage() {
         "track should have been confirmed over the sweep"
     );
 
-    // Tail mean should be within a few OTHR range sigmas.
     assert!(errors_m.len() >= 20);
-    let n = errors_m.len();
-    let tail = &errors_m[n - 20..];
-    let mean_tail: f64 = tail.iter().sum::<f64>() / tail.len() as f64;
+    let mean_tail = tail_mean(&errors_m, 20);
     assert!(
         mean_tail < 200_000.0,
         "tail mean error too large: {mean_tail} m"

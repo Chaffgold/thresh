@@ -52,44 +52,52 @@ fn advance_segment_step(
     dt: f64,
 ) {
     match segment_type {
-        SegmentType::Cv => {
-            *pos += *vel * dt;
-        }
-        SegmentType::Ca { acceleration } => {
-            let acc = Vector3::from_row_slice(acceleration);
-            *pos += *vel * dt + acc * 0.5 * dt * dt;
-            *vel += acc * dt;
-        }
-        SegmentType::Ctrv { turn_rate } => {
-            let omega = *turn_rate;
-            let speed = (vel.x * vel.x + vel.y * vel.y).sqrt();
-            let heading = vel.y.atan2(vel.x);
-            let new_heading = heading + omega * dt;
-
-            if omega.abs() < 1e-8 {
-                *pos += *vel * dt;
-            } else {
-                let r = speed / omega;
-                pos.x += r * (new_heading.sin() - heading.sin());
-                pos.y += r * (-new_heading.cos() + heading.cos());
-                pos.z += vel.z * dt;
-            }
-            vel.x = speed * new_heading.cos();
-            vel.y = speed * new_heading.sin();
-        }
+        SegmentType::Cv => step_cv(pos, vel, dt),
+        SegmentType::Ca { acceleration } => step_ca(pos, vel, acceleration, dt),
+        SegmentType::Ctrv { turn_rate } => step_ctrv(pos, vel, *turn_rate, dt),
         SegmentType::Ballistic { drag_coefficient } => {
-            let drag = *drag_coefficient;
-            let speed = vel.norm();
-            let drag_force = if speed > 1e-10 {
-                *vel * (-drag * speed)
-            } else {
-                Vector3::zeros()
-            };
-            let acc = drag_force + Vector3::new(0.0, 0.0, -GRAVITY);
-            *pos += *vel * dt + acc * 0.5 * dt * dt;
-            *vel += acc * dt;
+            step_ballistic(pos, vel, *drag_coefficient, dt)
         }
     }
+}
+
+fn step_cv(pos: &mut Vector3<f64>, vel: &Vector3<f64>, dt: f64) {
+    *pos += *vel * dt;
+}
+
+fn step_ca(pos: &mut Vector3<f64>, vel: &mut Vector3<f64>, acceleration: &[f64; 3], dt: f64) {
+    let acc = Vector3::from_row_slice(acceleration);
+    *pos += *vel * dt + acc * 0.5 * dt * dt;
+    *vel += acc * dt;
+}
+
+fn step_ctrv(pos: &mut Vector3<f64>, vel: &mut Vector3<f64>, omega: f64, dt: f64) {
+    let speed = (vel.x * vel.x + vel.y * vel.y).sqrt();
+    let heading = vel.y.atan2(vel.x);
+    let new_heading = heading + omega * dt;
+
+    if omega.abs() < 1e-8 {
+        *pos += *vel * dt;
+    } else {
+        let r = speed / omega;
+        pos.x += r * (new_heading.sin() - heading.sin());
+        pos.y += r * (-new_heading.cos() + heading.cos());
+        pos.z += vel.z * dt;
+    }
+    vel.x = speed * new_heading.cos();
+    vel.y = speed * new_heading.sin();
+}
+
+fn step_ballistic(pos: &mut Vector3<f64>, vel: &mut Vector3<f64>, drag: f64, dt: f64) {
+    let speed = vel.norm();
+    let drag_force = if speed > 1e-10 {
+        *vel * (-drag * speed)
+    } else {
+        Vector3::zeros()
+    };
+    let acc = drag_force + Vector3::new(0.0, 0.0, -GRAVITY);
+    *pos += *vel * dt + acc * 0.5 * dt * dt;
+    *vel += acc * dt;
 }
 
 impl Trajectory {
