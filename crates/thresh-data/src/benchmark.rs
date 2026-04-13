@@ -995,16 +995,12 @@ pub fn run_adsb_benchmark(
     // Detections binned by integer step index.
     let mut rng = StdRng::seed_from_u64(0xAD5B_5A5A_5A5A_5A5A_u64);
     let normal = Normal::new(0.0, 1.0).unwrap();
-    let mut dets_by_step = bin_adsb_detections(
-        &states,
-        params,
-        t0,
-        ref_lat_rad,
-        ref_lon_rad,
-        *ref_alt_m,
-        &normal,
-        &mut rng,
-    );
+    let enu_ref = EnuRef {
+        lat_rad: ref_lat_rad,
+        lon_rad: ref_lon_rad,
+        alt_m: *ref_alt_m,
+    };
+    let mut dets_by_step = bin_adsb_detections(&states, params, t0, &enu_ref, &normal, &mut rng);
 
     // Ground truth binned by step, using the 1-Hz-interpolated entries.
     let mut gt_by_step: std::collections::BTreeMap<i64, Vec<(u64, [f64; 3])>> =
@@ -1068,18 +1064,27 @@ pub fn run_adsb_benchmark(
     ))
 }
 
+/// ENU reference point for ADS-B measurement conversion.
+#[cfg(feature = "adsb")]
+struct EnuRef {
+    lat_rad: f64,
+    lon_rad: f64,
+    alt_m: f64,
+}
+
 /// Bin ADS-B state vectors into per-step noisy ENU detection vectors.
 #[cfg(feature = "adsb")]
 fn bin_adsb_detections(
     states: &[crate::adsb::StateVector],
     params: &ScenarioParameters,
     t0: f64,
-    ref_lat_rad: f64,
-    ref_lon_rad: f64,
-    ref_alt_m: f64,
+    enu_ref: &EnuRef,
     normal: &rand_distr::Normal<f64>,
     rng: &mut impl rand::Rng,
 ) -> std::collections::BTreeMap<i64, Vec<DVector<f64>>> {
+    let ref_lat_rad = enu_ref.lat_rad;
+    let ref_lon_rad = enu_ref.lon_rad;
+    let ref_alt_m = enu_ref.alt_m;
     use crate::adsb::state_to_measurement;
     use rand_distr::Distribution;
     use thresh_core::geodetic::wgs84_to_enu;
