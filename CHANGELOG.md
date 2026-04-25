@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Work in progress toward 0.3.0. Develop carries `version = "0.3.0-dev"`. The dated `[0.3.0]` section will be filled in at release-prep time.
+
+JPDA and MHT data association, SafeTensors weight loading, Rust-native DETR detection (no ONNX Runtime required), `thresh-viz` track visualization GUI, and a comprehensive cognitive complexity refactor.
+
+### Added
+
+#### JPDA and MHT Data Association
+- `jpda` module in `thresh-association` implementing Joint Probabilistic Data Association with soft assignment probabilities across all track-detection pairs (validation gating, joint event enumeration, marginal association probabilities). Integrates into the tracker via `AssociationStrategy::Jpda`.
+- `mht` module implementing Multi-Hypothesis Tracking with a hypothesis tree, deferred hard decisions, N-scan pruning, and clutter-rejection via track-quality scoring. Integrates via `AssociationStrategy::Mht`.
+- `MultiObjectTracker` now accepts `AssociationStrategy` (Hungarian | JPDA | MHT) — selectable at construction.
+- Crossing-tracks integration test demonstrates JPDA produces better MOTA than Hungarian on tightly-spaced targets; dense-clutter test (`mht_dense_clutter_maintains_track`) verifies MHT robustness with 10 false alarms per frame.
+
+#### SafeTensors Weight Loading
+- `WeightLoader` trait + `SafeTensorsLoader` implementation in `thresh-core::weights` and `thresh-inference::weights` mapping named tensors to `nalgebra` matrices with shape validation on load.
+- `WeightSet` API for organized access to detector weight collections.
+- `OnnxDetector` reload-with-weights stub returns a structured error (full hot-swap deferred to future ONNX Runtime work).
+- `scripts/generate_test_weights.py` produces `test-data/models/test_weights.safetensors` for CI and integration tests.
+
+#### Rust-Native DETR Detector
+- `NativeDetector` in `thresh-inference::native_detector` — a pure-Rust simplified DETR decoder (6 transformer layers, 256-dim embeddings, 8 attention heads) implementing the `DetectionPipeline` trait. Removes the ONNX Runtime dependency for the default detection path.
+- Building blocks: `relu`, `softmax_rows`, `layer_norm`, multi-head attention, FFN, decoder layer, detection head (class + bbox).
+- `NativeDetector::from_safetensors()` constructor wiring the SafeTensors loader to architecture weights.
+- 11 unit tests covering forward-pass shapes; CPU-only inference latency benchmark.
+
+#### Track Visualization (`thresh-viz`)
+- New `crates/thresh-viz` crate with a native `egui` + `eframe` desktop GUI for real-time and recorded track visualization.
+- 2D bird's-eye-view plot rendering color-coded track trails, measurement scatter, and association lines at ≥30 FPS.
+- Real-time metric sidebar (MOTA, MOTP, track count, confirmed/tentative/lost breakdown).
+- JSON recording format (`Recording`, `RecordingFrame`) with `--recording <file.json>` CLI flag for offline playback.
+- Sample recording at `crates/thresh-viz/test-data/sample_recording.json` for manual exploration.
+
+### Changed
+- All 19 SonarCloud `rust:S3776` cognitive complexity violations resolved via phase-helper decomposition (see CLAUDE.md style guide). Touched: `hungarian.rs`, `adsb.rs::extract_ground_truth`, `orbital.rs` (RK4 stages, `extract_passes`, `trajectory step`), and stereographic tracker tests. `bin_adsb_detections` argument list grouped into an `EnuRef` struct.
+- `MultiObjectTracker` integration: `step_detections` now dispatches through the configured `AssociationStrategy`.
+
+### Notes
+- `thresh-viz` is a workspace member but is **not** in `default-members` — build it explicitly with `cargo build -p thresh-viz` or `cargo run -p thresh-viz`.
+
 ## [0.2.0] - 2026-04-12
 
 Major feature release: IMM adaptive filtering, streaming tracker, track-to-track fusion, detection pipeline, Python bindings, and performance optimizations.
