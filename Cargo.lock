@@ -4100,7 +4100,7 @@ dependencies = [
 
 [[package]]
 name = "thresh"
-version = "0.2.0"
+version = "0.3.0-dev"
 dependencies = [
  "nalgebra",
  "rand 0.9.2",
@@ -4118,7 +4118,7 @@ dependencies = [
 
 [[package]]
 name = "thresh-association"
-version = "0.2.0"
+version = "0.3.0-dev"
 dependencies = [
  "criterion",
  "nalgebra",
@@ -4128,7 +4128,7 @@ dependencies = [
 
 [[package]]
 name = "thresh-bridge"
-version = "0.2.0"
+version = "0.3.0-dev"
 dependencies = [
  "nalgebra",
  "pyo3",
@@ -4137,7 +4137,7 @@ dependencies = [
 
 [[package]]
 name = "thresh-core"
-version = "0.2.0"
+version = "0.3.0-dev"
 dependencies = [
  "nalgebra",
  "serde",
@@ -4147,7 +4147,7 @@ dependencies = [
 
 [[package]]
 name = "thresh-data"
-version = "0.2.0"
+version = "0.3.0-dev"
 dependencies = [
  "csv",
  "nalgebra",
@@ -4168,7 +4168,7 @@ dependencies = [
 
 [[package]]
 name = "thresh-eval"
-version = "0.2.0"
+version = "0.3.0-dev"
 dependencies = [
  "serde",
  "serde_json",
@@ -4178,7 +4178,7 @@ dependencies = [
 
 [[package]]
 name = "thresh-filter"
-version = "0.2.0"
+version = "0.3.0-dev"
 dependencies = [
  "criterion",
  "nalgebra",
@@ -4187,7 +4187,7 @@ dependencies = [
 
 [[package]]
 name = "thresh-fusion"
-version = "0.2.0"
+version = "0.3.0-dev"
 dependencies = [
  "nalgebra",
  "thresh-association",
@@ -4196,7 +4196,7 @@ dependencies = [
 
 [[package]]
 name = "thresh-inference"
-version = "0.2.0"
+version = "0.3.0-dev"
 dependencies = [
  "nalgebra",
  "ort",
@@ -4206,7 +4206,7 @@ dependencies = [
 
 [[package]]
 name = "thresh-py"
-version = "0.2.0"
+version = "0.3.0-dev"
 dependencies = [
  "nalgebra",
  "pyo3",
@@ -4219,7 +4219,7 @@ dependencies = [
 
 [[package]]
 name = "thresh-synth"
-version = "0.2.0"
+version = "0.3.0-dev"
 dependencies = [
  "nalgebra",
  "pyo3",
@@ -4232,7 +4232,7 @@ dependencies = [
 
 [[package]]
 name = "thresh-tracker"
-version = "0.2.0"
+version = "0.3.0-dev"
 dependencies = [
  "criterion",
  "nalgebra",
@@ -4252,7 +4252,7 @@ dependencies = [
 
 [[package]]
 name = "thresh-viz"
-version = "0.2.0"
+version = "0.3.0-dev"
 dependencies = [
  "eframe",
  "egui",
