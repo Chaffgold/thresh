@@ -9,6 +9,9 @@ on:
     - cron: '0 6 * * 1'   # Weekly Monday 06:00 UTC
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -Dwarnings
@@ -135,6 +138,8 @@ jobs:
   python-tests:
     name: Python tests
     runs-on: ubuntu-latest
+    env:
+      VIRTUAL_ENV: ${{ github.workspace }}/.venv
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -142,12 +147,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install Python deps
-        run: pip install maturin pytest numpy
+      - name: Create virtualenv and install Python deps
+        run: |
+          python -m venv "$VIRTUAL_ENV"
+          "$VIRTUAL_ENV/bin/pip" install --upgrade pip
+          "$VIRTUAL_ENV/bin/pip" install maturin pytest numpy
       - name: Build and install thresh-py
-        run: cd crates/thresh-py && maturin develop
+        run: |
+          export PATH="$VIRTUAL_ENV/bin:$PATH"
+          cd crates/thresh-py && maturin develop
       - name: Run pytest
-        run: pytest tests/python/ -v
+        run: |
+          export PATH="$VIRTUAL_ENV/bin:$PATH"
+          pytest tests/python/ -v
 
   adsb-benchmark-gate:
     # Same regression gate pattern as synth-benchmark-gate / orbital-benchmark-gate,

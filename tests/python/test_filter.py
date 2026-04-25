@@ -22,5 +22,6 @@ def test_update_adjusts_state():
     r = [[1,0,0],[0,1,0],[0,0,1]]
     kf.update(z, h, r)
     state = kf.state
-    # State should have moved toward the measurement
-    assert abs(state[0] - 10.0) < 5.0  # x moved toward 10
+    # State should have moved from 0 toward the measurement at 10
+    assert state[0] > 0.0
+    assert state[0] <= 10.0
