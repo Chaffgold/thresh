@@ -4257,6 +4257,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui_plot",
+ "image",
  "nalgebra",
  "serde",
  "serde_json",
@@ -4264,6 +4265,7 @@ dependencies = [
  "thresh-core",
  "thresh-eval",
  "thresh-tracker",
+ "tokio",
 ]
 
 [[package]]

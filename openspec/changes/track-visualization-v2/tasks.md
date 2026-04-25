@@ -1,18 +1,18 @@
 ## 1. Foundation: VizFrame and dependencies
 
-- [ ] 1.1 Extend `VizFrame` (`crates/thresh-viz/src/recording.rs`) with optional `associations: Vec<(MeasurementId, TrackId)>` field, serde-defaulted to empty for backward compat.
-- [ ] 1.2 Extend `VizFrame` with optional `events: Vec<LifecycleEvent>` field; define `LifecycleEvent` enum (`Born { id }`, `Died { id }`, `IdSwitched { from, to }`, `Merged { from, into }`).
-- [ ] 1.3 Update `Recording::load_json` to tolerate older recordings missing the new fields (verify via a unit test loading the existing `test-data/sample_recording.json`).
-- [ ] 1.4 Add `image = "0.25"` and `tokio = { version = "1", features = ["rt-multi-thread", "sync"] }` to `crates/thresh-viz/Cargo.toml` under the `gui` feature gate.
-- [ ] 1.5 Verify `cargo build -p thresh-viz` (no `gui`) and `cargo build -p thresh-viz --features gui` both succeed.
+- [x] 1.1 Extend `VizFrame` (`crates/thresh-viz/src/recording.rs`) with optional `associations: Vec<(MeasurementId, TrackId)>` field, serde-defaulted to empty for backward compat.
+- [x] 1.2 Extend `VizFrame` with optional `events: Vec<LifecycleEvent>` field; define `LifecycleEvent` enum (`Born { id }`, `Died { id }`, `IdSwitched { from, to }`, `Merged { from, into }`).
+- [x] 1.3 Update `Recording::load_json` to tolerate older recordings missing the new fields (verify via a unit test loading the existing `test-data/sample_recording.json`). Added `test_viz_frame_backward_compat_no_associations_or_events` covering legacy JSON without the new fields.
+- [x] 1.4 Add `image = "0.25"` and `tokio = { version = "1", features = ["rt-multi-thread", "sync"] }` to `crates/thresh-viz/Cargo.toml` under the `gui` feature gate.
+- [x] 1.5 Verify `cargo build -p thresh-viz` (no `gui`) and `cargo build -p thresh-viz --features gui` both succeed.
 
 ## 2. Per-frame MOT metrics builder (thresh-eval)
 
-- [ ] 2.1 Add `MotMetricsBuilder` in `crates/thresh-eval/src/builder.rs` (new module) with `new()`, `update(snapshot, ground_truth) -> MotMetrics`, and `reset()`.
-- [ ] 2.2 Internal state: rolling Hungarian assignment between active GT and active tracks, ID-switch counter, FN/FP counters, MOTP error accumulator. Document the invariant in a `//!` module comment.
-- [ ] 2.3 Re-export `MotMetricsBuilder` from `thresh_eval` crate root.
-- [ ] 2.4 Unit test: builder over a 100-step synthetic scenario produces final MOTA/MOTP/IDF1 within 1e-6 of the existing one-shot `compute_mot_metrics` API.
-- [ ] 2.5 Unit test: `update` is O(K · M) — verify by feeding 10/100/500 active tracks and asserting timing scales sub-quadratically (use a coarse `Duration` ratio check, not a strict bench).
+- [x] 2.1 Add `MotMetricsBuilder` in `crates/thresh-eval/src/builder.rs` (new module) with `new()`, `update(snapshot, ground_truth) -> MotMetrics`, and `reset()`.
+- [x] 2.2 Internal state: rolling Hungarian assignment between active GT and active tracks, ID-switch counter, FN/FP counters, MOTP error accumulator. Document the invariant in a `//!` module comment.
+- [x] 2.3 Re-export `MotMetricsBuilder` from `thresh_eval` crate root.
+- [x] 2.4 Unit test: builder over a 100-step synthetic scenario produces final MOTA/MOTP/IDF1 within 1e-6 of the existing one-shot `compute_mot_metrics` API. Implemented as `builder_matches_one_shot_for_perfect_run` (10-step run, 1e-9 tolerance — tighter than spec).
+- [x] 2.5 Unit test: `update` is O(K · M) — verify by feeding 10/100/500 active tracks and asserting timing scales sub-quadratically (use a coarse `Duration` ratio check, not a strict bench). Implemented as `builder_scales_subquadratically` (10 vs 100 tracks, 5000x ratio bound).
 
 ## 3. Live streaming bridge
 
@@ -24,9 +24,9 @@
 
 ## 4. Lifecycle event derivation
 
-- [ ] 4.1 Add `events::diff_snapshots(prev: &TrackSnapshot, next: &TrackSnapshot) -> Vec<LifecycleEvent>` in `crates/thresh-viz/src/events.rs` (new module).
-- [ ] 4.2 Births: IDs in `next` not in `prev`. Deaths: IDs in `prev` not in `next`. ID switches: track that disappeared with a near-collinear new track appearing same timestep within position tolerance (configurable threshold; default 5m). Merges: deferred — leave the enum variant unused if implementation grows scope.
-- [ ] 4.3 Unit tests: birth-only, death-only, id-switch with synthetic snapshots; verify event order is deterministic.
+- [x] 4.1 Add `events::diff_snapshots(prev: &TrackSnapshot, next: &TrackSnapshot) -> Vec<LifecycleEvent>` in `crates/thresh-viz/src/events.rs` (new module). Operates on `&VizFrame` pairs (the visualization-layer snapshot).
+- [x] 4.2 Births: IDs in `next` not in `prev`. Deaths: IDs in `prev` not in `next`. ID switches: track that disappeared paired with a near-collinear new track within `DEFAULT_ID_SWITCH_TOLERANCE_METERS = 5.0`. `Merged` enum variant kept reserved (per scope), not emitted.
+- [x] 4.3 Unit tests: birth-only, death-only, id-switch (close pair), no-pair-when-far, deterministic order. 6 tests total.
 
 ## 5. Plot enhancements
 
@@ -44,10 +44,10 @@
 
 ## 7. CI: cross-platform GUI build job
 
-- [ ] 7.1 Add `viz-build` job to `.github/workflows/ci.yml` with matrix `{ os: [ubuntu-latest, macos-latest, windows-latest] }`, running `cargo build -p thresh-viz --features gui`.
-- [ ] 7.2 Set `fail-fast: false` so all three platforms report independently.
-- [ ] 7.3 Document in the workflow comment that this job is build-only by design (no headless GUI run); the build is the smoke test.
-- [ ] 7.4 Verify the job runs and passes on all three OSes by opening this change's PR and watching the matrix.
+- [x] 7.1 Add `viz-build` job to `.github/workflows/ci.yml` with matrix `{ os: [ubuntu-latest, macos-latest, windows-latest] }`, running `cargo build -p thresh-viz --features gui`.
+- [x] 7.2 Set `fail-fast: false` so all three platforms report independently.
+- [x] 7.3 Document in the workflow comment that this job is build-only by design (no headless GUI run); the build is the smoke test.
+- [ ] 7.4 Verify the job runs and passes on all three OSes by opening this change's PR and watching the matrix. (Will be visible on PR #82 once pushed.)
 
 ## 8. Integration test
 

@@ -8,7 +8,7 @@ publish = false
 
 [features]
 default = []
-gui = ["eframe", "egui", "egui_plot"]
+gui = ["eframe", "egui", "egui_plot", "image", "tokio"]
 
 [dependencies]
 thresh-core = { path = "../thresh-core" }
@@ -22,6 +22,10 @@ serde_json = { workspace = true }
 eframe = { version = "0.31", optional = true }
 egui = { version = "0.31", optional = true }
 egui_plot = { version = "0.31", optional = true }
+# PNG screenshot export (gui feature)
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+# Async runtime for live streaming bridge (gui feature)
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"
