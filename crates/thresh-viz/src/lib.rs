@@ -80,3 +80,6 @@ pub mod app;
 
 #[cfg(feature = "gui")]
 pub mod streaming;
+
+#[cfg(feature = "gui")]
+pub mod theme;
