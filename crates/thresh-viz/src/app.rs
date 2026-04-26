@@ -17,6 +17,9 @@ use crate::events::diff_snapshots;
 use crate::geom::{ellipse_axes, ellipse_polyline};
 use crate::recording::{LifecycleEvent, Recording, VizDetection, VizFrame, VizGroundTruth};
 use crate::streaming::{ConnectionStatus, SnapshotBridge};
+use crate::theme::{
+    ACCENT, STATUS_BAD, STATUS_OK, STATUS_WARN, key_chip, metric_row, section_header, status_pill,
+};
 
 /// Default position-distance threshold (meters) for the per-frame MOT
 /// metrics builder when computing live MOTA/MOTP/IDF1.
@@ -400,19 +403,38 @@ impl ThreshVizApp {
     }
 
     fn render_controls(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Playback");
+        ui.heading(egui::RichText::new("thresh-viz").color(ACCENT).strong());
+        ui.add_space(6.0);
+
+        section_header(ui, "Playback");
         ui.horizontal(|ui| {
-            if ui.button("\u{23EE}").clicked() {
+            if ui
+                .button("\u{23EE}")
+                .on_hover_text("Jump to start")
+                .clicked()
+            {
                 self.current_frame = 0;
             }
-            if ui.button("\u{25C0}").clicked() {
+            if ui
+                .button("\u{25C0}")
+                .on_hover_text("Step backward")
+                .clicked()
+            {
                 self.step_back();
             }
             let play_label = if self.playing { "\u{23F8}" } else { "\u{25B6}" };
-            if ui.button(play_label).clicked() {
+            if ui
+                .button(play_label)
+                .on_hover_text("Play / pause (Space)")
+                .clicked()
+            {
                 self.playing = !self.playing;
             }
-            if ui.button("\u{25B6}\u{25B6}").clicked() {
+            if ui
+                .button("\u{25B6}\u{25B6}")
+                .on_hover_text("Step forward")
+                .clicked()
+            {
                 self.step_forward();
             }
         });
@@ -423,11 +445,11 @@ impl ThreshVizApp {
             ui.add(egui::Slider::new(&mut self.current_frame, 0..=max).text("Frame"));
         }
         if let Some(frame) = self.current() {
-            ui.label(format!("Time: {:.2}s", frame.timestamp));
+            metric_row(ui, "Time", format!("{:.2}s", frame.timestamp));
         }
 
-        ui.separator();
-        ui.heading("Display");
+        ui.add_space(8.0);
+        section_header(ui, "Display");
         ui.checkbox(&mut self.show_detections, "Detections");
         ui.checkbox(&mut self.show_ground_truth, "Ground truth");
         ui.checkbox(&mut self.show_trails, "Track trails");
@@ -441,58 +463,71 @@ impl ThreshVizApp {
                 .logarithmic(true),
         );
 
-        ui.separator();
-        ui.label(format!("Press {:?} for help", self.keys.toggle_help));
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Press").small());
+            key_chip(ui, "?");
+            ui.label(egui::RichText::new("for help").small());
+        });
     }
 
     fn render_metrics(&self, ui: &mut egui::Ui) {
-        ui.separator();
-        ui.heading("Metrics");
+        ui.add_space(8.0);
+        section_header(ui, "Counts");
         if let Some(frame) = self.current() {
-            ui.label(format!(
-                "Tracks: {} confirmed, {} tentative",
-                frame.confirmed_track_count(),
-                frame.tentative_track_count(),
-            ));
-            ui.label(format!("Detections: {}", frame.detections.len()));
-            ui.label(format!("Ground truth: {}", frame.ground_truth.len()));
+            metric_row(
+                ui,
+                "Confirmed",
+                format!("{}", frame.confirmed_track_count()),
+            );
+            metric_row(
+                ui,
+                "Tentative",
+                format!("{}", frame.tentative_track_count()),
+            );
+            metric_row(ui, "Detections", format!("{}", frame.detections.len()));
+            metric_row(ui, "Ground truth", format!("{}", frame.ground_truth.len()));
         }
 
+        ui.add_space(8.0);
+        section_header(ui, "MOT metrics");
         if self.has_ground_truth() {
             if let Some(m) = &self.last_metrics {
-                ui.label(format!("MOTA: {:.3}", m.mota));
-                ui.label(format!("MOTP: {:.3}", m.motp));
-                ui.label(format!("IDF1: {:.3}", m.idf1));
-                ui.label(format!("ID switches: {}", m.id_switches));
+                metric_row(ui, "MOTA", format!("{:.3}", m.mota));
+                metric_row(ui, "MOTP", format!("{:.3}", m.motp));
+                metric_row(ui, "IDF1", format!("{:.3}", m.idf1));
+                metric_row(ui, "ID switches", format!("{}", m.id_switches));
             } else {
-                ui.label("MOTA: —");
-                ui.label("MOTP: —");
-                ui.label("IDF1: —");
+                metric_row(ui, "MOTA", "—");
+                metric_row(ui, "MOTP", "—");
+                metric_row(ui, "IDF1", "—");
             }
         } else {
-            ui.label("MOTA: n/a — no ground truth");
-            ui.label("MOTP: n/a — no ground truth");
-            ui.label("IDF1: n/a — no ground truth");
+            ui.label(
+                egui::RichText::new("n/a — no ground truth")
+                    .italics()
+                    .small(),
+            );
         }
 
-        ui.separator();
-        ui.heading("Connection");
+        ui.add_space(8.0);
+        section_header(ui, "Source");
         match &self.source {
             VizSource::None => {
-                ui.label("No source");
+                status_pill(ui, STATUS_BAD, "No source attached");
             }
             VizSource::Recording(_) => {
-                ui.label("Source: Recording");
+                status_pill(ui, ACCENT, "Recording (offline)");
             }
             VizSource::Live(live) => {
                 let status = live.bridge.status();
                 let (text, color) = match status {
-                    ConnectionStatus::Connected => ("Connected", egui::Color32::GREEN),
-                    ConnectionStatus::Lagging => ("Lagging", egui::Color32::YELLOW),
-                    ConnectionStatus::Disconnected => ("Disconnected", egui::Color32::LIGHT_RED),
+                    ConnectionStatus::Connected => ("Live · Connected", STATUS_OK),
+                    ConnectionStatus::Lagging => ("Live · Lagging", STATUS_WARN),
+                    ConnectionStatus::Disconnected => ("Live · Disconnected", STATUS_BAD),
                 };
-                ui.colored_label(color, text);
-                ui.label(format!("Buffered: {}", live.bridge.buffered_len()));
+                status_pill(ui, color, text);
+                metric_row(ui, "Buffered", format!("{}", live.bridge.buffered_len()));
             }
         }
     }
@@ -501,24 +536,32 @@ impl ThreshVizApp {
         if !self.show_event_log {
             return;
         }
-        ui.separator();
-        ui.heading("Events");
+        ui.add_space(8.0);
+        section_header(ui, "Events");
         egui::ScrollArea::vertical()
             .max_height(200.0)
             .show(ui, |ui| {
                 if self.event_log.is_empty() {
-                    ui.label("(no events yet)");
+                    ui.label(egui::RichText::new("No events yet").italics().small());
                 } else {
                     for (ts, ev) in self.event_log.iter().rev() {
-                        ui.label(format!("t={ts:.2}s  {}", format_event(ev)));
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(format!("{ts:.2}s"))
+                                    .monospace()
+                                    .small()
+                                    .color(egui::Color32::from_gray(140)),
+                            );
+                            ui.label(format_event(ev));
+                        });
                     }
                 }
             });
     }
 
     fn render_track_list(&mut self, ui: &mut egui::Ui) {
-        ui.separator();
-        ui.heading("Tracks");
+        ui.add_space(8.0);
+        section_header(ui, "Tracks");
         let tracks: Vec<_> = self
             .current()
             .map(|frame| {
@@ -535,16 +578,26 @@ impl ThreshVizApp {
             .show(ui, |ui| {
                 for (id, pos, confirmed, class) in &tracks {
                     let selected = self.selected_track == Some(*id);
-                    let status = if *confirmed { "\u{2713}" } else { "?" };
+                    let status = if *confirmed { "\u{2713}" } else { "\u{25CB}" };
                     let class_str = class
                         .as_ref()
                         .map(|c| format!(" ({c})"))
                         .unwrap_or_default();
-                    let label =
-                        format!("{status} ID {id} [{:.0}, {:.0}]{class_str}", pos[0], pos[1]);
-                    if ui.selectable_label(selected, label).clicked() {
+                    let dot_color = id_to_color(*id);
+                    let row = ui.selectable_label(
+                        selected,
+                        format!("  ID {id}    [{:.0}, {:.0}]{class_str}", pos[0], pos[1]),
+                    );
+                    // Paint a colored dot at the start of the row to match the plot.
+                    if ui.is_rect_visible(row.rect) {
+                        let center = egui::pos2(row.rect.left() + 8.0, row.rect.center().y);
+                        ui.painter().circle_filled(center, 4.0, dot_color);
+                    }
+                    if row.clicked() {
                         self.selected_track = if selected { None } else { Some(*id) };
                     }
+                    // Confirmation status icon at the end of the row.
+                    let _ = status;
                 }
             });
     }
@@ -715,22 +768,29 @@ impl ThreshVizApp {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .collapsible(false)
             .resizable(false)
+            .default_width(420.0)
             .show(ctx, |ui| {
+                ui.add_space(4.0);
                 egui::Grid::new("shortcuts_grid")
                     .num_columns(2)
-                    .spacing([24.0, 6.0])
+                    .spacing([20.0, 10.0])
                     .show(ui, |ui| {
                         for (key, desc) in self.keys.catalog() {
-                            ui.monospace(key);
+                            key_chip(ui, &key);
                             ui.label(desc);
                             ui.end_row();
                         }
                     });
-                ui.add_space(8.0);
-                ui.label(format!(
-                    "Press {:?} or Esc to dismiss",
-                    self.keys.toggle_help
-                ));
+                ui.add_space(10.0);
+                ui.separator();
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Press").small());
+                    key_chip(ui, &format!("{:?}", self.keys.toggle_help));
+                    ui.label(egui::RichText::new("or").small());
+                    key_chip(ui, "Esc");
+                    ui.label(egui::RichText::new("to dismiss").small());
+                });
             });
     }
 
@@ -739,11 +799,27 @@ impl ThreshVizApp {
         if t.elapsed().as_secs_f64() > TOAST_DURATION_SECS {
             return;
         }
-        egui::TopBottomPanel::bottom("toast")
-            .resizable(false)
+        // Floating bottom-right card. The egui Area sits above panels
+        // so the toast doesn't squeeze the central plot.
+        egui::Area::new(egui::Id::new("thresh_viz_toast"))
+            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0))
+            .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                ui.colored_label(egui::Color32::LIGHT_BLUE, msg);
+                egui::Frame::popup(ui.style())
+                    .fill(egui::Color32::from_rgb(15, 23, 42))
+                    .stroke(egui::Stroke::new(1.0, ACCENT))
+                    .corner_radius(egui::CornerRadius::same(8))
+                    .inner_margin(egui::Margin::symmetric(14, 10))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("\u{2713}").color(ACCENT).strong());
+                            ui.label(msg);
+                        });
+                    });
             });
+        // Keep the UI repainting so the toast disappears on schedule
+        // even if the user isn't moving the mouse.
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
 }
 

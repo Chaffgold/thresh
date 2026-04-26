@@ -43,7 +43,14 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default().with_inner_size([1280.0, 800.0]),
         ..Default::default()
     };
-    eframe::run_native("thresh-viz", options, Box::new(|_cc| Ok(Box::new(app))))
+    eframe::run_native(
+        "thresh-viz",
+        options,
+        Box::new(|cc| {
+            thresh_viz::theme::apply_modern_theme(&cc.egui_ctx);
+            Ok(Box::new(app))
+        }),
+    )
 }
 
 #[cfg(feature = "gui")]
