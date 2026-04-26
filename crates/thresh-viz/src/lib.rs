@@ -2,7 +2,7 @@
 //!
 //! The data layer ([`recording`], [`events`], [`geom`]) works without
 //! any GUI dependencies. Enable the `gui` feature to get the
-//! interactive egui application and the live [`streaming`] bridge.
+//! interactive egui `app` module and the live `streaming` bridge.
 //!
 //! # Usage
 //!

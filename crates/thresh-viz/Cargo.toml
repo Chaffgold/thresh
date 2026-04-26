@@ -38,4 +38,4 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"], optiona
 tempfile = "3"
 # Headless egui app testing — only used by tests that exercise the gui
 # feature; no impact on default-feature builds.
-egui_kittest = { version = "0.31", features = ["eframe"] }
+egui_kittest = { version = "0.31", features = ["eframe", "x11"] }
