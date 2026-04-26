@@ -47,7 +47,7 @@
 - [x] 7.1 Add `viz-build` job to `.github/workflows/ci.yml` with matrix `{ os: [ubuntu-latest, macos-latest, windows-latest] }`, running `cargo build -p thresh-viz --features gui`.
 - [x] 7.2 Set `fail-fast: false` so all three platforms report independently.
 - [x] 7.3 Document in the workflow comment that this job is build-only by design (no headless GUI run); the build is the smoke test.
-- [ ] 7.4 Verify the job runs and passes on all three OSes by opening this change's PR and watching the matrix. (Will be visible on PR #82 once pushed.)
+- [x] 7.4 Verify the job runs and passes on all three OSes. Confirmed green on PR #82: `viz-build (ubuntu-latest)` 59s, `viz-build (macos-latest)` 48s, `viz-build (windows-latest)` 1m55s.
 
 ## 8. Integration test
 
