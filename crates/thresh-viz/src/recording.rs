@@ -19,6 +19,32 @@ pub struct VizFrame {
     pub detections: Vec<VizDetection>,
     /// Ground-truth positions at this timestep.
     pub ground_truth: Vec<VizGroundTruth>,
+    /// Measurement-to-track associations for this timestep, as
+    /// `(detection_index, track_id)` pairs. Empty if no association
+    /// information is available (e.g., older recordings).
+    #[serde(default)]
+    pub associations: Vec<(usize, u64)>,
+    /// Track lifecycle events occurring at this timestep (births, deaths,
+    /// ID switches). Empty if no event information is available.
+    #[serde(default)]
+    pub events: Vec<LifecycleEvent>,
+}
+
+/// A track lifecycle event derived from snapshot diffs or emitted directly
+/// by the tracker.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LifecycleEvent {
+    /// A new track ID appeared at this timestep.
+    Born { id: u64 },
+    /// A track ID disappeared at this timestep.
+    Died { id: u64 },
+    /// A track ID was swapped for another (typically due to a misassignment
+    /// being corrected).
+    IdSwitched { from: u64, to: u64 },
+    /// Two tracks merged into one. Currently emitted only by trackers that
+    /// support explicit merging; reserved for future use.
+    Merged { from: u64, into: u64 },
 }
 
 /// Serializable snapshot of a single track.
@@ -181,6 +207,8 @@ impl VizFrame {
             tracks,
             detections,
             ground_truth,
+            associations: Vec::new(),
+            events: Vec::new(),
         }
     }
 
@@ -226,6 +254,8 @@ impl VizFrame {
             tracks,
             detections: viz_detections,
             ground_truth: viz_gt,
+            associations: Vec::new(),
+            events: Vec::new(),
         }
     }
 }
@@ -313,6 +343,8 @@ mod tests {
                 id: 100,
                 position: [1.0, 2.0, 3.0],
             }],
+            associations: Vec::new(),
+            events: Vec::new(),
         }
     }
 
@@ -626,6 +658,8 @@ mod tests {
                         position: [500.0 - t * 15.0, 300.0 + t * 10.0, 0.0],
                     },
                 ],
+                associations: Vec::new(),
+                events: Vec::new(),
             });
         }
 
@@ -641,6 +675,34 @@ mod tests {
         assert_eq!(loaded.frames[0].tracks.len(), 2);
         assert_eq!(loaded.frames[0].detections.len(), 2);
         assert_eq!(loaded.frames[0].ground_truth.len(), 2);
+    }
+
+    #[test]
+    fn test_viz_frame_backward_compat_no_associations_or_events() {
+        // Older recordings predate the associations/events fields. Verify
+        // the JSON deserializer accepts them via #[serde(default)].
+        let legacy_json = r#"{
+            "timestamp": 1.0,
+            "tracks": [],
+            "detections": [],
+            "ground_truth": []
+        }"#;
+        let frame: VizFrame = serde_json::from_str(legacy_json).unwrap();
+        assert!(frame.associations.is_empty());
+        assert!(frame.events.is_empty());
+    }
+
+    #[test]
+    fn test_lifecycle_event_serialization_roundtrip() {
+        let events = vec![
+            LifecycleEvent::Born { id: 1 },
+            LifecycleEvent::Died { id: 2 },
+            LifecycleEvent::IdSwitched { from: 3, to: 4 },
+            LifecycleEvent::Merged { from: 5, into: 6 },
+        ];
+        let json = serde_json::to_string(&events).unwrap();
+        let loaded: Vec<LifecycleEvent> = serde_json::from_str(&json).unwrap();
+        assert_eq!(events, loaded);
     }
 
     #[test]
