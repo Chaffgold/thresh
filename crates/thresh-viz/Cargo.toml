@@ -8,7 +8,14 @@ publish = false
 
 [features]
 default = []
-gui = ["eframe", "egui", "egui_plot", "image", "tokio"]
+gui = [
+    "eframe",
+    "egui",
+    "egui_plot",
+    "image",
+    "tokio",
+    "thresh-tracker/streaming",
+]
 
 [dependencies]
 thresh-core = { path = "../thresh-core" }
@@ -29,3 +36,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"], optiona
 
 [dev-dependencies]
 tempfile = "3"
+# Headless egui app testing — only used by tests that exercise the gui
+# feature; no impact on default-feature builds.
+egui_kittest = { version = "0.31", features = ["eframe"] }

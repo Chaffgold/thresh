@@ -86,7 +86,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 0.5,
@@ -173,7 +175,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 1.0,
@@ -260,7 +264,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 1.5,
@@ -347,7 +353,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 2.0,
@@ -434,7 +442,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 2.5,
@@ -521,7 +531,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 3.0,
@@ -608,7 +620,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 3.5,
@@ -695,7 +709,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 4.0,
@@ -782,7 +798,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 4.5,
@@ -869,7 +887,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 5.0,
@@ -956,7 +976,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 5.5,
@@ -1043,7 +1065,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 6.0,
@@ -1130,7 +1154,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 6.5,
@@ -1217,7 +1243,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 7.0,
@@ -1304,7 +1332,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 7.5,
@@ -1391,7 +1421,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 8.0,
@@ -1478,7 +1510,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 8.5,
@@ -1565,7 +1599,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 9.0,
@@ -1652,7 +1688,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 9.5,
@@ -1739,7 +1777,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 10.0,
@@ -1826,7 +1866,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 10.5,
@@ -1913,7 +1955,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 11.0,
@@ -2000,7 +2044,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 11.5,
@@ -2087,7 +2133,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 12.0,
@@ -2174,7 +2222,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 12.5,
@@ -2261,7 +2311,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 13.0,
@@ -2348,7 +2400,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 13.5,
@@ -2435,7 +2489,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 14.0,
@@ -2522,7 +2578,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 14.5,
@@ -2609,7 +2667,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 15.0,
@@ -2696,7 +2756,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 15.5,
@@ -2783,7 +2845,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 16.0,
@@ -2870,7 +2934,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 16.5,
@@ -2957,7 +3023,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 17.0,
@@ -3044,7 +3112,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 17.5,
@@ -3131,7 +3201,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 18.0,
@@ -3218,7 +3290,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 18.5,
@@ -3305,7 +3379,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 19.0,
@@ -3392,7 +3468,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 19.5,
@@ -3479,7 +3557,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 20.0,
@@ -3566,7 +3646,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 20.5,
@@ -3653,7 +3735,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 21.0,
@@ -3740,7 +3824,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 21.5,
@@ -3827,7 +3913,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 22.0,
@@ -3914,7 +4002,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 22.5,
@@ -4001,7 +4091,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 23.0,
@@ -4088,7 +4180,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 23.5,
@@ -4175,7 +4269,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 24.0,
@@ -4262,7 +4358,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     },
     {
       "timestamp": 24.5,
@@ -4349,7 +4447,9 @@
             0.0
           ]
         }
-      ]
+      ],
+      "associations": [],
+      "events": []
     }
   ]
 }

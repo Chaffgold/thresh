@@ -140,7 +140,10 @@ mod tests {
         let events = diff_snapshots(&prev, &next);
         assert_eq!(
             events,
-            vec![LifecycleEvent::Born { id: 2 }, LifecycleEvent::Born { id: 3 },]
+            vec![
+                LifecycleEvent::Born { id: 2 },
+                LifecycleEvent::Born { id: 3 },
+            ]
         );
     }
 
@@ -151,7 +154,10 @@ mod tests {
         let events = diff_snapshots(&prev, &next);
         assert_eq!(
             events,
-            vec![LifecycleEvent::Died { id: 2 }, LifecycleEvent::Died { id: 3 },]
+            vec![
+                LifecycleEvent::Died { id: 2 },
+                LifecycleEvent::Died { id: 3 },
+            ]
         );
     }
 
@@ -172,7 +178,10 @@ mod tests {
         let events = diff_snapshots(&prev, &next);
         assert_eq!(
             events,
-            vec![LifecycleEvent::Born { id: 9 }, LifecycleEvent::Died { id: 5 },]
+            vec![
+                LifecycleEvent::Born { id: 9 },
+                LifecycleEvent::Died { id: 5 },
+            ]
         );
     }
 

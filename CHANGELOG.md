@@ -9,9 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Work in progress toward 0.3.0. Develop carries `version = "0.3.0-dev"`. The dated `[0.3.0]` section will be filled in at release-prep time.
 
-JPDA and MHT data association, SafeTensors weight loading, Rust-native DETR detection (no ONNX Runtime required), `thresh-viz` track visualization GUI, and a comprehensive cognitive complexity refactor.
+JPDA and MHT data association, SafeTensors weight loading, Rust-native DETR detection (no ONNX Runtime required), `thresh-viz` track visualization GUI (v1 + v2 desktop-app milestone), and a comprehensive cognitive complexity refactor.
 
 ### Added
+
+#### Track Visualization v2 (Desktop App Milestone)
+- **Live streaming integration** in `thresh-viz`: new `streaming::SnapshotBridge` consumes `tokio::sync::broadcast::Receiver<TrackSnapshot>` from `StreamingTracker::subscribe()` on a dedicated tokio runtime, drains into a bounded deque, and surfaces `ConnectionStatus::{Connected, Lagging, Disconnected}` for the dashboard sidebar.
+- **Per-frame MOT metrics** via new `thresh_eval::MotMetricsBuilder` (incremental MOTA / MOTP / IDF1 / ID switches in O(K·M) per frame). Re-exported as `thresh_eval::{MotMetrics, MotMetricsBuilder}`.
+- **Track lifecycle events** derived from snapshot diffs: `events::diff_snapshots(prev, next) -> Vec<LifecycleEvent>` emits `Born` / `Died` / `IdSwitched` / `Merged` (last reserved). New `LifecycleEvent` enum on `VizFrame.events`.
+- **Plot enhancements**: 2σ covariance ellipses (toggleable, hotkey `E`) via `geom::ellipse_axes` + `geom::ellipse_polyline`; association lines (toggleable, hotkey `A`) drawn from each measurement to its assigned track using new `VizFrame.associations`.
+- **UI polish**: centralized `KeyBindings`, scrolling lifecycle event log panel (toggleable, hotkey `L`), live connection status indicator, PNG screenshot export with timestamped filenames (hotkey `S`, `--screenshot-dir <PATH>` flag), keyboard shortcuts help overlay (hotkey `?`, also dismissed by `Esc`).
+- **CLI flags** on the `thresh-viz` binary: `--recording`, `--stream` (reserved), `--max-buffered-snapshots`, `--screenshot-dir`, `-h`/`--help`.
+- **Cross-platform GUI build CI**: new `viz-build` job in `.github/workflows/ci.yml` runs `cargo build -p thresh-viz --features gui` on Ubuntu, macOS, and Windows runners with `fail-fast: false`. Build is the smoke test (no headless GUI run required).
+- **Headless integration tests** using `egui_kittest`: 5 tests drive simulated keyboard input against a real `ThreshVizApp` and assert state transitions (help overlay open/close, ellipse / association / event-log toggles).
 
 #### JPDA and MHT Data Association
 - `jpda` module in `thresh-association` implementing Joint Probabilistic Data Association with soft assignment probabilities across all track-detection pairs (validation gating, joint event enumeration, marginal association probabilities). Integrates into the tracker via `AssociationStrategy::Jpda`.
@@ -44,6 +54,11 @@ JPDA and MHT data association, SafeTensors weight loading, Rust-native DETR dete
 
 ### Notes
 - `thresh-viz` is a workspace member but is **not** in `default-members` — build it explicitly with `cargo build -p thresh-viz` or `cargo run -p thresh-viz`.
+
+### Migration
+- **`VizFrame` gained two new fields**: `associations: Vec<(usize, u64)>` and `events: Vec<LifecycleEvent>`. Both are `#[serde(default)]` so existing JSON recordings load unchanged. Code that constructs `VizFrame` via struct literals must add `associations: Vec::new(), events: Vec::new()` (or use `VizFrame::from_raw` / `from_tracker`).
+- **New incremental metrics API**: `thresh_eval::MotMetricsBuilder` is the recommended way to compute MOTA / MOTP / IDF1 in live tracking sessions. The existing one-shot `compute_mot_metrics` and `compute_idf1` continue to work unchanged.
+- **`thresh-viz` `gui` feature now also activates `thresh-tracker/streaming`** transitively (needed for the live `SnapshotBridge`). No action needed unless you depended on the old, narrower feature graph.
 
 ## [0.2.0] - 2026-04-12
 
