@@ -227,7 +227,7 @@ impl DetectionPipeline for MockDetector {
 /// RT-DETR (or similar) `.onnx` file at `model_path`.
 #[cfg(feature = "onnx")]
 pub struct OnnxDetector {
-    session: ort::Session,
+    session: ort::session::Session,
     confidence_threshold: f64,
     nms_iou_threshold: f64,
 }
@@ -243,7 +243,7 @@ impl OnnxDetector {
         confidence_threshold: f64,
         nms_iou_threshold: f64,
     ) -> Result<Self, ort::Error> {
-        let session = ort::Session::builder()?.commit_from_file(model_path)?;
+        let session = ort::session::Session::builder()?.commit_from_file(model_path)?;
         Ok(Self {
             session,
             confidence_threshold,
@@ -252,7 +252,7 @@ impl OnnxDetector {
     }
 
     /// Return a reference to the underlying ORT session.
-    pub fn session(&self) -> &ort::Session {
+    pub fn session(&self) -> &ort::session::Session {
         &self.session
     }
 
