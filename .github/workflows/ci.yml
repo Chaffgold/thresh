@@ -222,14 +222,42 @@ jobs:
       - name: Build thresh-viz with gui feature
         run: cargo build -p thresh-viz --features gui
 
+  changes:
+    # PR-only path filter: detect whether this PR touches the ONNX
+    # inference code path so the (slow, uncached) ONNX job below can
+    # be skipped on PRs that don't need it.
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    outputs:
+      inference: ${{ steps.filter.outputs.inference }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            inference:
+              - 'crates/thresh-inference/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.github/workflows/ci.yml'
+
   onnx-tests:
     # ONNX inference tests require ORT binaries which the ort crate
-    # auto-downloads during build. Gated to schedule/workflow_dispatch
-    # so it does not block every PR — ORT download can be slow and the
-    # binaries are not cached by rust-cache.
+    # auto-downloads during build. ORT download is slow and not cached
+    # by rust-cache, so we skip this job on PRs that don't touch
+    # inference-relevant paths. Always runs on schedule (weekly) and
+    # workflow_dispatch.
     name: ONNX inference tests
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: changes
+    if: |
+      always() && (
+        github.event_name == 'schedule' ||
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'pull_request' && needs.changes.outputs.inference == 'true')
+      )
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
