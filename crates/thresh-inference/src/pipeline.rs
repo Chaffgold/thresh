@@ -473,8 +473,8 @@ mod tests {
         fn session_builder_errors_on_missing_model() {
             // Verify that attempting to create a session from a nonexistent
             // model file returns an error rather than panicking.
-            let result = ort::Session::builder()
-                .and_then(|builder| builder.commit_from_file("/nonexistent/model.onnx"));
+            let result = ort::session::Session::builder()
+                .and_then(|mut builder| builder.commit_from_file("/nonexistent/model.onnx"));
             assert!(
                 result.is_err(),
                 "Loading a nonexistent model should return an error"
@@ -485,8 +485,8 @@ mod tests {
         fn session_builder_errors_on_invalid_data() {
             // Verify that loading garbage bytes as an ONNX model is an error.
             let garbage = vec![0u8; 64];
-            let result =
-                ort::Session::builder().and_then(|builder| builder.commit_from_memory(&garbage));
+            let result = ort::session::Session::builder()
+                .and_then(|mut builder| builder.commit_from_memory(&garbage));
             assert!(
                 result.is_err(),
                 "Loading invalid model data should return an error"
