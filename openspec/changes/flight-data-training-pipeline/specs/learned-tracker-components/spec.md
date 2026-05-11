@@ -2,26 +2,48 @@
 
 ### Overview
 
-A family of small ONNX models trained directly on real ADS-B trajectories that augment the existing classical Bayesian tracker. Three candidate components are scoped: an IMM mode-probability classifier (implemented in this change), a learned association cost network (designed but not implemented here), and a short-horizon trajectory predictor (designed but not implemented here). Each component is opt-in via a Cargo feature gate; the classical pipeline remains the default.
+A family of small ONNX models that augment the existing classical Bayesian tracker. Three candidate components are scoped: an IMM mode-probability classifier (implemented in this change), a learned association cost network (designed but not implemented here), and a short-horizon trajectory predictor (designed but not implemented here). Each component is opt-in via a Cargo feature gate; the classical pipeline remains the default.
+
+**Training-data architecture.** ADS-B reports are **system-level truth**, not sensor measurements. A model that runs inside a filter at deployment time must be trained on inputs that match the filter's deployment-time inputs — not on raw ADS-B states, whose noise / smoothing / rate characteristics differ. Therefore the training pipeline for every component in this capability runs the full **ADS-B truth → `thresh-synth` measurements → classical tracker → filter state** chain and trains on the filter-state outputs. The classifier never sees a raw ADS-B state vector as an input.
 
 ## ADDED Requirements
 
 ### Requirement: IMM mode classifier — model contract
 
-The IMM mode classifier ONNX model MUST conform to the following contract:
+The IMM mode classifier ONNX model MUST conform to the following contract. The input is a **filter-state history**, not a raw trajectory; it carries both the state vector and a projection of the covariance produced by the classical Kalman/IMM filter.
 
 | Tensor | Shape | dtype | Semantics |
 |---|---|---|---|
-| `state_history` (input) | `(batch, 10, state_dim)` | float32 | 10 consecutive state vectors `[x, y, z, vx, vy, vz, ax, ay, az]` (state_dim = 9) in sensor-ENU frame |
+| `filter_state_history` (input) | `(batch, 10, filter_state_dim)` | float32 | 10 consecutive filter-state snapshots. Default `filter_state_dim` = 18: state `[x, y, z, vx, vy, vz, ax, ay, az]` concatenated with the 9 diagonal entries of the state covariance. All values in sensor-ENU frame and SI units. |
 | `mode_probs` (output) | `(batch, 4)` | float32 | Softmaxed probabilities over `[CV, CA, CTRV, coord_turn]` |
 
 #### Scenario: Contract verification
 
 **WHEN** the `onnx-tests` workflow runs against `test-data/models/imm_mode_classifier.onnx`
 
-**THEN** the workflow asserts the model's input shape is `(batch, 10, 9)`, output shape is `(batch, 4)`, and output values sum to 1.0 per batch row within 1e-5 tolerance
+**THEN** the workflow asserts the model's input shape is `(batch, 10, 18)` (or whatever `filter_state_dim` the trained model uses, documented in the model card), output shape is `(batch, 4)`, and output values sum to 1.0 per batch row within 1e-5 tolerance
 
 **SHALL** fail the build on any shape, name, or normalisation violation.
+
+### Requirement: Training data must come from filter outputs, not raw ADS-B
+
+The IMM mode classifier MUST be trained on inputs produced by running the classical tracker over synthesised measurements from `thresh-synth`. The training dataset MUST NOT contain raw ADS-B state vectors as classifier inputs. Analytic mode labels may be derived from ADS-B trajectory kinematics (truth labels), but the input features MUST be filter outputs.
+
+#### Scenario: Dataset construction check
+
+**WHEN** the training dataset for the IMM classifier is constructed
+
+**THEN** every input feature window in the dataset is traceable to a `thresh-tracker` run over `thresh-synth`-produced measurements; no input window is sourced directly from an ADS-B state-vector record
+
+**SHALL** be enforced by a unit test in `python/training/test_imm_dataset.py` that fails if any dataset row's provenance metadata says `source = "adsbx"` or `source = "opensky"` in the input-features column (truth labels may still cite those sources for the label column).
+
+#### Scenario: Adapter rejects raw measurements at runtime
+
+**WHEN** the `learned-imm` adapter is fed an input that does not match the `filter_state_dim` (e.g. a 9-dim raw state without covariance, or a measurement-level vector)
+
+**THEN** the adapter returns an error and falls back to the analytic transition matrix; it does NOT silently produce mode probabilities from a malformed input
+
+**SHALL** log the rejection at WARN level with the observed input shape.
 
 ### Requirement: IMM mode label derivation
 

@@ -55,25 +55,34 @@ This is a 3D point-cloud → oriented-3D-bounding-box detector — a DETR family
 
 **Rationale:** ADS-B alone gives us state vectors, not perception inputs. We have no source of real radar returns paired with ground truth. `thresh-synth` is the existing piece of code that turns truth trajectories into sensor returns; reusing it makes Track A possible with the data we have. The cost is a sim-to-real gap which we explicitly accept (Non-Goals) — closing that gap is a follow-on change. The win is that we exercise the full chain (acquisition → synth → train → export → inference) end-to-end with non-random weights.
 
-### 4. IMM mode classifier as Track B first experiment
+### 4. ADS-B is system-level data; both tracks reflect this in their training pipelines
 
-**Decision:** Track B implements one learned model first: an IMM mode-probability classifier that ingests a track-state history and outputs `(p_CV, p_CA, p_CTRV, p_coord_turn)`. Its ONNX checkpoint is loaded by a new `learned-imm` feature gate in `thresh-filter` that lets the existing IMM filter use learned mode probabilities instead of (or alongside) the analytic mode-transition matrix.
+**Decision:** Treat ADS-B reports as **system-level / track-level truth**, never as sensor measurements. ADS-B reports are aircraft self-reports of GPS-derived state, carry the ICAO identity, encode quality as NIC/NAC flags rather than a measurement covariance, and arrive at ~1 Hz — all hallmarks of post-tracking output, not pre-association measurements. Consequently:
 
-**Rationale:** Three reasons. First, it has the lowest dependency surface — no simulator in the loop, trains directly on ADS-B trajectories. Second, the integration point (existing IMM in `thresh-filter`) is well-defined and well-tested. Third, mode-probability outputs are bounded and easy to validate (sum to 1, between 0 and 1) — a forgiving first integration. The other two candidates (learned association cost, trajectory predictor) are captured as future requirements but not implemented in this change.
+- **Track A** consumes ADS-B as truth and synthesises measurements via `thresh-synth` (already captured by Decision 3).
+- **Track B** is forbidden from training the IMM mode classifier on raw ADS-B states. Instead, the training data is produced by a full simulated-sensor + classical-tracker pipeline so the classifier learns from inputs whose noise / smoothing / rate characteristics match deployment.
 
-### 5. PyTorch + ONNX export, uv for environment management
+**Rationale:** Training a deployment-time component on ADS-B states directly would create a distribution shift: at training, the classifier sees clean self-reported GPS state at 1 Hz; at deployment, it sees a filter state estimate with non-trivial covariance, residual smoothing artefacts, and whatever rate the host filter is running. That mismatch silently degrades the classifier and is invisible until system-level evaluation. Forcing the training pipeline to mirror the deployment pipeline closes the gap and has the side benefit of exercising the full synth → tracker chain (also needed for Track A's evaluation harness).
+
+### 5. IMM mode classifier as Track B first experiment
+
+**Decision:** Track B implements one learned model first: an IMM mode-probability classifier that ingests a **filter-state** history (state vector plus a projection of the covariance, produced by running the classical tracker over simulated measurements) and outputs `(p_CV, p_CA, p_CTRV, p_coord_turn)`. Its ONNX checkpoint is loaded by a new `learned-imm` feature gate in `thresh-filter` that lets the existing IMM filter use learned mode probabilities instead of (or alongside) the analytic mode-transition matrix.
+
+**Rationale:** Three reasons. First, the integration point (existing IMM in `thresh-filter`) is well-defined and well-tested. Second, mode-probability outputs are bounded and easy to validate (sum to 1, between 0 and 1) — a forgiving first integration. Third, the training pipeline mirrors the deployment pipeline (per Decision 4) — the classifier consumes the same kind of filter state at training time that it consumes at deployment time. The other two candidates (learned association cost, trajectory predictor) are captured as future requirements but not implemented in this change.
+
+### 6. PyTorch + ONNX export, uv for environment management
 
 **Decision:** Training is implemented in PyTorch. ONNX export uses `torch.onnx.export` with the existing input/output contract. Python toolchain is pinned via `pyproject.toml` + `uv.lock`. Training scripts live under `python/training/`.
 
 **Rationale:** PyTorch is the dominant framework for DETR-family detectors and has first-class ONNX export. `uv` is the fastest reproducible Python toolchain available and works well in CI dry-runs. Keeping all Python under `python/` mirrors the existing `crates/thresh-py` convention and keeps the Rust-side build untouched.
 
-### 6. Training storage: external, not checked in
+### 7. Training storage: external, not checked in
 
 **Decision:** Full training datasets (multi-GB OpenSky dumps) live outside the repository. Only a small (< 5 MB) trajectory sample is checked in under `test-data/trajectories/` for CI dry-runs and smoke tests. The full reproduction recipe is documented in `TRAINING.md`.
 
 **Rationale:** Multi-gigabyte parquet files in git would break CI checkout times and bloat git-lfs costs. Checked-in samples are sized to fit comfortably in CI caches.
 
-### 7. Class taxonomy mapping
+### 8. Class taxonomy mapping
 
 **Decision:** Map ADS-B emitter categories to a thresh-internal class enum with five buckets:
 
@@ -85,21 +94,21 @@ This is a 3D point-cloud → oriented-3D-bounding-box detector — a DETR family
 | B1, B2, B6 | `glider-or-balloon-or-uav` | Sailplanes, balloons, ADS-B-equipped UAVs |
 | (anything else, military codes) | `other` | Surface vehicles, obstacles, unknown |
 
-**Rationale:** The detector's current output has no class head, only `[box, score]`. Adding multi-class output is a real architectural change to the ONNX contract. For this change we add a sixth dimension to the output tensor (boxes `(1, 100, 8)` with a class index — see Decision 8) and revisit if needed. Five classes is enough to demonstrate the pipeline without over-fitting the data we have.
+**Rationale:** The detector's current output has no class head, only `[box, score]`. Adding multi-class output is a real architectural change to the ONNX contract. For this change we add a separate class-index output tensor alongside `boxes` and `scores` (see Decision 9) and revisit if needed. Five classes is enough to demonstrate the pipeline without over-fitting the data we have.
 
-### 8. ONNX output contract: extend with class index, keep score
+### 9. ONNX output contract: extend with class index, keep score
 
 **Decision:** Extend the existing output contract from `boxes (1, 100, 7) + scores (1, 100, 1)` to `boxes (1, 100, 7) + scores (1, 100, 1) + classes (1, 100, 1)`. The third output is an integer class index in `[0, 5)` per detection. The existing input shape `(1, 1000, 4)` is unchanged.
 
 **Rationale:** Adding a separate class tensor instead of widening `boxes` keeps the Rust-side parser changes minimal and preserves backward compatibility with the random-weights stub (which can keep emitting a constant `classes = 0` tensor). The `onnx-tests` workflow gets one new shape assertion.
 
-### 9. Sensor frame: ENU centered at sensor location
+### 10. Sensor frame: ENU centered at sensor location
 
 **Decision:** The detector outputs boxes in a local East-North-Up frame centered at the sensor's lat/lon. `thresh-tracker` is responsible for any frame conversion downstream.
 
 **Rationale:** ENU at the sensor matches the convention of the existing `thresh-synth` radar generator and minimises numerical range for the detector's regression head. Global frames (ECEF, WGS84) are downstream conversions and don't need to be in the detector's output.
 
-### 10. Exit criteria (Track A)
+### 11. Exit criteria (Track A)
 
 **Decision:** Track A's trained ONNX checkpoint replaces `test_detector.onnx` only when it hits the following on a held-out OpenSky region (e.g. train on KSEA-region trajectories, evaluate on KPHX-region):
 
@@ -111,7 +120,7 @@ If after one full training run none of these are hit, document findings in the c
 
 **Rationale:** These are intentionally modest. We are not chasing benchmark numbers — we are validating that the pipeline produces a model meaningfully better than random.
 
-### 11. Exit criteria (Track B)
+### 12. Exit criteria (Track B)
 
 **Decision:** Track B's IMM mode classifier ships only when:
 
@@ -123,7 +132,7 @@ If the third bullet fails, ship the model but keep the feature gate off by defau
 
 **Rationale:** Tracker-level MOTA is the only metric that matters for "does this help"; the first two bullets are sanity checks that the model isn't garbage.
 
-### 12. License and attribution posture
+### 13. License and attribution posture
 
 **Decision:**
 

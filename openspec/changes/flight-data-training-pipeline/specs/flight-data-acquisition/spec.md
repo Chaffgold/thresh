@@ -4,6 +4,8 @@
 
 A unified Python ingestion layer that pulls real flight-data trajectories from two providers — OpenSky Network (primary, historical, redistributable) and ADS-B Exchange v2 (live, geographically scoped, edge cases) — into a single canonical Parquet/Arrow schema. The acquisition layer is the shared foundation for both Track A (learned detector) and Track B (learned tracker components).
 
+**Data semantics.** Records produced by this layer are **system-level / track-level truth**: aircraft self-reports of GPS-derived state, identity-tagged by ICAO address, with quality encoded as NIC/NAC flags rather than a measurement covariance. They are consumed downstream as ground-truth target trajectories and are never used directly as sensor measurements. All measurement-level data in this pipeline is synthesised downstream by `thresh-synth` from these trajectories — see `specs/learned-detector/spec.md` and `specs/learned-tracker-components/spec.md` for the consumption contracts.
+
 ## ADDED Requirements
 
 ### Requirement: Canonical trajectory schema
