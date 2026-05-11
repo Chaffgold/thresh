@@ -4,11 +4,11 @@
 
 ## 1. Python toolchain and project layout
 
-- [ ] 1.1 Add `pyproject.toml` at repo root (or `python/`) declaring the training-side dependencies: `torch`, `onnx`, `onnxruntime`, `numpy`, `pandas`, `pyarrow`, `requests`, `httpx`, `pydantic`.
-- [ ] 1.2 Generate `uv.lock` and document the bootstrap command (`uv sync`) in `TRAINING.md`.
-- [ ] 1.3 Create the `python/` source tree: `python/acquisition/`, `python/training/`, `python/export/`, `python/eval/`, with `__init__.py` stubs.
-- [ ] 1.4 Add a pre-commit hook running `ruff` and `pyright` on the new Python tree.
-- [ ] 1.5 Wire `python/` into the existing CI workflow so its tests run alongside the Rust ones.
+- [x] 1.1 Add `pyproject.toml` at repo root (or `python/`) declaring the training-side dependencies: `torch`, `onnx`, `onnxruntime`, `numpy`, `pandas`, `pyarrow`, `requests`, `httpx`, `pydantic`. _Landed at `python/pyproject.toml`; heavy deps (`torch`, `onnx`, `onnxruntime`) split into the `training` optional-extra to keep CI smoke fast._
+- [x] 1.2 Generate `uv.lock` and document the bootstrap command (`uv sync`) in `TRAINING.md`.
+- [x] 1.3 Create the `python/` source tree: `python/acquisition/`, `python/training/`, `python/export/`, `python/eval/`, with `__init__.py` stubs.
+- [x] 1.4 Add a pre-commit hook running `ruff` and `pyright` on the new Python tree.
+- [x] 1.5 Wire `python/` into the existing CI workflow so its tests run alongside the Rust ones. _New `python-training-tree` job in `.github/workflows/ci.yml` runs ruff + pyright + pytest via `uv`._
 
 ## 2. Acquisition layer — OpenSky
 

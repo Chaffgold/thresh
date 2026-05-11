@@ -36,3 +36,17 @@ repos:
         language: system
         files: ^openspec/
         pass_filenames: false
+
+      - id: python-training-ruff
+        name: ruff (python/)
+        entry: bash -c 'cd python && uv run --no-default-groups --group dev ruff check .'
+        language: system
+        files: ^python/
+        pass_filenames: false
+
+      - id: python-training-pyright
+        name: pyright (python/)
+        entry: bash -c 'cd python && uv run --no-default-groups --group dev pyright'
+        language: system
+        files: ^python/
+        pass_filenames: false
