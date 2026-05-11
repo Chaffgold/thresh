@@ -12,13 +12,13 @@
 
 ## 2. Acquisition layer — OpenSky
 
-- [ ] 2.1 Implement `python/acquisition/opensky.py` with `fetch_state_vectors(bbox, time_range)` over the Impala REST endpoint.
-- [ ] 2.2 Implement Zenodo trajectory-dump loader (`load_zenodo_dump(path)`).
-- [ ] 2.3 Define the canonical trajectory schema in `python/acquisition/schema.py` using Pydantic + PyArrow: `icao24`, `timestamp`, `lat`, `lon`, `alt_geom`, `alt_baro`, `vel_ground`, `track`, `vrate`, `category`, `callsign`, `quality_nic`, `quality_nac_p`, `source` (one of `opensky` / `adsbx`).
-- [ ] 2.4 Implement track stitching: `stitch_tracks(state_vectors)` returns one row per `(icao24, contact)` with the full state-vector sequence as a nested list, splitting on gaps > 60 s.
-- [ ] 2.5 Implement Parquet writer with one file per day, partitioned by source and airport region.
-- [ ] 2.6 Add a unit test that round-trips a tiny synthetic state-vector stream through the schema and stitching, asserting trajectories are non-empty and timestamps are monotonic.
-- [ ] 2.7 Check in a small (< 5 MB) OpenSky-derived sample under `test-data/trajectories/opensky-sample.parquet` for CI dry-runs.
+- [x] 2.1 Implement `python/acquisition/opensky.py` with `fetch_state_vectors(bbox, time_range)` over the Impala REST endpoint. _Uses the public `/api/states/all` endpoint with optional credentials; polls across the time range with exponential-backoff retry. Exercised against `httpx.MockTransport` (no live calls in unit tests)._
+- [x] 2.2 Implement Zenodo trajectory-dump loader (`load_zenodo_dump(path)`). _Loads Parquet files written in the canonical schema; validates SHA-256 when a checksum is supplied._
+- [x] 2.3 Define the canonical trajectory schema in `python/acquisition/schema.py` using Pydantic + PyArrow. _Adds an optional `provenance` map for ADSBx MLAT/TIS-B flags; a parity test asserts Pydantic fields and PyArrow columns match._
+- [x] 2.4 Implement track stitching. _`stitch_tracks` yields `Track` records with stable IDs of the form `{icao24}-{first_timestamp_iso}`._
+- [x] 2.5 Implement Parquet writer with one file per day, partitioned by source and airport region. _`storage.write_partition` writes at `<root>/source=<src>/date=YYYY-MM-DD/trajectories.parquet` and enforces per-icao monotonicity. Airport-region sub-partitioning is deferred to Phase 3 (ADSBx poller introduces per-airport directories)._
+- [x] 2.6 Add a unit test that round-trips a tiny synthetic state-vector stream through the schema and stitching. _46 unit tests across schema / stitching / storage / opensky; full round-trip in `test_storage.TestRoundTrip`._
+- [ ] 2.7 Check in a small (< 5 MB) OpenSky-derived sample under `test-data/trajectories/opensky-sample.parquet` for CI dry-runs. _Deferred: requires a live OpenSky fetch, which is not available in the implementation sandbox. To be filled in by a contributor with network access — `uv run python -m acquisition.opensky_cli --bbox … --time …` (small CLI to be added)._
 
 ## 3. Acquisition layer — ADS-B Exchange v2
 
