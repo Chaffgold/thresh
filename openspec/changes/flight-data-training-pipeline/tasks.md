@@ -22,12 +22,12 @@
 
 ## 3. Acquisition layer — ADS-B Exchange v2
 
-- [ ] 3.1 Implement `python/acquisition/adsbx.py` with `fetch_airport(icao, api_key)` hitting `/api/aircraft/v2/airport/{icao}`.
-- [ ] 3.2 Translate the readsb-style ADSBx response into the canonical trajectory schema; map `hex` → `icao24`, `flight` → `callsign`, `alt_baro` / `alt_geom` directly, `gs` → `vel_ground`, `track` directly, `baro_rate` → `vrate`, `category` directly.
-- [ ] 3.3 Implement a polling scheduler `python/acquisition/adsbx_poller.py` with a rate-limit budget (default: 1 req/sec, configurable).
-- [ ] 3.4 Add per-snapshot append-to-parquet logic with deduplication on `(icao24, timestamp)`.
-- [ ] 3.5 Unit test the schema translation against a recorded sample ADSBx response fixture.
-- [ ] 3.6 Document the API-key bootstrap in `TRAINING.md` and `LICENSING.md`.
+- [x] 3.1 Implement `python/acquisition/adsbx.py` with `fetch_airport(icao, api_key)` hitting `/api/aircraft/v2/airport/{icao}`. _Uses `httpx` with the gateway base URL and the `x-rapidapi-key` header; exponential-backoff retry on transient errors; honours `Retry-After` on 429 and raises `AdsbxRateLimited` after three consecutive rate-limit responses._
+- [x] 3.2 Translate the readsb-style ADSBx response into the canonical trajectory schema. _`aircraft_record_to_canonical` handles `hex → icao24` (lowercased), `flight → callsign` (stripped), feet-to-metres altitude conversion, knots-to-m/s ground speed, fpm-to-m/s vertical rate (preferring `geom_rate` over `baro_rate`), and `mlat[]` / `tisb[]` provenance translation._
+- [x] 3.3 Implement a polling scheduler `python/acquisition/adsbx_poller.py` with a rate-limit budget. _Default 1 Hz, configurable via `rate_limit_hz`; `_ticks` uses `time.monotonic()` deltas so wall-clock drift doesn't accumulate._
+- [x] 3.4 Per-snapshot append-to-parquet logic with deduplication on `(icao24, timestamp)`. _Dedup is in-memory across all snapshots in a polling run; final batch is written via `storage.write_partition` under `<root>/airport=<ICAO>/source=adsbx/date=…/`._
+- [x] 3.5 Unit test the schema translation against a recorded sample ADSBx response fixture. _Eighteen new tests in `tests/test_adsbx.py` covering record translation, MLAT/TIS-B provenance, fetch happy + error paths, 429 rate-limit recovery, and dedup coalescing. Live ADSBx is mocked via `httpx.MockTransport` — no API key required for tests._
+- [x] 3.6 Document the API-key bootstrap in `TRAINING.md` and `LICENSING.md`. _TRAINING.md gains an "ADS-B Exchange API key" subsection; `LICENSING.md` is created in Phase 10 — the redistribution-posture note is repeated in TRAINING.md until then._
 
 ## 4. Trajectory-driven `thresh-synth` pairing (shared foundation for Tracks A and B)
 
