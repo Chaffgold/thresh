@@ -52,7 +52,7 @@ Key design choices:
 
 ## OpenSpec Workflow
 
-Design specs live in `openspec/changes/`. Three active change sets: `transformer-fusion-tracker`, `test-data-pipeline`, `hifi-sensor-simulation`. Each contains proposal, design, tasks, and capability specs.
+Design specs live in `openspec/changes/`. Each active change contains proposal, design, tasks, and capability specs; completed changes are moved to `openspec/changes/archive/`.
 
 Claude Code commands for OpenSpec: `/opsx:explore`, `/opsx:propose`, `/opsx:apply`, `/opsx:archive`.
 
