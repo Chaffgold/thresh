@@ -161,6 +161,36 @@ jobs:
           export PATH="$VIRTUAL_ENV/bin:$PATH"
           pytest tests/python/ -v
 
+  python-training-tree:
+    # Lint + type-check + smoke-test the python/ training tree
+    # (separate from crates/thresh-py, which is a maturin-built binding).
+    # Installs only the `dev` dependency group via uv; the heavier
+    # `training` optional deps (torch, onnx, onnxruntime) are pulled in
+    # by the training and export scripts in Phases 6–7, not here.
+    name: Python training tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: 'latest'
+      - name: Sync dev deps
+        working-directory: python
+        run: uv sync --no-default-groups --group dev
+      - name: ruff check
+        working-directory: python
+        run: uv run --no-default-groups --group dev ruff check .
+      - name: pyright
+        working-directory: python
+        run: uv run --no-default-groups --group dev pyright
+      - name: pytest
+        working-directory: python
+        run: uv run --no-default-groups --group dev pytest -q
+
   adsb-benchmark-gate:
     # Same regression gate pattern as synth-benchmark-gate / orbital-benchmark-gate,
     # but for ADS-B scenarios that need the `adsb` feature (reqwest + csv).
