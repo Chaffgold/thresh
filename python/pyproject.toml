@@ -53,6 +53,16 @@ pythonVersion = "3.11"
 typeCheckingMode = "strict"
 reportMissingImports = "error"
 reportMissingTypeStubs = false
+# pyarrow's type stubs leave many call results typed as Unknown.
+# Accept that pragmatically in user code rather than annotate every
+# pyarrow call site. The remaining strict-mode signal is still useful
+# for our own code (reportMissingImports, reportCallIssue,
+# reportArgumentType for our own functions, etc.).
+reportUnknownMemberType = "none"
+reportUnknownVariableType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownLambdaType = "none"
+reportUnknownParameterType = "none"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
