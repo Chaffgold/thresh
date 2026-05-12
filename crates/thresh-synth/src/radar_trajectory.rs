@@ -205,6 +205,7 @@ pub enum TrajectoryRadarError {
     UnsortedWaypoints(usize),
     InvalidClass(u32),
     InvalidSampleRate(f64),
+    InvalidNoiseParam(&'static str),
 }
 
 impl std::fmt::Display for TrajectoryRadarError {
@@ -218,11 +219,51 @@ impl std::fmt::Display for TrajectoryRadarError {
             Self::InvalidSampleRate(rate) => {
                 write!(f, "sample_rate_hz must be positive, got {rate}")
             }
+            Self::InvalidNoiseParam(name) => {
+                write!(f, "config field {name} must be positive and finite")
+            }
         }
     }
 }
 
 impl std::error::Error for TrajectoryRadarError {}
+
+/// Pre-built per-tick sampling distributions, hoisted out of the hot path so
+/// failures (zero or negative noise parameters) surface as a recoverable
+/// [`TrajectoryRadarError`] rather than a panic from `Distribution::new`.
+struct SnapshotDistributions {
+    return_noise: Normal<f64>,
+    target_intensity: Uniform<f32>,
+    clutter_xy: Uniform<f32>,
+    clutter_z: Uniform<f32>,
+    clutter_intensity: Uniform<f32>,
+}
+
+fn build_distributions(
+    config: &TrajectoryRadarConfig,
+) -> Result<SnapshotDistributions, TrajectoryRadarError> {
+    let return_noise = Normal::new(0.0, config.return_position_noise_m)
+        .map_err(|_| TrajectoryRadarError::InvalidNoiseParam("return_position_noise_m"))?;
+    let target_intensity = Uniform::new(
+        config.target_intensity_max * 0.5,
+        config.target_intensity_max,
+    )
+    .map_err(|_| TrajectoryRadarError::InvalidNoiseParam("target_intensity_max"))?;
+    let half_ext = config.clutter_half_extent_m as f32;
+    let clutter_xy = Uniform::new(-half_ext, half_ext)
+        .map_err(|_| TrajectoryRadarError::InvalidNoiseParam("clutter_half_extent_m"))?;
+    let clutter_z = Uniform::new(0.0_f32, half_ext * 0.2)
+        .map_err(|_| TrajectoryRadarError::InvalidNoiseParam("clutter_half_extent_m"))?;
+    let clutter_intensity = Uniform::new(0.0_f32, config.clutter_intensity_max)
+        .map_err(|_| TrajectoryRadarError::InvalidNoiseParam("clutter_intensity_max"))?;
+    Ok(SnapshotDistributions {
+        return_noise,
+        target_intensity,
+        clutter_xy,
+        clutter_z,
+        clutter_intensity,
+    })
+}
 
 /// Synthesise paired `(point_cloud, gt_boxes)` snapshots at the configured
 /// sample rate over the union of all targets' trajectory time windows.
@@ -236,12 +277,13 @@ pub fn from_trajectory<R: Rng>(
     rng: &mut R,
 ) -> Result<Vec<RadarSnapshot>, TrajectoryRadarError> {
     validate_inputs(targets, config)?;
+    let distributions = build_distributions(config)?;
     let (t_start, t_end) = trajectory_time_bounds(targets);
     let dt = 1.0 / config.sample_rate_hz;
     let mut snapshots = Vec::new();
     let mut t = t_start;
     while t <= t_end + 1e-9 {
-        snapshots.push(make_snapshot(targets, config, t, rng));
+        snapshots.push(make_snapshot(targets, config, &distributions, t, rng));
         t += dt;
     }
     Ok(snapshots)
@@ -321,8 +363,15 @@ fn trajectory_time_bounds(targets: &[TargetTrack]) -> (f64, f64) {
     let mut t_start = f64::INFINITY;
     let mut t_end = f64::NEG_INFINITY;
     for target in targets {
-        let first = target.waypoints.first().unwrap().time;
-        let last = target.waypoints.last().unwrap().time;
+        // `validate_inputs` guarantees non-empty waypoints, but we still
+        // pattern-match rather than unwrap so SonarCloud doesn't flag a
+        // potential panic.
+        let Some(first) = target.waypoints.first().map(|wp| wp.time) else {
+            continue;
+        };
+        let Some(last) = target.waypoints.last().map(|wp| wp.time) else {
+            continue;
+        };
         if first < t_start {
             t_start = first;
         }
@@ -400,23 +449,21 @@ fn write_target_returns<R: Rng>(
     point_cursor: &mut usize,
     wp: &Waypoint,
     config: &TrajectoryRadarConfig,
+    distributions: &SnapshotDistributions,
     rng: &mut R,
 ) {
-    let noise = Normal::new(0.0, config.return_position_noise_m).unwrap();
-    let intensity_dist = Uniform::new(
-        config.target_intensity_max * 0.5,
-        config.target_intensity_max,
-    )
-    .unwrap();
     for _ in 0..config.returns_per_target {
         if *point_cursor >= POINT_CLOUD_SIZE {
             break;
         }
         let base = *point_cursor * POINT_DIM;
-        snapshot.point_cloud[base] = (wp.position[0] + noise.sample(rng)) as f32;
-        snapshot.point_cloud[base + 1] = (wp.position[1] + noise.sample(rng)) as f32;
-        snapshot.point_cloud[base + 2] = (wp.position[2] + noise.sample(rng)) as f32;
-        snapshot.point_cloud[base + 3] = intensity_dist.sample(rng);
+        snapshot.point_cloud[base] =
+            (wp.position[0] + distributions.return_noise.sample(rng)) as f32;
+        snapshot.point_cloud[base + 1] =
+            (wp.position[1] + distributions.return_noise.sample(rng)) as f32;
+        snapshot.point_cloud[base + 2] =
+            (wp.position[2] + distributions.return_noise.sample(rng)) as f32;
+        snapshot.point_cloud[base + 3] = distributions.target_intensity.sample(rng);
         *point_cursor += 1;
     }
 }
@@ -424,22 +471,15 @@ fn write_target_returns<R: Rng>(
 fn fill_clutter<R: Rng>(
     snapshot: &mut RadarSnapshot,
     point_cursor: &mut usize,
-    config: &TrajectoryRadarConfig,
+    distributions: &SnapshotDistributions,
     rng: &mut R,
 ) {
-    let xy_dist = Uniform::new(
-        -config.clutter_half_extent_m as f32,
-        config.clutter_half_extent_m as f32,
-    )
-    .unwrap();
-    let z_dist = Uniform::new(0.0_f32, (config.clutter_half_extent_m * 0.2) as f32).unwrap();
-    let intensity_dist = Uniform::new(0.0_f32, config.clutter_intensity_max).unwrap();
     while *point_cursor < POINT_CLOUD_SIZE {
         let base = *point_cursor * POINT_DIM;
-        snapshot.point_cloud[base] = xy_dist.sample(rng);
-        snapshot.point_cloud[base + 1] = xy_dist.sample(rng);
-        snapshot.point_cloud[base + 2] = z_dist.sample(rng);
-        snapshot.point_cloud[base + 3] = intensity_dist.sample(rng);
+        snapshot.point_cloud[base] = distributions.clutter_xy.sample(rng);
+        snapshot.point_cloud[base + 1] = distributions.clutter_xy.sample(rng);
+        snapshot.point_cloud[base + 2] = distributions.clutter_z.sample(rng);
+        snapshot.point_cloud[base + 3] = distributions.clutter_intensity.sample(rng);
         *point_cursor += 1;
     }
 }
@@ -447,6 +487,7 @@ fn fill_clutter<R: Rng>(
 fn make_snapshot<R: Rng>(
     targets: &[TargetTrack],
     config: &TrajectoryRadarConfig,
+    distributions: &SnapshotDistributions,
     t: f64,
     rng: &mut R,
 ) -> RadarSnapshot {
@@ -470,9 +511,16 @@ fn make_snapshot<R: Rng>(
             write_box(&mut snapshot, box_slot, &wp, target);
             box_slot += 1;
         }
-        write_target_returns(&mut snapshot, &mut point_cursor, &wp, config, rng);
+        write_target_returns(
+            &mut snapshot,
+            &mut point_cursor,
+            &wp,
+            config,
+            distributions,
+            rng,
+        );
     }
-    fill_clutter(&mut snapshot, &mut point_cursor, config, rng);
+    fill_clutter(&mut snapshot, &mut point_cursor, distributions, rng);
     snapshot
 }
 
