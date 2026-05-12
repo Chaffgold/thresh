@@ -277,9 +277,9 @@ pub fn from_trajectory<R: Rng>(
     rng: &mut R,
 ) -> Result<Vec<RadarSnapshot>, TrajectoryRadarError> {
     validate_inputs(targets, config)?;
+    let dt = sample_period(config.sample_rate_hz)?;
     let distributions = build_distributions(config)?;
     let (t_start, t_end) = trajectory_time_bounds(targets);
-    let dt = 1.0 / config.sample_rate_hz;
     let mut snapshots = Vec::new();
     let mut t = t_start;
     while t <= t_end + 1e-9 {
@@ -301,8 +301,8 @@ pub fn measurements_from_trajectory<R: Rng>(
     rng: &mut R,
 ) -> Result<Vec<Vec<Measurement>>, TrajectoryRadarError> {
     validate_inputs(targets, config)?;
+    let dt = sample_period(config.sample_rate_hz)?;
     let (t_start, t_end) = trajectory_time_bounds(targets);
-    let dt = 1.0 / config.sample_rate_hz;
     let mut per_tick = Vec::new();
     let mut t = t_start;
     while t <= t_end + 1e-9 {
@@ -310,7 +310,7 @@ pub fn measurements_from_trajectory<R: Rng>(
         for target in targets {
             if let Some(wp) = interpolate_at(&target.waypoints, t) {
                 let translated = translate_to_sensor_frame(&wp, &config.sensor);
-                let rcs = config.class_rcs_m2[target.class_id as usize];
+                let rcs = class_rcs(config, target.class_id);
                 if let Some(m) = crate::measurement_gen::generate_radar_with_rcs(
                     &translated,
                     &config.radar,
@@ -330,6 +330,40 @@ pub fn measurements_from_trajectory<R: Rng>(
 // ---------------------------------------------------------------------------
 // Internals
 // ---------------------------------------------------------------------------
+
+/// Compute the per-tick sample period in seconds, surfacing zero/negative
+/// `sample_rate_hz` as a recoverable error rather than relying on
+/// validate_inputs to prevent the division.
+fn sample_period(sample_rate_hz: f64) -> Result<f64, TrajectoryRadarError> {
+    if sample_rate_hz <= 0.0 || !sample_rate_hz.is_finite() {
+        return Err(TrajectoryRadarError::InvalidSampleRate(sample_rate_hz));
+    }
+    Ok(1.0 / sample_rate_hz)
+}
+
+/// Look up a class's RCS, defaulting to `1.0` for any out-of-range class id.
+/// `validate_inputs` rejects out-of-range class ids; this is a defence-in-depth
+/// fallback that means callers cannot panic on the lookup.
+fn class_rcs(config: &TrajectoryRadarConfig, class_id: u32) -> f64 {
+    config
+        .class_rcs_m2
+        .get(class_id as usize)
+        .copied()
+        .unwrap_or(1.0)
+}
+
+/// Look up a class's default box dimensions; same defence-in-depth fallback
+/// as [`class_rcs`].
+fn class_box_dims(class_id: u32) -> BoxDimensions {
+    CLASS_BOX_DIMS
+        .get(class_id as usize)
+        .copied()
+        .unwrap_or(BoxDimensions {
+            length: 10.0,
+            width: 10.0,
+            height: 5.0,
+        })
+}
 
 fn validate_inputs(
     targets: &[TargetTrack],
@@ -431,7 +465,7 @@ fn yaw_from_velocity(vel: &[f64; 3]) -> f64 {
 fn write_box(snapshot: &mut RadarSnapshot, slot: usize, wp: &Waypoint, target: &TargetTrack) {
     let dims = target
         .size_override
-        .unwrap_or(CLASS_BOX_DIMS[target.class_id as usize]);
+        .unwrap_or_else(|| class_box_dims(target.class_id));
     let base = slot * BOX_DIM;
     snapshot.gt_boxes[base] = wp.position[0] as f32;
     snapshot.gt_boxes[base + 1] = wp.position[1] as f32;
@@ -502,7 +536,7 @@ fn make_snapshot<R: Rng>(
         if range > config.max_range_m || range < 1.0 {
             continue;
         }
-        let rcs = config.class_rcs_m2[target.class_id as usize];
+        let rcs = class_rcs(config, target.class_id);
         let pd = detection_probability(range, Some(rcs), &config.radar);
         if rng.random::<f64>() > pd {
             continue;
