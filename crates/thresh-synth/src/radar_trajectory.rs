@@ -384,10 +384,12 @@ fn validate_inputs(
         if target.class_id as usize >= CLASS_BOX_DIMS.len() {
             return Err(TrajectoryRadarError::InvalidClass(target.class_id));
         }
-        for (i, pair) in target.waypoints.windows(2).enumerate() {
-            if pair[1].time < pair[0].time {
-                return Err(TrajectoryRadarError::UnsortedWaypoints(i + 1));
-            }
+        let regression = target
+            .waypoints
+            .windows(2)
+            .position(|pair| matches!(pair, [a, b] if b.time < a.time));
+        if let Some(i) = regression {
+            return Err(TrajectoryRadarError::UnsortedWaypoints(i + 1));
         }
     }
     Ok(())
@@ -422,21 +424,25 @@ fn interpolate_at(waypoints: &[Waypoint], t: f64) -> Option<Waypoint> {
     if t < first.time || t > last.time {
         return None;
     }
-    // Binary search for the upper-bound waypoint.
+    // Binary search for the segment containing `t`. `mid` uses the
+    // overflow-safe form `lo + (hi - lo) / 2` rather than `(lo + hi) / 2`
+    // (CWE-190 / the classic broken-binary-search bug), and every index
+    // goes through `.get()` so the loop cannot panic.
     let mut lo = 0usize;
     let mut hi = waypoints.len();
     while lo + 1 < hi {
-        let mid = (lo + hi) / 2;
-        if waypoints[mid].time <= t {
-            lo = mid;
-        } else {
-            hi = mid;
+        let mid = lo + (hi - lo) / 2;
+        match waypoints.get(mid) {
+            Some(wp) if wp.time <= t => lo = mid,
+            Some(_) => hi = mid,
+            None => break,
         }
     }
-    if lo + 1 >= waypoints.len() {
-        return Some(waypoints[lo].clone());
+    let lower = waypoints.get(lo)?;
+    match waypoints.get(lo + 1) {
+        Some(upper) => Some(Waypoint::interpolate(lower, upper, t)),
+        None => Some(lower.clone()),
     }
-    Some(Waypoint::interpolate(&waypoints[lo], &waypoints[lo + 1], t))
 }
 
 fn translate_to_sensor_frame(wp: &Waypoint, sensor: &SensorPose) -> Waypoint {
