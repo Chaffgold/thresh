@@ -281,10 +281,9 @@ pub fn from_trajectory<R: Rng>(
     let distributions = build_distributions(config)?;
     let (t_start, t_end) = trajectory_time_bounds(targets);
     let mut snapshots = Vec::new();
-    let mut t = t_start;
-    while t <= t_end + 1e-9 {
+    for i in 0..tick_count(t_start, t_end, dt) {
+        let t = t_start + i as f64 * dt;
         snapshots.push(make_snapshot(targets, config, &distributions, t, rng));
-        t += dt;
     }
     Ok(snapshots)
 }
@@ -304,8 +303,8 @@ pub fn measurements_from_trajectory<R: Rng>(
     let dt = sample_period(config.sample_rate_hz)?;
     let (t_start, t_end) = trajectory_time_bounds(targets);
     let mut per_tick = Vec::new();
-    let mut t = t_start;
-    while t <= t_end + 1e-9 {
+    for i in 0..tick_count(t_start, t_end, dt) {
+        let t = t_start + i as f64 * dt;
         let mut tick = Vec::new();
         for target in targets {
             if let Some(wp) = interpolate_at(&target.waypoints, t) {
@@ -322,7 +321,6 @@ pub fn measurements_from_trajectory<R: Rng>(
             }
         }
         per_tick.push(tick);
-        t += dt;
     }
     Ok(per_tick)
 }
@@ -339,6 +337,15 @@ fn sample_period(sample_rate_hz: f64) -> Result<f64, TrajectoryRadarError> {
         return Err(TrajectoryRadarError::InvalidSampleRate(sample_rate_hz));
     }
     Ok(1.0 / sample_rate_hz)
+}
+
+/// Number of snapshot ticks over `[t_start, t_end]` at step `dt`, matching
+/// the inclusive `t <= t_end` sweep with a 1 ns epsilon. Callers drive the
+/// sweep off an integer index (`t_start + i * dt`) rather than an
+/// accumulating float counter: this avoids drift and the float-loop-counter
+/// reliability rule (rust:S2193). `dt > 0` is guaranteed by `sample_period`.
+fn tick_count(t_start: f64, t_end: f64, dt: f64) -> usize {
+    ((t_end + 1e-9 - t_start) / dt).floor() as usize + 1
 }
 
 /// Look up a class's RCS, defaulting to `1.0` for any out-of-range class id.
