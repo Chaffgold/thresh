@@ -54,21 +54,7 @@ impl UnscentedKalmanFilter {
 
     /// Ensure P is positive definite by clamping negative eigenvalues.
     fn ensure_psd(&mut self) {
-        let eigen = self.p.clone().symmetric_eigen();
-        let min_eig = 1e-10;
-        let mut needs_repair = false;
-        let mut clamped = eigen.eigenvalues.clone();
-        for i in 0..clamped.len() {
-            if clamped[i] < min_eig {
-                clamped[i] = min_eig;
-                needs_repair = true;
-            }
-        }
-        if needs_repair {
-            let d = DMatrix::from_diagonal(&clamped);
-            self.p = &eigen.eigenvectors * d * eigen.eigenvectors.transpose();
-            self.p = (&self.p + self.p.transpose()) * 0.5;
-        }
+        crate::cov::ensure_psd(&mut self.p);
     }
 
     /// Generate 2n+1 sigma points and their weights.
@@ -173,12 +159,15 @@ impl UnscentedKalmanFilter {
         }
         s_mat += r;
 
-        // Kalman gain
-        let s_inv = s_mat
+        // Kalman gain. K = Pxz * S^-1; S is symmetric, so K^T =
+        // solve(S, Pxz^T). An LU solve is better-conditioned than
+        // forming S^-1 explicitly.
+        let k = s_mat
             .clone()
-            .try_inverse()
-            .expect("UKF innovation covariance S is singular");
-        let k = &pxz * &s_inv;
+            .lu()
+            .solve(&pxz.transpose())
+            .expect("UKF innovation covariance S is singular")
+            .transpose();
 
         // Update
         let innovation = z - &z_pred;

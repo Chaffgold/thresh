@@ -31,7 +31,7 @@ Cargo workspace with 10 crates. Dependency flow (lower depends on higher):
 ```
 thresh-core          (types: state vectors, measurements, covariance, coords, sensors, tracks, time)
     ↓
-thresh-filter        (KF, EKF, UKF + motion models: CV, CA, CTRV, CT)
+thresh-filter        (KF, EKF, UKF, CKF + motion models: CV, CA, CTRV, CT)
 thresh-association   (Hungarian, Mahalanobis gating, IoU, cascaded association)
 thresh-fusion        (centralized fusion, information filter, covariance intersection)
     ↓
