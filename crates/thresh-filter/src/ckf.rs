@@ -37,44 +37,23 @@ impl CubatureKalmanFilter {
         Self { x, p }
     }
 
-    /// Ensure P is positive definite by clamping negative eigenvalues.
-    ///
-    /// Mirrors [`crate::ukf::UnscentedKalmanFilter`]'s repair step so the two
-    /// filters behave identically on near-degenerate covariances.
-    fn ensure_psd(&mut self) {
-        let eigen = self.p.clone().symmetric_eigen();
-        let min_eig = 1e-10;
-        let mut needs_repair = false;
-        let mut clamped = eigen.eigenvalues.clone();
-        for i in 0..clamped.len() {
-            if clamped[i] < min_eig {
-                clamped[i] = min_eig;
-                needs_repair = true;
-            }
-        }
-        if needs_repair {
-            let d = DMatrix::from_diagonal(&clamped);
-            self.p = &eigen.eigenvectors * d * eigen.eigenvectors.transpose();
-            self.p = (&self.p + self.p.transpose()) * 0.5;
-        }
-    }
-
     /// Generate the `2n` cubature points for the current `(x, p)` state.
     ///
     /// Third-order spherical-radial rule: `S = chol(P)`, then emit
     /// `x ± √n · S_{:,i}` for each column `i`. All points carry the implicit
     /// weight `1 / (2n)`, applied by the callers.
     fn cubature_points(&mut self) -> Vec<DVector<f64>> {
-        self.ensure_psd();
+        // `ensure_psd` clamps the eigenvalue floor to a strictly positive
+        // value, so the subsequent Cholesky is guaranteed to succeed.
+        crate::cov::ensure_psd(&mut self.p);
         let n = self.x.len();
         let sqrt_n = (n as f64).sqrt();
 
-        let chol = self.p.clone().cholesky().unwrap_or_else(|| {
-            // Fallback: regularize with a small identity (matches UKF).
-            let reg = &self.p + DMatrix::identity(n, n) * 1e-8;
-            reg.cholesky()
-                .expect("P is not recoverable for CKF cubature points")
-        });
+        let chol = self
+            .p
+            .clone()
+            .cholesky()
+            .expect("P is positive-definite after ensure_psd");
         let l = chol.l();
 
         let mut points = Vec::with_capacity(2 * n);
@@ -112,7 +91,7 @@ impl CubatureKalmanFilter {
         p_pred += q;
 
         self.x = x_pred;
-        self.p = (&p_pred + p_pred.transpose()) * 0.5;
+        self.p = crate::cov::symmetrize(&p_pred);
     }
 
     /// Update step given measurement `z`, observation function `h_fn`, and
@@ -155,8 +134,8 @@ impl CubatureKalmanFilter {
         self.x = &self.x + &k * &innovation;
         self.p = &self.p - &k * &s_mat * k.transpose();
 
-        self.p = (&self.p + self.p.transpose()) * 0.5;
-        self.ensure_psd();
+        self.p = crate::cov::symmetrize(&self.p);
+        crate::cov::ensure_psd(&mut self.p);
     }
 
     /// Linear update (convenience for sensors with a linear `H`).
@@ -200,6 +179,19 @@ mod tests {
             .iter()
             .copied()
             .fold(f64::INFINITY, f64::min)
+    }
+
+    /// Position-only observation matrix for the 6D `[x,vx,y,vy,z,vz]` state
+    /// (observes `x`, `y`, `z`). Shared by the multi-step CKF tests.
+    fn pos_obs_h() -> DMatrix<f64> {
+        DMatrix::from_row_slice(
+            3,
+            6,
+            &[
+                1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                1.0, 0.0,
+            ],
+        )
     }
 
     // 2.1
@@ -357,14 +349,7 @@ mod tests {
             DMatrix::identity(6, 6) * 10.0,
         );
         let model = ConstantVelocity::new(1.0);
-        let h = DMatrix::from_row_slice(
-            3,
-            6,
-            &[
-                1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                1.0, 0.0,
-            ],
-        );
+        let h = pos_obs_h();
         let r = DMatrix::identity(3, 3) * 4.0;
         let mut rng = Lcg::new(7);
 
@@ -401,14 +386,7 @@ mod tests {
         let mut ukf = UnscentedKalmanFilter::new(x0, p0, UkfParams::default());
 
         let model = ConstantVelocity::new(1.0);
-        let h = DMatrix::from_row_slice(
-            3,
-            6,
-            &[
-                1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                1.0, 0.0,
-            ],
-        );
+        let h = pos_obs_h();
         let r = DMatrix::identity(3, 3) * 9.0;
         let mut rng = Lcg::new(2024);
 

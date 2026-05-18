@@ -54,21 +54,7 @@ impl UnscentedKalmanFilter {
 
     /// Ensure P is positive definite by clamping negative eigenvalues.
     fn ensure_psd(&mut self) {
-        let eigen = self.p.clone().symmetric_eigen();
-        let min_eig = 1e-10;
-        let mut needs_repair = false;
-        let mut clamped = eigen.eigenvalues.clone();
-        for i in 0..clamped.len() {
-            if clamped[i] < min_eig {
-                clamped[i] = min_eig;
-                needs_repair = true;
-            }
-        }
-        if needs_repair {
-            let d = DMatrix::from_diagonal(&clamped);
-            self.p = &eigen.eigenvectors * d * eigen.eigenvectors.transpose();
-            self.p = (&self.p + self.p.transpose()) * 0.5;
-        }
+        crate::cov::ensure_psd(&mut self.p);
     }
 
     /// Generate 2n+1 sigma points and their weights.
