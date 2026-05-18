@@ -8,7 +8,7 @@ The IMM filter bank in `thresh-filter::imm` becomes filter-agnostic: each model-
 
 ### Requirement: LeafFilter trait
 
-`thresh-filter` MUST expose a `LeafFilter` trait capturing the predict/update/state-accessor contract the IMM bank needs, and MUST implement it for `ExtendedKalmanFilter`, `UnscentedKalmanFilter`, and `CubatureKalmanFilter`.
+`thresh-filter` MUST expose a `LeafFilter` trait capturing the predict/update contract plus state accessors **and mutators** — `x()`, `p()`, `set_x()`, `set_p()` — the IMM bank needs (the interaction step writes mixed state back into each leaf, so setters are mandatory, not optional). It MUST implement the trait for `ExtendedKalmanFilter`, `UnscentedKalmanFilter`, and `CubatureKalmanFilter`.
 
 #### Scenario: All three filters satisfy the trait
 

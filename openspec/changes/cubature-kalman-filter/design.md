@@ -48,6 +48,18 @@ CKF (Arasaratnam & Haykin, 2009) is a structurally simpler nonlinear Kalman filt
 
 **Rationale:** Need to read code before committing to a tracker-side change. The IMM wiring is well-defined (the `StateMapping` trait must be implementable for CKF state); the tracker-side wiring depends on what's already there.
 
+### 5. Test parity with UKF
+
+**Decision:** Mirror `ukf::tests` one-for-one. Specifically: linear-system convergence, nonlinear bearings-only example with covariance reduction over multiple updates, and a random-perturbation invariant test that asserts the covariance stays symmetric and positive-definite after `predict` and `update`.
+
+**Rationale:** The CKF and UKF should be empirically interchangeable on linear and mildly-nonlinear problems. Side-by-side tests pin that behaviour and catch regressions if either filter drifts.
+
+### 6. Documentation includes the Arasaratnam-Haykin reference
+
+**Decision:** The module-level docstring on `ckf.rs` cites Arasaratnam & Haykin 2009 ("Cubature Kalman Filters", IEEE Transactions on Automatic Control, vol. 54, no. 6) and points to `docs/reference/` for the worked derivation if one is added.
+
+**Rationale:** This is standard for the existing filter modules and helps anyone debugging cubature rules later.
+
 ### 7. IMM-leaf integration deferred to a separate change (post-survey amendment)
 
 **Decision:** Phases 3 (IMM integration) is **descoped from this change**. CKF ships as a `thresh-filter`-level filter (Phases 1, 2, 5, 6). A new change, `imm-pluggable-leaf-filter`, will introduce the abstraction that lets CKF (and UKF) be IMM-bank leaves.
@@ -62,18 +74,6 @@ Making CKF an IMM leaf therefore requires generalizing the IMM leaf into a trait
 ### 8. Tracker-side filter-kind wiring confirmed unnecessary (post-survey amendment)
 
 **Decision:** Phase 4 is a no-op. Survey of every file under `crates/thresh-tracker/src/` (grep for `FilterKind` / `filter_kind` / `Kf` / `Ekf` / `Ukf` / `kalman`) found **no filter-kind selector of any kind**. Per Decision 4, nothing is added tracker-side; CKF is reachable through the `thresh-filter` API.
-
-### 5. Test parity with UKF
-
-**Decision:** Mirror `ukf::tests` one-for-one. Specifically: linear-system convergence, nonlinear bearings-only example with covariance reduction over multiple updates, and a random-perturbation invariant test that asserts the covariance stays symmetric and positive-definite after `predict` and `update`.
-
-**Rationale:** The CKF and UKF should be empirically interchangeable on linear and mildly-nonlinear problems. Side-by-side tests pin that behaviour and catch regressions if either filter drifts.
-
-### 6. Documentation includes the Arasaratnam-Haykin reference
-
-**Decision:** The module-level docstring on `ckf.rs` cites Arasaratnam & Haykin 2009 ("Cubature Kalman Filters", IEEE Transactions on Automatic Control, vol. 54, no. 6) and points to `docs/reference/` for the worked derivation if one is added.
-
-**Rationale:** This is standard for the existing filter modules and helps anyone debugging cubature rules later.
 
 ## Risks
 

@@ -159,12 +159,15 @@ impl UnscentedKalmanFilter {
         }
         s_mat += r;
 
-        // Kalman gain
-        let s_inv = s_mat
+        // Kalman gain. K = Pxz * S^-1; S is symmetric, so K^T =
+        // solve(S, Pxz^T). An LU solve is better-conditioned than
+        // forming S^-1 explicitly.
+        let k = s_mat
             .clone()
-            .try_inverse()
-            .expect("UKF innovation covariance S is singular");
-        let k = &pxz * &s_inv;
+            .lu()
+            .solve(&pxz.transpose())
+            .expect("UKF innovation covariance S is singular")
+            .transpose();
 
         // Update
         let innovation = z - &z_pred;

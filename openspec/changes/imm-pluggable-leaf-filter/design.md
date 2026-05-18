@@ -46,11 +46,15 @@ So a trait over that surface is mechanical; the work is the IMM refactor and not
 
 **Rationale:** The bank stores a heterogeneous-by-config collection and is already trait-object-heavy (`Box<dyn MotionModel>`, `Box<dyn StateMapping>`). Generics would virally parameterize `ImmFilter`, `ImmConfig`, and every caller. A boxed trait keeps the public `ImmFilter` type unchanged.
 
+**API impact:** `ExtendedKalmanFilter`, `UnscentedKalmanFilter`, and `CubatureKalmanFilter` currently expose `x` / `p` as public fields with no accessor methods. Each must gain four trivial wrappers (`x()`, `p()`, `set_x()`, `set_p()`) to implement the trait — a small but real public-API surface addition (additive, not breaking: the existing public fields stay). Tracked as a Risk below.
+
 ### 2. Leaf kind selected on `ImmConfig`, default `Ekf`
 
 **Decision:** Add `pub leaf_kind: ImmLeafKind` (`enum ImmLeafKind { Ekf, Ukf, Ckf }`) to `ImmConfig`, defaulting to `Ekf`. Existing constructors (`cv_ca`, `cv_ctrv`, `cv_ca_ctrv_ct`) set `Ekf` so behaviour is byte-for-byte unchanged.
 
 **Rationale:** Backward compatibility is the dominant risk. A defaulted field localizes the change and lets the parity test flip a single knob.
+
+**Ownership:** `ImmFilter::new` copies `config.leaf_kind` into a new `ImmFilter` field at construction time; `update_step` reads `self.leaf_kind` (not the config) when instantiating the temporary common-space leaf, so the kind is owned by the filter instance rather than re-read from the config on every call.
 
 ### 3. UKF leaf uses default `UkfParams`
 

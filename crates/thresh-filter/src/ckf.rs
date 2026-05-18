@@ -43,17 +43,19 @@ impl CubatureKalmanFilter {
     /// `x ± √n · S_{:,i}` for each column `i`. All points carry the implicit
     /// weight `1 / (2n)`, applied by the callers.
     fn cubature_points(&mut self) -> Vec<DVector<f64>> {
-        // `ensure_psd` clamps the eigenvalue floor to a strictly positive
-        // value, so the subsequent Cholesky is guaranteed to succeed.
         crate::cov::ensure_psd(&mut self.p);
         let n = self.x.len();
         let sqrt_n = (n as f64).sqrt();
 
-        let chol = self
-            .p
-            .clone()
-            .cholesky()
-            .expect("P is positive-definite after ensure_psd");
+        let chol = self.p.clone().cholesky().unwrap_or_else(|| {
+            // Fallback: regularize with a small identity. Mirrors
+            // `ukf::UnscentedKalmanFilter::sigma_points` so both filters
+            // degrade identically on a near-degenerate P that survives
+            // `ensure_psd` but still trips the Cholesky pivot tolerance.
+            let reg = &self.p + DMatrix::identity(n, n) * 1e-8;
+            reg.cholesky()
+                .expect("P is not recoverable for CKF cubature points")
+        });
         let l = chol.l();
 
         let mut points = Vec::with_capacity(2 * n);
@@ -124,11 +126,15 @@ impl CubatureKalmanFilter {
         }
         s_mat += r;
 
-        let s_inv = s_mat
+        // K = Pxz * S^-1. S is symmetric, so K^T = S^-1 * Pxz^T =
+        // solve(S, Pxz^T); an LU solve is better-conditioned than
+        // forming S^-1 explicitly.
+        let k = s_mat
             .clone()
-            .try_inverse()
-            .expect("CKF innovation covariance S is singular");
-        let k = &pxz * &s_inv;
+            .lu()
+            .solve(&pxz.transpose())
+            .expect("CKF innovation covariance S is singular")
+            .transpose();
 
         let innovation = z - &z_pred;
         self.x = &self.x + &k * &innovation;

@@ -4,7 +4,7 @@
 
 ## 1. LeafFilter trait
 
-- [ ] 1.1 Define `pub trait LeafFilter: Send + Sync` in `imm.rs` (or a new `leaf.rs`) with `predict(&mut self, &dyn MotionModel, f64)`, `update_linear(&mut self, &DVector<f64>, &DMatrix<f64>, &DMatrix<f64>)`, `x(&self) -> &DVector<f64>`, `p(&self) -> &DMatrix<f64>`, `set_x(&mut self, DVector<f64>)`, `set_p(&mut self, DMatrix<f64>)`.
+- [ ] 1.1 Define `pub trait LeafFilter: Send + Sync` **in `imm.rs`** (trait + `ImmLeafKind` + `make_leaf` are ~100 lines total — co-locating them avoids a new module and extra `pub use` re-exports; revisit a dedicated `leaf.rs` only if later leaf utilities materialize) with `predict(&mut self, &dyn MotionModel, f64)`, `update_linear(&mut self, &DVector<f64>, &DMatrix<f64>, &DMatrix<f64>)`, `x(&self) -> &DVector<f64>`, `p(&self) -> &DMatrix<f64>`, `set_x(&mut self, DVector<f64>)`, `set_p(&mut self, DMatrix<f64>)`.
 - [ ] 1.2 `impl LeafFilter for ExtendedKalmanFilter`.
 - [ ] 1.3 `impl LeafFilter for UnscentedKalmanFilter` (construct with `UkfParams::default()` where the bank instantiates it).
 - [ ] 1.4 `impl LeafFilter for CubatureKalmanFilter`.
