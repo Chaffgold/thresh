@@ -7,7 +7,7 @@ use nalgebra::DMatrix;
 /// Covariance eigenvalue floor used when repairing an indefinite matrix.
 const MIN_EIGENVALUE: f64 = 1e-10;
 
-/// Clamp any eigenvalues below [`MIN_EIGENVALUE`] back up to it, restoring
+/// Clamp any eigenvalues below `MIN_EIGENVALUE` back up to it, restoring
 /// positive-definiteness. A no-op when `p` is already positive-definite.
 pub fn ensure_psd(p: &mut DMatrix<f64>) {
     let eigen = p.clone().symmetric_eigen();
