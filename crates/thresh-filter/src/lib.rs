@@ -1,5 +1,6 @@
-//! Kalman filter family (KF, EKF, UKF) with configurable motion models.
+//! Kalman filter family (KF, EKF, UKF, CKF) with configurable motion models.
 
+pub mod ckf;
 pub mod ekf;
 pub mod imm;
 pub mod kf;

@@ -20,6 +20,7 @@ CKF (Arasaratnam & Haykin, 2009) is a structurally simpler nonlinear Kalman filt
 - Square-root CKF (SR-CKF). Numerically robust on limited-precision hardware; not needed for thresh's host-CPU targets.
 - Benchmarking CKF vs. UKF on existing thresh scenarios. A separate evaluation change.
 - A `CkfParams` struct. CKF is parameter-free by design — adding a knob would defeat the point.
+- **CKF as an IMM-bank leaf.** Deferred to a separate change (`imm-pluggable-leaf-filter`) — see Decision 7. The IMM bank hardcodes an EKF leaf and has no pluggable-filter trait, so this is a real `imm.rs` refactor, not the verbatim copy the original design assumed.
 
 ## Decisions
 
@@ -47,6 +48,21 @@ CKF (Arasaratnam & Haykin, 2009) is a structurally simpler nonlinear Kalman filt
 
 **Rationale:** Need to read code before committing to a tracker-side change. The IMM wiring is well-defined (the `StateMapping` trait must be implementable for CKF state); the tracker-side wiring depends on what's already there.
 
+### 7. IMM-leaf integration deferred to a separate change (post-survey amendment)
+
+**Decision:** Phases 3 (IMM integration) is **descoped from this change**. CKF ships as a `thresh-filter`-level filter (Phases 1, 2, 5, 6). A new change, `imm-pluggable-leaf-filter`, will introduce the abstraction that lets CKF (and UKF) be IMM-bank leaves.
+
+**Rationale (what the Task 3 survey actually found):** Decisions 1 and 5 and the Risk below assumed there was *"an existing `StateMapping` impl on `UnscentedKalmanFilter`"* to copy. There is not. In the real code:
+
+- `StateMapping` is implemented **per motion model** (`CvMapping`, `CaMapping`, `CtrvMapping`, `CtMapping`) — it maps state *layouts* (CV's 6D, CA's 9D, CTRV's 5D) to a common 6D space. It is orthogonal to filter type.
+- `ModelConditionedFilter` **hardcodes `ExtendedKalmanFilter`** as the per-mode leaf, and `ImmFilter::update_step` even constructs a temporary `ExtendedKalmanFilter` internally. There is no leaf-filter trait that UKF or CKF implements, so there is nothing to "copy verbatim".
+
+Making CKF an IMM leaf therefore requires generalizing the IMM leaf into a trait — a genuine `imm.rs` refactor with regression risk against the existing IMM test suite. That is out of scope for a single-PR filter addition and is tracked as its own change.
+
+### 8. Tracker-side filter-kind wiring confirmed unnecessary (post-survey amendment)
+
+**Decision:** Phase 4 is a no-op. Survey of every file under `crates/thresh-tracker/src/` (grep for `FilterKind` / `filter_kind` / `Kf` / `Ekf` / `Ukf` / `kalman`) found **no filter-kind selector of any kind**. Per Decision 4, nothing is added tracker-side; CKF is reachable through the `thresh-filter` API.
+
 ### 5. Test parity with UKF
 
 **Decision:** Mirror `ukf::tests` one-for-one. Specifically: linear-system convergence, nonlinear bearings-only example with covariance reduction over multiple updates, and a random-perturbation invariant test that asserts the covariance stays symmetric and positive-definite after `predict` and `update`.
@@ -61,12 +77,12 @@ CKF (Arasaratnam & Haykin, 2009) is a structurally simpler nonlinear Kalman filt
 
 ## Risks
 
-- **IMM-bank wiring.** The IMM filter expects each leaf to map to/from a common state representation via `StateMapping`. CKF's state representation is identical to UKF's (a flat mean + covariance), so the existing `StateMapping` impl on `UnscentedKalmanFilter` should be replicable verbatim — but worth verifying during Task 3.
+- ~~**IMM-bank wiring.**~~ **Resolved (Decision 7):** the assumed `StateMapping` impl on `UnscentedKalmanFilter` does not exist; `StateMapping` is per motion model and the IMM leaf is a hardcoded EKF. IMM-leaf integration is descoped to the `imm-pluggable-leaf-filter` change. CKF's state representation (flat mean + covariance) is already IMM-compatible and will be adopted by that refactor.
 - **Cholesky failure on near-degenerate P.** If the covariance becomes near-singular (e.g. after a zero-noise predict on a stationary target), Cholesky can fail. The UKF handles this the same way; CKF will use the same fallback (return an error, propagated up).
 - **Performance.** CKF is 2n cubature points; UKF is 2n+1 sigma points. The compute difference is negligible (one extra column of state propagation), but worth a `criterion` benchmark eventually — captured as a follow-up, not in scope here.
 
 ## Open Questions
 
-- Does `thresh-tracker` expose a `FilterKind` enum that needs the `Ckf` variant, or does it dispatch on a different abstraction? Resolved during Task 3 implementation.
-- Should `CubatureKalmanFilter::new` accept an optional `process_noise_floor` parameter to clamp the covariance away from singularity? Likely yes if UKF has the same, but check first.
-- Worth comparing CKF + IMM against UKF + IMM on the `thresh-eval` ADS-B scenario to confirm no regression — separate evaluation PR after this lands.
+- ~~Does `thresh-tracker` expose a `FilterKind` enum?~~ **Resolved (Decision 8):** no — no filter-kind selector exists anywhere in `thresh-tracker`. Phase 4 is a no-op.
+- ~~Should `CubatureKalmanFilter::new` accept an optional `process_noise_floor` parameter?~~ **Resolved:** no. UKF's `new` has no such parameter; CKF matches the sibling-filter convention (store `(x, p)` as-is, repair via the shared `ensure_psd` step). Adding a knob would also contradict the parameter-free goal.
+- Worth comparing CKF + IMM against UKF + IMM on the `thresh-eval` ADS-B scenario to confirm no regression — belongs to the `imm-pluggable-leaf-filter` follow-up, after IMM can take a CKF leaf.

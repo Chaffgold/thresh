@@ -102,17 +102,17 @@ CKF and UKF MUST produce posterior estimates that agree within tight tolerances 
 
 **SHALL** be a shared test fixture that exercises both filters in parallel for at least 10 measurement steps.
 
-### Requirement: IMM filter-bank integration
+### Requirement: IMM-compatible state representation (leaf integration deferred)
 
-The CKF MUST be usable as a leaf filter inside the IMM filter bank in `thresh-filter::imm`. This requires a `StateMapping` implementation whose `to_common` / `from_common` semantics match those of the existing UKF leaf.
+The CKF MUST use the same flat `(mean, covariance)` state representation as the other `thresh-filter` filters so that a future IMM pluggable-leaf abstraction can adopt it without changing the CKF API. Wiring CKF in as an actual IMM-bank leaf is **deferred to the `imm-pluggable-leaf-filter` change** — see design.md Decision 7. The IMM bank in `thresh-filter::imm` currently hardcodes an EKF leaf and exposes no pluggable-filter trait; `StateMapping` is implemented per motion model, not per filter, so there is no existing impl to mirror.
 
-#### Scenario: CKF leaf in an IMM bank
+#### Scenario: CKF state representation matches the sibling filters
 
-**WHEN** an IMM filter bank is configured with a CKF leaf and stepped through `predict` and `update` over a synthetic trajectory
+**WHEN** a `CubatureKalmanFilter` is constructed and stepped
 
-**THEN** the bank produces mode probabilities that sum to one and a combined state estimate that tracks the truth within reasonable tolerance
+**THEN** its public state is a `DVector<f64>` mean `x` and a `DMatrix<f64>` covariance `p`, identical in shape and semantics to `ExtendedKalmanFilter` / `UnscentedKalmanFilter`
 
-**SHALL** match the behaviour of the equivalent UKF-leaf IMM bank to within statistical equivalence over a fixed-seed run.
+**SHALL** be the only IMM-readiness guarantee in this change; the `imm-pluggable-leaf-filter` change owns the trait and the IMM-leaf behavioural parity test.
 
 ### Requirement: Filter-kind selector (conditional)
 
