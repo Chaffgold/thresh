@@ -22,9 +22,11 @@
 - [x] 2.5 `covariance_stays_symmetric_pd_under_perturbation` — random init, random predict/update sequence, assert P symmetric (||P - P^T|| < ε) and positive-definite (smallest eigenvalue > 0) after each step.
 - [x] 2.6 `ckf_and_ukf_agree_on_linear_problem` — same input, same motion model, same measurements, assert posterior means within 1e-6 and covariances within 1e-4. _CV motion model + linear H, 15 steps; passes at the spec tolerances._
 
-## 3. IMM filter-bank integration — DESCOPED (see design.md Decision 7)
+## 3. IMM filter-bank integration — DESCOPED (see design.md Decision 7) → DELIVERED in `imm-pluggable-leaf-filter`
 
 > Survey outcome: there is **no** `StateMapping` impl on `UnscentedKalmanFilter` to copy. `StateMapping` is per motion model (`Cv/Ca/Ctrv/Ct`), and `ModelConditionedFilter` hardcodes an `ExtendedKalmanFilter` leaf with no pluggable-filter trait. Making CKF an IMM leaf is a real `imm.rs` refactor, tracked as the separate `imm-pluggable-leaf-filter` change. CKF's flat `(x, p)` state is already IMM-compatible.
+>
+> **Update:** delivered by the `imm-pluggable-leaf-filter` change — `LeafFilter` trait + `ImmLeafKind` selector (`ImmFilter::with_leaf_kind`), with `imm_ckf_leaf_matches_ekf_leaf` carrying the descoped 3.3 parity test.
 
 - [x] 3.1 Inspect `thresh-filter::imm` to find the `StateMapping` impl pattern used for UKF leaves. _Done — found the mismatch above; no UKF-leaf `StateMapping` exists._
 - [~] 3.2 Descoped to `imm-pluggable-leaf-filter`: no UKF `StateMapping` to copy; requires a leaf-filter trait refactor of `imm.rs`.
