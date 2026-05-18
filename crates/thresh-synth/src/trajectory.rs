@@ -11,6 +11,43 @@ pub struct Waypoint {
     pub velocity: [f64; 3],
 }
 
+impl Waypoint {
+    /// Linear interpolation of position and velocity at `t` between `prev` and `next`.
+    ///
+    /// Used by [`crate::radar_trajectory`] to upsample sparse (e.g. 1 Hz ADS-B)
+    /// trajectories to the synth's sample rate. The interpolation is
+    /// constant-velocity inside the segment: position is linearly interpolated
+    /// in time, and velocity is linearly interpolated between the endpoint
+    /// velocities.
+    ///
+    /// If `t` is outside `[prev.time, next.time]` the result is the nearer
+    /// endpoint (clamped, not extrapolated). Both endpoints are returned
+    /// unchanged when their times are equal (avoids divide-by-zero).
+    pub fn interpolate(prev: &Waypoint, next: &Waypoint, t: f64) -> Waypoint {
+        if t <= prev.time || (next.time - prev.time).abs() < 1e-9 {
+            return prev.clone();
+        }
+        if t >= next.time {
+            return next.clone();
+        }
+        let alpha = (t - prev.time) / (next.time - prev.time);
+        let lerp = |a: f64, b: f64| a + (b - a) * alpha;
+        Waypoint {
+            time: t,
+            position: [
+                lerp(prev.position[0], next.position[0]),
+                lerp(prev.position[1], next.position[1]),
+                lerp(prev.position[2], next.position[2]),
+            ],
+            velocity: [
+                lerp(prev.velocity[0], next.velocity[0]),
+                lerp(prev.velocity[1], next.velocity[1]),
+                lerp(prev.velocity[2], next.velocity[2]),
+            ],
+        }
+    }
+}
+
 /// A trajectory segment type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SegmentType {
