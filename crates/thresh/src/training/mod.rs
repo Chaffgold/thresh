@@ -342,6 +342,47 @@ mod tests {
     }
 
     #[test]
+    fn training_error_displays_both_arms() {
+        // `from` exercises the `From<TrajectoryRadarError>` impl; Display
+        // covers the `Synth` arm (which delegates to the inner error).
+        let synth = TrainingError::from(TrajectoryRadarError::InvalidSampleRate(0.0));
+        assert!(format!("{synth}").contains("synth error"));
+        let contam = TrainingError::AdsbContamination;
+        assert!(format!("{contam}").contains("integrity violation"));
+    }
+
+    #[test]
+    fn radar_to_detection_ignores_non_radar() {
+        let eoir = Measurement::EoIr {
+            azimuth: 0.1,
+            elevation: 0.0,
+            time: 0.0,
+            sensor_id: 1,
+        };
+        assert!(radar_to_detection(&eoir).is_none());
+        let radar = Measurement::Radar {
+            range: 100.0,
+            azimuth: 0.0,
+            elevation: 0.0,
+            range_rate: None,
+            time: 0.0,
+            sensor_id: 1,
+        };
+        assert!(radar_to_detection(&radar).is_some());
+    }
+
+    #[test]
+    fn invalid_sample_rate_propagates_synth_error() {
+        let wps = cv_trajectory();
+        let bad = TrajectoryRadarConfig {
+            sample_rate_hz: 0.0,
+            ..TrajectoryRadarConfig::default()
+        };
+        let err = generate_imm_training_samples(0, &wps, 1, &bad, ImmTrainingParams::default(), 1);
+        assert!(matches!(err, Err(TrainingError::Synth(_))));
+    }
+
+    #[test]
     fn empty_trajectory_is_an_error() {
         let err = generate_imm_training_samples(
             0,

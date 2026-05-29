@@ -85,6 +85,8 @@ mod tests {
     #[test]
     fn string_labels_are_snake_case() {
         assert_eq!(MotionModeLabel::Cv.as_str(), "cv");
+        assert_eq!(MotionModeLabel::Ca.as_str(), "ca");
+        assert_eq!(MotionModeLabel::Ctrv.as_str(), "ctrv");
         assert_eq!(MotionModeLabel::CoordTurn.as_str(), "coord_turn");
     }
 }

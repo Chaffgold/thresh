@@ -55,15 +55,20 @@ fn heading(velocity: &[f64; 3]) -> f64 {
 }
 
 /// Wrap an angle difference into `(-π, π]`.
-fn wrap_angle(mut a: f64) -> f64 {
-    use std::f64::consts::PI;
-    while a > PI {
-        a -= 2.0 * PI;
+///
+/// Branch-free: a single modulo brings the value into `(-2π, 2π)` and one
+/// conditional adjustment folds it into `(-π, π]`. (Heading differences are
+/// already within `(-2π, 2π)`, so one adjustment always suffices.)
+fn wrap_angle(a: f64) -> f64 {
+    use std::f64::consts::{PI, TAU};
+    let r = a % TAU;
+    if r > PI {
+        r - TAU
+    } else if r <= -PI {
+        r + TAU
+    } else {
+        r
     }
-    while a <= -PI {
-        a += 2.0 * PI;
-    }
-    a
 }
 
 /// Indices `(lo, hi)` bracketing waypoint `i` for a central difference, falling
@@ -273,5 +278,33 @@ mod tests {
         // 0.1 rad/s at 100 m/s → atan2(10, 9.81) ≈ 0.7954 rad ≈ 45.6°.
         let bank = bank_angle_rad(0.1, 100.0);
         assert!((bank - 0.7954).abs() < 1e-3, "bank = {bank}");
+    }
+
+    #[test]
+    fn wrap_angle_covers_all_three_branches() {
+        use std::f64::consts::PI;
+        // In-range value passes through unchanged.
+        assert!((wrap_angle(0.5) - 0.5).abs() < 1e-12);
+        // > π folds down by 2π.
+        assert!((wrap_angle(1.5 * PI) - (-0.5 * PI)).abs() < 1e-9);
+        // ≤ -π folds up by 2π.
+        assert!((wrap_angle(-1.5 * PI) - (0.5 * PI)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn derivatives_handle_degenerate_inputs() {
+        let wp = |t: f64, vx: f64| Waypoint {
+            time: t,
+            position: [0.0, 0.0, 0.0],
+            velocity: [vx, 0.0, 0.0],
+        };
+        // Single waypoint: no difference bracket → zero.
+        let one = vec![wp(0.0, 10.0)];
+        assert!(accel_magnitude_mps2(&one, 0).abs() < 1e-12);
+        assert!(turn_rate_rad_s(&one, 0).abs() < 1e-12);
+        // Two waypoints sharing a timestamp: divide-by-zero guard → zero.
+        let same_time = vec![wp(1.0, 10.0), wp(1.0, 20.0)];
+        assert!(accel_magnitude_mps2(&same_time, 0).abs() < 1e-12);
+        assert!(turn_rate_rad_s(&same_time, 0).abs() < 1e-12);
     }
 }
