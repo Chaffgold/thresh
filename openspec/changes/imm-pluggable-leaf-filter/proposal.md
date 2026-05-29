@@ -18,7 +18,7 @@ So letting the IMM bank use a UKF or CKF leaf is a real `imm.rs` refactor with r
 - Introduce a `LeafFilter` trait in `thresh-filter` capturing the predict/update contract the IMM bank needs: `predict(&mut self, &dyn MotionModel, dt)`, `update_linear(&mut self, z, h, r)`, and accessors for `x` / `p`.
 - Implement `LeafFilter` for `ExtendedKalmanFilter`, `UnscentedKalmanFilter`, and `CubatureKalmanFilter` (the three already share this API surface).
 - Replace `ModelConditionedFilter`'s concrete `ekf: ExtendedKalmanFilter` field with `Box<dyn LeafFilter>`, and the internal temporary EKF in `update_step` with a leaf chosen by the bank's configured filter kind.
-- Add an IMM-level leaf-kind selector (`ImmLeafKind { Ekf, Ukf, Ckf }`, default `Ekf` for backward compatibility) on `ImmConfig`.
+- Add an IMM-level leaf-kind selector (`ImmLeafKind { Ekf, Ukf, Ckf }`, default `Ekf` for backward compatibility) chosen at construction via `ImmFilter::with_leaf_kind`, with `ImmFilter::new` defaulting to `Ekf`. _(Amended from "on `ImmConfig`": placing it on `ImmConfig` was found during apply to contradict this change's own zero-edit backward-compatibility gate — see design.md Decision 3. `ImmConfig` is left unchanged.)_
 - Behavioural-parity test: an IMM bank configured with CKF leaves tracks a fixed-seed synthetic trajectory within statistical equivalence of the EKF-leaf bank, and mode probabilities still sum to one.
 
 ## Out of scope
