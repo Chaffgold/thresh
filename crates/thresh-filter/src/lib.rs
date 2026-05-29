@@ -4,6 +4,8 @@ pub mod ckf;
 pub mod cov;
 pub mod ekf;
 pub mod imm;
+#[cfg(feature = "learned-imm")]
+pub mod imm_adapter;
 pub mod kf;
 pub mod models;
 pub mod traits;

@@ -5,8 +5,17 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+# Learned IMM mode classifier: loads an ONNX checkpoint via thresh-inference
+# and overrides the analytic mode-probability update. Pulls the heavy ort/ONNX
+# stack, so it is opt-in and kept out of default/CI builds (see project
+# convention for ONNX/PyO3 deps).
+learned-imm = ["dep:thresh-inference", "thresh-inference/onnx"]
+
 [dependencies]
 thresh-core = { path = "../thresh-core" }
+thresh-inference = { path = "../thresh-inference", optional = true }
 nalgebra = { workspace = true }
 
 [dev-dependencies]

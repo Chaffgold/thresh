@@ -4697,6 +4697,7 @@ dependencies = [
  "criterion",
  "nalgebra",
  "thresh-core",
+ "thresh-inference",
 ]
 
 [[package]]
