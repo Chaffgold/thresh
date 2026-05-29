@@ -21,7 +21,7 @@ The IMM mode classifier ONNX model MUST conform to the following contract. The i
 
 **WHEN** the `onnx-tests` workflow runs against `test-data/models/imm_mode_classifier.onnx`
 
-**THEN** the workflow asserts the model's input shape is `(batch, 10, 12)` (or whatever `filter_state_dim` the trained model uses, documented in the model card), output shape is `(batch, 4)`, and output values sum to 1.0 per batch row within 1e-5 tolerance
+**THEN** the workflow asserts the model's input shape is exactly `(batch, 10, 12)` — the trailing dimension MUST equal `thresh_filter::imm::CLASSIFIER_FEATURE_DIM` (12) so a model whose feature width disagrees with the runtime projection cannot pass — output shape is `(batch, 4)`, and output values sum to 1.0 per batch row within 1e-5 tolerance
 
 **SHALL** fail the build on any shape, name, or normalisation violation.
 
