@@ -37,7 +37,21 @@ Transactions on Automatic Control*, vol. 54, no. 6, pp. 1254–1269, June 2009.
 
 ## IMM leaf filter
 
-The IMM bank currently uses a hardcoded EKF leaf. Making the leaf selectable
-(EKF / UKF / CKF) is tracked by the `imm-pluggable-leaf-filter` OpenSpec
-change; until it lands, use `CubatureKalmanFilter` directly via the
-`thresh-filter` API.
+The IMM bank's model-conditioned leaf is selectable — EKF, UKF, or CKF — via
+the `ImmLeafKind` chosen at construction:
+
+```rust
+use thresh_filter::imm::{ImmConfig, ImmFilter, ImmLeafKind};
+
+// Default leaf is EKF — behaviour identical to the pre-pluggable bank.
+let ekf_bank = ImmFilter::new(ImmConfig::cv_ca(5.0, 1.0), &x0, &p0);
+
+// Or pick the leaf kind explicitly (every mode uses the same kind).
+let ckf_bank =
+    ImmFilter::with_leaf_kind(ImmConfig::cv_ca(5.0, 1.0), ImmLeafKind::Ckf, &x0, &p0);
+```
+
+The kind is owned by the `ImmFilter` instance and also drives the
+common-space measurement-update leaf. `ImmFilter::new` defaults to
+`ImmLeafKind::Ekf`, so existing callers and the `thresh-tracker` IMM path
+are unaffected.

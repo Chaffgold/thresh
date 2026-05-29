@@ -1,18 +1,21 @@
 //! Interacting Multiple Model (IMM) filter.
 //!
-//! Maintains a bank of model-conditioned EKFs with different motion models
-//! and blends their outputs using Bayesian mode probabilities. Handles
-//! heterogeneous state dimensions via explicit state mapping to a common
-//! 6D representation `[x, vx, y, vy, z, vz]`.
+//! Maintains a bank of model-conditioned leaf filters with different motion
+//! models and blends their outputs using Bayesian mode probabilities. The
+//! leaf kind (EKF / UKF / CKF) is selectable at construction; EKF is the
+//! default. Handles heterogeneous state dimensions via explicit state
+//! mapping to a common 6D representation `[x, vx, y, vy, z, vz]`.
 
 use nalgebra::{DMatrix, DVector};
 
+use crate::ckf::CubatureKalmanFilter;
 use crate::ekf::ExtendedKalmanFilter;
 use crate::models::ca::ConstantAcceleration;
 use crate::models::coordinated_turn::CoordinatedTurn;
 use crate::models::ctrv::Ctrv;
 use crate::models::cv::ConstantVelocity;
 use crate::traits::MotionModel;
+use crate::ukf::{UkfParams, UnscentedKalmanFilter};
 
 // ---------------------------------------------------------------------------
 // State mapping trait and implementations
@@ -250,6 +253,124 @@ impl StateMapping for CtMapping {
 }
 
 // ---------------------------------------------------------------------------
+// Leaf filter abstraction
+// ---------------------------------------------------------------------------
+
+/// The predict/update contract plus state accessors **and mutators** that the
+/// IMM bank requires of a model-conditioned leaf filter.
+///
+/// Implemented for [`ExtendedKalmanFilter`], [`UnscentedKalmanFilter`], and
+/// [`CubatureKalmanFilter`] — the three already share this surface, so the
+/// impls are pure delegation. Mutators are mandatory, not optional: the
+/// interaction step mixes states across modes and writes the result back
+/// into each leaf.
+pub trait LeafFilter: Send + Sync {
+    /// Model-conditioned predict step.
+    fn predict(&mut self, model: &dyn MotionModel, dt: f64);
+    /// Linear measurement update.
+    fn update_linear(&mut self, z: &DVector<f64>, h: &DMatrix<f64>, r: &DMatrix<f64>);
+    /// Current state estimate.
+    fn x(&self) -> &DVector<f64>;
+    /// Current covariance estimate.
+    fn p(&self) -> &DMatrix<f64>;
+    /// Overwrite the state estimate (interaction mix-back).
+    fn set_x(&mut self, x: DVector<f64>);
+    /// Overwrite the covariance estimate (interaction mix-back).
+    fn set_p(&mut self, p: DMatrix<f64>);
+}
+
+impl LeafFilter for ExtendedKalmanFilter {
+    fn predict(&mut self, model: &dyn MotionModel, dt: f64) {
+        ExtendedKalmanFilter::predict(self, model, dt)
+    }
+    fn update_linear(&mut self, z: &DVector<f64>, h: &DMatrix<f64>, r: &DMatrix<f64>) {
+        ExtendedKalmanFilter::update_linear(self, z, h, r)
+    }
+    fn x(&self) -> &DVector<f64> {
+        &self.x
+    }
+    fn p(&self) -> &DMatrix<f64> {
+        &self.p
+    }
+    fn set_x(&mut self, x: DVector<f64>) {
+        self.x = x;
+    }
+    fn set_p(&mut self, p: DMatrix<f64>) {
+        self.p = p;
+    }
+}
+
+impl LeafFilter for UnscentedKalmanFilter {
+    fn predict(&mut self, model: &dyn MotionModel, dt: f64) {
+        UnscentedKalmanFilter::predict(self, model, dt)
+    }
+    fn update_linear(&mut self, z: &DVector<f64>, h: &DMatrix<f64>, r: &DMatrix<f64>) {
+        UnscentedKalmanFilter::update_linear(self, z, h, r)
+    }
+    fn x(&self) -> &DVector<f64> {
+        &self.x
+    }
+    fn p(&self) -> &DMatrix<f64> {
+        &self.p
+    }
+    fn set_x(&mut self, x: DVector<f64>) {
+        self.x = x;
+    }
+    fn set_p(&mut self, p: DMatrix<f64>) {
+        self.p = p;
+    }
+}
+
+impl LeafFilter for CubatureKalmanFilter {
+    fn predict(&mut self, model: &dyn MotionModel, dt: f64) {
+        CubatureKalmanFilter::predict(self, model, dt)
+    }
+    fn update_linear(&mut self, z: &DVector<f64>, h: &DMatrix<f64>, r: &DMatrix<f64>) {
+        CubatureKalmanFilter::update_linear(self, z, h, r)
+    }
+    fn x(&self) -> &DVector<f64> {
+        &self.x
+    }
+    fn p(&self) -> &DMatrix<f64> {
+        &self.p
+    }
+    fn set_x(&mut self, x: DVector<f64>) {
+        self.x = x;
+    }
+    fn set_p(&mut self, p: DMatrix<f64>) {
+        self.p = p;
+    }
+}
+
+/// Selects which concrete filter the IMM bank instantiates for every mode.
+///
+/// `Ekf` is the default so an `ImmFilter` built via [`ImmFilter::new`]
+/// behaves byte-for-byte identically to the pre-pluggable implementation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ImmLeafKind {
+    /// Extended Kalman Filter (Jacobian linearization). Default.
+    #[default]
+    Ekf,
+    /// Unscented Kalman Filter (constructed with [`UkfParams::default`]).
+    Ukf,
+    /// Cubature Kalman Filter (parameter-free).
+    Ckf,
+}
+
+/// Construct a boxed leaf of the requested kind from a common `(x, p)`.
+///
+/// `Ukf` uses [`UkfParams::default`]; UKF tuning is intentionally not
+/// surfaced through the IMM API (CKF, the motivating leaf, is
+/// parameter-free).
+fn make_leaf(kind: ImmLeafKind, x: DVector<f64>, p: DMatrix<f64>) -> Box<dyn LeafFilter> {
+    match kind {
+        ImmLeafKind::Ekf => Box::new(ExtendedKalmanFilter::new(x, p)),
+        ImmLeafKind::Ukf => Box::new(UnscentedKalmanFilter::new(x, p, UkfParams::default())),
+        ImmLeafKind::Ckf => Box::new(CubatureKalmanFilter::new(x, p)),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // IMM Configuration
 // ---------------------------------------------------------------------------
 
@@ -389,8 +510,9 @@ impl ImmConfig {
 
 /// A single model-conditioned filter within the IMM bank.
 pub struct ModelConditionedFilter {
-    /// The EKF instance (handles both linear and nonlinear models).
-    pub ekf: ExtendedKalmanFilter,
+    /// The leaf filter for this mode (EKF / UKF / CKF, chosen at bank
+    /// construction). Handles both linear and nonlinear models.
+    pub leaf: Box<dyn LeafFilter>,
     /// The motion model for this mode.
     pub model: Box<dyn MotionModel>,
     /// State mapping between model-native and common space.
@@ -403,8 +525,10 @@ pub struct ModelConditionedFilter {
 
 /// Interacting Multiple Model filter.
 ///
-/// Maintains a bank of model-conditioned EKFs and blends their outputs
-/// using Bayesian mode probabilities updated at every measurement step.
+/// Maintains a bank of model-conditioned leaf filters and blends their
+/// outputs using Bayesian mode probabilities updated at every measurement
+/// step. The leaf kind is fixed at construction (see [`ImmFilter::new`] and
+/// [`ImmFilter::with_leaf_kind`]).
 pub struct ImmFilter {
     /// Bank of model-conditioned filters.
     pub filters: Vec<ModelConditionedFilter>,
@@ -414,6 +538,9 @@ pub struct ImmFilter {
     pub transition_matrix: DMatrix<f64>,
     /// Minimum mode probability to prevent mode starvation.
     pub mode_probability_floor: f64,
+    /// Leaf kind used for every mode, including the common-space update
+    /// leaf. Owned by the filter instance, fixed at construction.
+    pub leaf_kind: ImmLeafKind,
 }
 
 /// Result of a single IMM step.
@@ -429,10 +556,26 @@ pub struct ImmStepResult {
 }
 
 impl ImmFilter {
-    /// Create a new IMM filter from a configuration and initial state/covariance
-    /// in common 6D space `[x, vx, y, vy, z, vz]`.
+    /// Create a new IMM filter from a configuration and initial
+    /// state/covariance in common 6D space `[x, vx, y, vy, z, vz]`, using
+    /// the default [`ImmLeafKind::Ekf`] leaf.
+    ///
+    /// Behaviour is byte-for-byte identical to the pre-pluggable
+    /// implementation; existing callers need no changes.
     pub fn new(
         config: ImmConfig,
+        initial_state: &DVector<f64>,
+        initial_covariance: &DMatrix<f64>,
+    ) -> Self {
+        Self::with_leaf_kind(config, ImmLeafKind::Ekf, initial_state, initial_covariance)
+    }
+
+    /// Create a new IMM filter with an explicit leaf kind (EKF / UKF / CKF)
+    /// for every mode. The kind is owned by the returned `ImmFilter` and
+    /// also drives the common-space update leaf in `update_step`.
+    pub fn with_leaf_kind(
+        config: ImmConfig,
+        leaf_kind: ImmLeafKind,
         initial_state: &DVector<f64>,
         initial_covariance: &DMatrix<f64>,
     ) -> Self {
@@ -454,9 +597,9 @@ impl ImmFilter {
             let mapping = mappings.pop().unwrap();
 
             let (ms, mc) = mapping.from_common(initial_state, initial_covariance);
-            let ekf = ExtendedKalmanFilter::new(ms, mc);
+            let leaf = make_leaf(leaf_kind, ms, mc);
             filters.push(ModelConditionedFilter {
-                ekf,
+                leaf,
                 model,
                 mapping,
             });
@@ -467,6 +610,7 @@ impl ImmFilter {
             mode_probabilities,
             transition_matrix,
             mode_probability_floor: 0.01,
+            leaf_kind,
         }
     }
 
@@ -551,7 +695,7 @@ impl ImmFilter {
         let common_states: Vec<(DVector<f64>, DMatrix<f64>)> = self
             .filters
             .iter()
-            .map(|f| f.mapping.to_common(&f.ekf.x, &f.ekf.p))
+            .map(|f| f.mapping.to_common(f.leaf.x(), f.leaf.p()))
             .collect();
 
         // For each target model j, compute mixed state/covariance in common space
@@ -576,8 +720,8 @@ impl ImmFilter {
             let (ms, mc) = self.filters[j]
                 .mapping
                 .from_common(&mixed_state, &mixed_cov);
-            self.filters[j].ekf.x = ms;
-            self.filters[j].ekf.p = mc;
+            self.filters[j].leaf.set_x(ms);
+            self.filters[j].leaf.set_p(mc);
         }
     }
 
@@ -627,7 +771,7 @@ impl ImmFilter {
     /// Model-conditioned prediction step.
     fn predict_step(&mut self, dt: f64) {
         for f in &mut self.filters {
-            f.ekf.predict(f.model.as_ref(), dt);
+            f.leaf.predict(f.model.as_ref(), dt);
         }
     }
 
@@ -641,10 +785,11 @@ impl ImmFilter {
         let n = self.num_models();
         let mut log_likelihoods = Vec::with_capacity(n);
         let m = z.len();
+        let leaf_kind = self.leaf_kind;
 
         for f in &mut self.filters {
             // Map predicted state to common space for observation
-            let (x_common, p_common) = f.mapping.to_common(&f.ekf.x, &f.ekf.p);
+            let (x_common, p_common) = f.mapping.to_common(f.leaf.x(), f.leaf.p());
 
             // Innovation in common space
             let y = z - h_common * &x_common;
@@ -662,18 +807,16 @@ impl ImmFilter {
             let log_lik = -0.5 * (m as f64 * (2.0 * std::f64::consts::PI).ln() + log_det + maha);
             log_likelihoods.push(log_lik);
 
-            // Now perform the actual EKF update using the observation model
-            // We need to construct an H matrix in the model's native space
-            // H_model = H_common * J_to_common, but for linear mappings
-            // (CV, CA, CT) this is a simple index remapping.
-            // Instead, we update in common space and back-project.
-            //
-            // Approach: update a temporary common-space EKF, then back-project.
-            let mut common_ekf = ExtendedKalmanFilter::new(x_common, p_common);
-            common_ekf.update_linear(z, h_common, r);
-            let (ms, mc) = f.mapping.from_common(&common_ekf.x, &common_ekf.p);
-            f.ekf.x = ms;
-            f.ekf.p = mc;
+            // Perform the actual measurement update in common space, then
+            // back-project to the model's native representation. For a
+            // linear common-space `H` all leaf kinds reduce to the standard
+            // Kalman update, so the temporary leaf follows the configured
+            // kind to keep the filter type consistent end-to-end.
+            let mut common_leaf = make_leaf(leaf_kind, x_common, p_common);
+            common_leaf.update_linear(z, h_common, r);
+            let (ms, mc) = f.mapping.from_common(common_leaf.x(), common_leaf.p());
+            f.leaf.set_x(ms);
+            f.leaf.set_p(mc);
         }
 
         log_likelihoods
@@ -733,7 +876,7 @@ impl ImmFilter {
         let commons: Vec<(DVector<f64>, DMatrix<f64>)> = self
             .filters
             .iter()
-            .map(|f| f.mapping.to_common(&f.ekf.x, &f.ekf.p))
+            .map(|f| f.mapping.to_common(f.leaf.x(), f.leaf.p()))
             .collect();
 
         // Combined state
@@ -910,7 +1053,7 @@ mod tests {
         let pre: Vec<(DVector<f64>, DMatrix<f64>)> = imm
             .filters
             .iter()
-            .map(|f| f.mapping.to_common(&f.ekf.x, &f.ekf.p))
+            .map(|f| f.mapping.to_common(f.leaf.x(), f.leaf.p()))
             .collect();
 
         imm.interaction_step();
@@ -918,7 +1061,7 @@ mod tests {
         // After interaction with uniform probs and identical common states,
         // the common-space states should be approximately unchanged.
         for (j, f) in imm.filters.iter().enumerate() {
-            let (xc, _) = f.mapping.to_common(&f.ekf.x, &f.ekf.p);
+            let (xc, _) = f.mapping.to_common(f.leaf.x(), f.leaf.p());
             // The shared components should match
             for k in 0..4 {
                 // x, vx, y, vy
@@ -1107,5 +1250,171 @@ mod tests {
             imm_rmse < worst_single * 1.5,
             "IMM RMSE ({imm_rmse:.2}) should not be much worse than worst single model ({worst_single:.2})"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Pluggable leaf filter (imm-pluggable-leaf-filter change)
+    // -----------------------------------------------------------------------
+
+    /// Deterministic LCG for reproducible measurement noise.
+    struct Lcg(u64);
+    impl Lcg {
+        fn new(seed: u64) -> Self {
+            Self(seed)
+        }
+        fn next_unit(&mut self) -> f64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((self.0 >> 11) as f64) / ((1u64 << 53) as f64)
+        }
+        fn next_gauss(&mut self) -> f64 {
+            let s: f64 = (0..12).map(|_| self.next_unit()).sum();
+            s - 6.0
+        }
+    }
+
+    /// Position-only observation of the common `[x,vx,y,vy,z,vz]` state.
+    fn pos_obs_h() -> DMatrix<f64> {
+        DMatrix::from_row_slice(
+            3,
+            6,
+            &[
+                1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                1.0, 0.0,
+            ],
+        )
+    }
+
+    // Spec: "All three filters satisfy the trait" — exercise each concrete
+    // filter through `&mut dyn LeafFilter` and assert it matches calling the
+    // inherent methods directly (no behavioural change via the trait object).
+    #[test]
+    fn leaf_filter_trait_object_matches_inherent() {
+        let x0 = DVector::from_column_slice(&[0.0, 5.0, 0.0, -3.0, 0.0, 1.0]);
+        let p0 = DMatrix::identity(6, 6) * 50.0;
+        let model = ConstantVelocity::new(1.0);
+        let h = pos_obs_h();
+        let r = DMatrix::identity(3, 3) * 9.0;
+        let z = DVector::from_column_slice(&[5.0, -3.0, 1.0]);
+
+        // (boxed-as-trait-object, concrete-via-inherent) pairs.
+        let mut ekf_obj: Box<dyn LeafFilter> =
+            Box::new(ExtendedKalmanFilter::new(x0.clone(), p0.clone()));
+        let mut ekf_inh = ExtendedKalmanFilter::new(x0.clone(), p0.clone());
+        let mut ukf_obj: Box<dyn LeafFilter> = Box::new(UnscentedKalmanFilter::new(
+            x0.clone(),
+            p0.clone(),
+            UkfParams::default(),
+        ));
+        let mut ukf_inh = UnscentedKalmanFilter::new(x0.clone(), p0.clone(), UkfParams::default());
+        let mut ckf_obj: Box<dyn LeafFilter> =
+            Box::new(CubatureKalmanFilter::new(x0.clone(), p0.clone()));
+        let mut ckf_inh = CubatureKalmanFilter::new(x0.clone(), p0.clone());
+
+        ekf_obj.predict(&model, 1.0);
+        ekf_obj.update_linear(&z, &h, &r);
+        ekf_inh.predict(&model, 1.0);
+        ekf_inh.update_linear(&z, &h, &r);
+        ukf_obj.predict(&model, 1.0);
+        ukf_obj.update_linear(&z, &h, &r);
+        ukf_inh.predict(&model, 1.0);
+        ukf_inh.update_linear(&z, &h, &r);
+        ckf_obj.predict(&model, 1.0);
+        ckf_obj.update_linear(&z, &h, &r);
+        ckf_inh.predict(&model, 1.0);
+        ckf_inh.update_linear(&z, &h, &r);
+
+        assert!((ekf_obj.x() - &ekf_inh.x).norm() < 1e-12);
+        assert!((ekf_obj.p() - &ekf_inh.p).norm() < 1e-12);
+        assert!((ukf_obj.x() - &ukf_inh.x).norm() < 1e-12);
+        assert!((ukf_obj.p() - &ukf_inh.p).norm() < 1e-12);
+        assert!((ckf_obj.x() - &ckf_inh.x).norm() < 1e-12);
+        assert!((ckf_obj.p() - &ckf_inh.p).norm() < 1e-12);
+        assert!(ekf_obj.x().iter().all(|v| v.is_finite()));
+    }
+
+    // Task 3.1 / spec "CKF-leaf IMM behavioural parity": a CKF-leaf bank
+    // tracks the same fixed-seed trajectory within a tight tolerance of the
+    // EKF-leaf bank, with valid mode probabilities throughout. CV+CA are
+    // linear motion models, so the two leaf kinds are theoretically
+    // identical here — the tolerance only absorbs arithmetic ordering.
+    #[test]
+    fn imm_ckf_leaf_matches_ekf_leaf() {
+        let x0 = DVector::from_column_slice(&[0.0, 50.0, 0.0, 10.0, 0.0, 0.0]);
+        let p0 = DMatrix::identity(6, 6) * 100.0;
+        let h = pos_obs_h();
+        let r = DMatrix::identity(3, 3) * 25.0;
+        let dt = 1.0;
+
+        let mut ekf_bank = ImmFilter::new(ImmConfig::cv_ca(5.0, 1.0), &x0, &p0);
+        let mut ckf_bank =
+            ImmFilter::with_leaf_kind(ImmConfig::cv_ca(5.0, 1.0), ImmLeafKind::Ckf, &x0, &p0);
+
+        let mut rng = Lcg::new(20260518);
+        let mut max_state_diff = 0.0_f64;
+
+        for step in 0..40 {
+            let t = (step + 1) as f64 * dt;
+            // Mild constant-acceleration truth so both modes stay active.
+            let true_x = 50.0 * t + 0.5 * 0.2 * t * t;
+            let true_y = 10.0 * t;
+            let z = DVector::from_column_slice(&[
+                true_x + 3.0 * rng.next_gauss(),
+                true_y + 3.0 * rng.next_gauss(),
+                0.0,
+            ]);
+
+            let res_ekf = ekf_bank.step(dt, &z, &h, &r);
+            let res_ckf = ckf_bank.step(dt, &z, &h, &r);
+
+            let d = (&res_ekf.state - &res_ckf.state).amax();
+            max_state_diff = max_state_diff.max(d);
+
+            for res in [&res_ekf, &res_ckf] {
+                let psum: f64 = res.mode_probabilities.iter().sum();
+                assert!(
+                    (psum - 1.0).abs() < 1e-9,
+                    "mode probabilities must sum to 1, got {psum}"
+                );
+            }
+        }
+
+        assert!(
+            max_state_diff < 1e-6,
+            "CKF-leaf and EKF-leaf banks must agree on a linear-model \
+             trajectory; max combined-state diff was {max_state_diff:e}"
+        );
+    }
+
+    // Task 3.2: smoke test — a UKF-leaf bank produces finite output and
+    // valid mode probabilities.
+    #[test]
+    fn imm_ukf_leaf_runs() {
+        let x0 = DVector::from_column_slice(&[0.0, 30.0, 0.0, 0.0, 0.0, 0.0]);
+        let p0 = DMatrix::identity(6, 6) * 100.0;
+        let h = pos_obs_h();
+        let r = DMatrix::identity(3, 3) * 16.0;
+        let dt = 1.0;
+
+        let mut bank =
+            ImmFilter::with_leaf_kind(ImmConfig::cv_ca(5.0, 1.0), ImmLeafKind::Ukf, &x0, &p0);
+        assert_eq!(bank.leaf_kind, ImmLeafKind::Ukf);
+
+        for step in 0..12 {
+            let t = (step + 1) as f64 * dt;
+            let z = DVector::from_column_slice(&[30.0 * t, 0.0, 0.0]);
+            let res = bank.step(dt, &z, &h, &r);
+
+            assert!(
+                res.state.iter().all(|v| v.is_finite()),
+                "UKF-leaf combined state must be finite"
+            );
+            assert!(res.covariance.iter().all(|v| v.is_finite()));
+            let psum: f64 = res.mode_probabilities.iter().sum();
+            assert!((psum - 1.0).abs() < 1e-9, "mode probs sum to {psum}");
+            assert!(res.dominant_mode < bank.num_models());
+        }
     }
 }
