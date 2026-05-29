@@ -555,6 +555,45 @@ pub struct ImmStepResult {
     pub dominant_mode: usize,
 }
 
+/// Common-space state dimension `[x, vx, y, vy, z, vz]`.
+const COMMON_STATE_DIM: usize = 6;
+
+/// Length of the feature vector produced by [`project_filter_state`].
+///
+/// Six state components followed by six covariance-diagonal variances.
+pub const CLASSIFIER_FEATURE_DIM: usize = 2 * COMMON_STATE_DIM;
+
+/// Project an IMM common-space estimate into the fixed-length feature vector
+/// consumed by the Track B IMM mode classifier.
+///
+/// The IMM `combine` step yields a 6D common state `[x, vx, y, vy, z, vz]` and
+/// a 6×6 covariance. The feature is those six state components followed by the
+/// six covariance-diagonal entries (variances), in the same order —
+/// [`CLASSIFIER_FEATURE_DIM`] (= 12) elements total.
+///
+/// Acceleration is intentionally **not** fabricated here: the common space has
+/// no acceleration component, and the downstream sequence model infers it from
+/// the windowed state history. Only the leading 6 state entries and the leading
+/// 6×6 covariance block are read, so larger inputs are tolerated; in debug
+/// builds, smaller inputs trip an assertion.
+pub fn project_filter_state(state: &DVector<f64>, covariance: &DMatrix<f64>) -> Vec<f64> {
+    debug_assert!(
+        state.len() >= COMMON_STATE_DIM,
+        "state has {} elements, need at least {COMMON_STATE_DIM}",
+        state.len()
+    );
+    debug_assert!(
+        covariance.nrows() >= COMMON_STATE_DIM && covariance.ncols() >= COMMON_STATE_DIM,
+        "covariance is {}x{}, need at least {COMMON_STATE_DIM}x{COMMON_STATE_DIM}",
+        covariance.nrows(),
+        covariance.ncols()
+    );
+    let mut feature = Vec::with_capacity(CLASSIFIER_FEATURE_DIM);
+    feature.extend((0..COMMON_STATE_DIM).map(|i| state[i]));
+    feature.extend((0..COMMON_STATE_DIM).map(|i| covariance[(i, i)]));
+    feature
+}
+
 impl ImmFilter {
     /// Create a new IMM filter from a configuration and initial
     /// state/covariance in common 6D space `[x, vx, y, vy, z, vz]`, using
@@ -905,6 +944,23 @@ impl ImmFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_filter_state_has_state_then_cov_diag() {
+        let state = DVector::from_column_slice(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let mut cov = DMatrix::zeros(6, 6);
+        for i in 0..6 {
+            cov[(i, i)] = (i as f64 + 1.0) * 10.0; // 10, 20, ..., 60
+        }
+        // Off-diagonal entries must be ignored.
+        cov[(0, 1)] = 999.0;
+        cov[(3, 4)] = -999.0;
+
+        let feature = project_filter_state(&state, &cov);
+        assert_eq!(feature.len(), CLASSIFIER_FEATURE_DIM);
+        assert_eq!(&feature[0..6], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        assert_eq!(&feature[6..12], &[10.0, 20.0, 30.0, 40.0, 50.0, 60.0]);
+    }
 
     // 6.1: State mapping round-trips
     #[test]

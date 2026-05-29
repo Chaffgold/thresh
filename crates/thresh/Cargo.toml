@@ -14,13 +14,27 @@ thresh-inference = { path = "../thresh-inference" }
 thresh-tracker = { path = "../thresh-tracker" }
 thresh-synth = { path = "../thresh-synth" }
 thresh-eval = { path = "../thresh-eval" }
+nalgebra = { workspace = true }
+rand = "0.9"
+
+# Parquet export for the Track B training-data pipeline. Heavy and optional,
+# so gated behind `training-export` and kept out of default/CI builds (mirrors
+# the project convention for ONNX/PyO3 deps).
+arrow = { version = "53", optional = true }
+parquet = { version = "53", features = ["arrow"], optional = true }
 
 [features]
 default = []
 stonesoup = ["thresh-bridge/stonesoup"]
+# Rust-native Parquet writer for IMM-classifier training samples.
+training-export = ["dep:arrow", "dep:parquet"]
 
 [dependencies.thresh-bridge]
 path = "../thresh-bridge"
+
+[[bin]]
+name = "gen-imm-dataset"
+required-features = ["training-export"]
 
 [dev-dependencies]
 nalgebra = { workspace = true }

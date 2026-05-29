@@ -155,3 +155,23 @@ If the third bullet fails, ship the model but keep the feature gate off by defau
 - Which pretrained backbone do we start from? Candidates: RT-DETR-R50 (image), Group-Free-3D (point cloud), 3DETR (point cloud). The choice affects the training script structure; we will pick during Phase 5 after the data is in hand.
 - Do we want a single sensor location per checkpoint, or a single sensor-agnostic checkpoint? Sensor-agnostic is harder but more useful; sensor-specific is faster to validate. Default to sensor-agnostic; revisit if exit criteria fail.
 - What is the right train/test split granularity? Per-trajectory? Per-airport? Per-day? Default to per-region.
+
+## Decisions made during Phase 5 (Track B foundation)
+
+### 14. Classifier feature is 12-dim, not 18-dim
+
+**Decision:** `filter_state_projection` (task 5.3) emits a **12-dim** vector: the 6D IMM common state `[x, vx, y, vy, z, vz]` followed by the 6 covariance-diagonal variances. The originally-sketched 9-dim state `[x, y, z, vx, vy, vz, ax, ay, az]` (→ 18 dims) is dropped.
+
+**Rationale:** The IMM `combine()` output is always in 6D common space — the bank's heterogeneous models (CV 6D, CA 9D, CTRV/CT 5D) are projected down to `[x, vx, y, vy, z, vz]`, which carries **no acceleration component**. Producing an 18-dim vector would require fabricating three constant acceleration entries (and three constant covariance entries via the CA back-projection convention), which carry no signal. Acceleration is recoverable by the Phase 6 sequence model from the windowed state history, so the honest 12-dim feature is preferred. `thresh_filter::imm::CLASSIFIER_FEATURE_DIM = 12`. The Phase 8 ONNX classifier input contract becomes `(batch, window, 12)`.
+
+### 15. Bank angle derived analytically (not stored in the trajectory)
+
+**Decision:** The `coord_turn` vs `CTRV` distinction (task 5.4) needs a bank angle, which the trajectory model does not store. Bank is computed from the balanced coordinated-turn relation `bank = atan2(|ω|·speed, g)`. Turning is evaluated **before** acceleration in the label precedence, so a turn's centripetal acceleration (`a = ω·v`, which can exceed the 1 m/s² CA threshold) does not mislabel a turn as `CA`.
+
+**Rationale:** A fast sustained turn banks steeply (e.g. 0.1 rad/s at 100 m/s ⇒ ~45°), a slow/shallow one does not — so the bank threshold cleanly separates a banked coordinated turn from a level constant-turn. This keeps both labels physically meaningful without extending the trajectory representation.
+
+### 16. Rust-native Parquet export behind a feature gate
+
+**Decision:** Training samples are written to Parquet **directly from Rust** (`arrow`/`parquet` crates) rather than via a Python converter. The writer lives behind a `training-export` Cargo feature on the umbrella `thresh` crate so default and CI builds do not pull the heavy `arrow`/`parquet` dependency tree — mirroring the project convention for ONNX/PyO3. Phase 6's PyTorch loader reads the standard Parquet with `pyarrow` (verified round-trip).
+
+**Rationale:** Keeps the whole generation pipeline in one language/toolchain (the request), avoids a brittle intermediate-format + converter step, and the feature gate preserves lean default builds. Code placement: the pure functions live in `thresh-core` (`MotionModeLabel`), `thresh-synth` (`analytic_mode_label`), and `thresh-filter` (`project_filter_state`) for reuse by the Phase 6 `learned-imm` adapter; the synth→tracker orchestration and Parquet writer live in the umbrella `thresh` crate, which is the only crate that legitimately depends on both `thresh-synth` and `thresh-tracker`.

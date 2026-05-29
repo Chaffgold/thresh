@@ -46,6 +46,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
+      # Track B training-data export (Rust-native Parquet) is feature-gated to
+      # keep arrow/parquet out of default builds; exercise it explicitly.
+      - run: cargo test -p thresh --features training-export
 
   doc:
     name: Doc
