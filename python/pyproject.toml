@@ -15,7 +15,9 @@ dependencies = [
 
 [project.optional-dependencies]
 training = [
-    "torch>=2.2",
+    # >=2.4: `torch.onnx.export` accepts the `dynamo` kwarg (export_imm.py
+    # passes `dynamo=False` for the legacy exporter).
+    "torch>=2.4",
     "onnx>=1.16",
     "onnxruntime>=1.18",
 ]

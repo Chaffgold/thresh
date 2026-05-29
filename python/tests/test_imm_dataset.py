@@ -21,7 +21,15 @@ from training.imm_dataset import (
 )
 
 # Repo-root sample produced by the Rust `gen-imm-dataset` binary (Phase 5).
-SAMPLE_PARQUET = Path("../test-data/training/imm-classifier/imm-samples.parquet")
+# Anchored to this file (not the CWD) so the test runs regardless of where
+# pytest is launched from.
+SAMPLE_PARQUET = (
+    Path(__file__).resolve().parents[2]
+    / "test-data"
+    / "training"
+    / "imm-classifier"
+    / "imm-samples.parquet"
+)
 
 
 def _write_parquet(path: Path, trajectories: dict[int, tuple[int, int]]) -> None:
