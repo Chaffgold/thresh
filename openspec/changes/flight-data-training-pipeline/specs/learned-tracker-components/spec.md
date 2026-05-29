@@ -14,14 +14,14 @@ The IMM mode classifier ONNX model MUST conform to the following contract. The i
 
 | Tensor | Shape | dtype | Semantics |
 |---|---|---|---|
-| `filter_state_history` (input) | `(batch, 10, filter_state_dim)` | float32 | 10 consecutive filter-state snapshots. Default `filter_state_dim` = 18: state `[x, y, z, vx, vy, vz, ax, ay, az]` concatenated with the 9 diagonal entries of the state covariance. All values in sensor-ENU frame and SI units. |
+| `filter_state_history` (input) | `(batch, 10, filter_state_dim)` | float32 | 10 consecutive filter-state snapshots. Default `filter_state_dim` = 12: the IMM common-space state `[x, vx, y, vy, z, vz]` concatenated with the 6 diagonal entries of the 6×6 common-space covariance (see design.md Decision 14 — the IMM combine output is 6D, so acceleration is inferred by the sequence model from the window rather than carried explicitly). All values in sensor-ENU frame and SI units. Produced by `thresh_filter::imm::project_filter_state` (`CLASSIFIER_FEATURE_DIM = 12`). |
 | `mode_probs` (output) | `(batch, 4)` | float32 | Softmaxed probabilities over `[CV, CA, CTRV, coord_turn]` |
 
 #### Scenario: Contract verification
 
 **WHEN** the `onnx-tests` workflow runs against `test-data/models/imm_mode_classifier.onnx`
 
-**THEN** the workflow asserts the model's input shape is `(batch, 10, 18)` (or whatever `filter_state_dim` the trained model uses, documented in the model card), output shape is `(batch, 4)`, and output values sum to 1.0 per batch row within 1e-5 tolerance
+**THEN** the workflow asserts the model's input shape is exactly `(batch, 10, 12)` — the trailing dimension MUST equal `thresh_filter::imm::CLASSIFIER_FEATURE_DIM` (12) so a model whose feature width disagrees with the runtime projection cannot pass — output shape is `(batch, 4)`, and output values sum to 1.0 per batch row within 1e-5 tolerance
 
 **SHALL** fail the build on any shape, name, or normalisation violation.
 

@@ -5,6 +5,7 @@ pub mod detection;
 pub mod eci;
 pub mod geodetic;
 pub mod measurement;
+pub mod motion_mode;
 pub mod othr;
 pub mod sensor;
 pub mod state;
