@@ -245,4 +245,43 @@ mod tests {
             report.mota
         );
     }
+
+    #[test]
+    fn radar_to_detection_handles_radar_and_non_radar() {
+        let radar = Measurement::Radar {
+            range: 1_000.0,
+            azimuth: 0.1,
+            elevation: 0.05,
+            range_rate: None,
+            time: 0.0,
+            sensor_id: 1,
+        };
+        assert!(radar_to_detection(&radar).is_some());
+        let eoir = Measurement::EoIr {
+            azimuth: 0.1,
+            elevation: 0.0,
+            time: 0.0,
+            sensor_id: 1,
+        };
+        assert!(radar_to_detection(&eoir).is_none());
+    }
+
+    #[test]
+    fn gt_position_at_handles_edges() {
+        let target = cv_target([1_000.0, 0.0, 0.0], [10.0, 0.0, 0.0]); // active 0..30 s
+        // In-window, in-range → Some.
+        assert!(gt_position_at(&target, 1.0, [0.0, 0.0, 0.0], 1.0e9).is_some());
+        // Outside the target's time window → None.
+        assert!(gt_position_at(&target, -1.0, [0.0, 0.0, 0.0], 1.0e9).is_none());
+        assert!(gt_position_at(&target, 1.0e6, [0.0, 0.0, 0.0], 1.0e9).is_none());
+        // Beyond max range → None.
+        assert!(gt_position_at(&target, 1.0, [0.0, 0.0, 0.0], 1.0).is_none());
+        // Too few waypoints → None.
+        let empty = TargetTrack {
+            waypoints: vec![],
+            class_id: 0,
+            size_override: None,
+        };
+        assert!(gt_position_at(&empty, 1.0, [0.0, 0.0, 0.0], 1.0e9).is_none());
+    }
 }
