@@ -80,6 +80,10 @@ git worktree remove ../thresh-worktrees/<branch-name>
 
 Each worktree is a full working copy that shares the same `.git` — commits, branches, and stash are shared across all worktrees. Build artifacts (`target/`) are per-worktree.
 
+## Python Training Tree
+
+The learned-model training/export code lives under `python/` (PyTorch + ONNX), a separate concern from `crates/thresh-py` (the maturin-built Rust binding). It has its own `pyproject.toml` + `uv.lock` and is linted/tested by the `python-training-tree` CI job. Heavy deps (`torch`, `onnx`, `onnxruntime`, `scipy`) live in the `training` optional extra and are **not** installed in default CI — training is a non-CI goal. The Rust side feeds it via `gen-imm-dataset` / `gen-detector-dataset` binaries (umbrella `thresh` crate, `training-export` feature) that write Parquet. End-to-end reproduction is documented in `TRAINING.md`; data licensing in `LICENSING.md`. The learned models are loaded behind feature gates: `thresh-filter`'s `learned-imm` (IMM mode classifier) and `thresh-inference`'s `onnx` (detector).
+
 ## Reference Docs
 
 Mathematical and algorithmic references are in `docs/reference/` — covering Kalman filter derivations, fusion math, data association, and transformer architectures.
