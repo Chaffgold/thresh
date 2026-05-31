@@ -12,4 +12,5 @@ pub use thresh_inference as inference;
 pub use thresh_synth as synth;
 pub use thresh_tracker as tracker;
 
+pub mod eval_harness;
 pub mod training;
