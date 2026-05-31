@@ -36,6 +36,10 @@ path = "../thresh-bridge"
 name = "gen-imm-dataset"
 required-features = ["training-export"]
 
+[[bin]]
+name = "gen-detector-dataset"
+required-features = ["training-export"]
+
 [dev-dependencies]
 nalgebra = { workspace = true }
 rand = "0.9"

@@ -40,6 +40,8 @@ use thresh_synth::radar_trajectory::{
 use thresh_synth::trajectory::Waypoint;
 use thresh_tracker::tracker::MultiObjectTracker;
 
+pub mod detector;
+
 #[cfg(feature = "training-export")]
 pub mod parquet_export;
 
