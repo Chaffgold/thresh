@@ -272,6 +272,8 @@ jobs:
           filters: |
             inference:
               - 'crates/thresh-inference/**'
+              - 'crates/thresh-filter/**'
+              - 'test-data/models/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - '.github/workflows/ci.yml'
@@ -301,3 +303,5 @@ jobs:
           echo "ORT will be fetched by the ort crate during build"
       - name: Run inference tests
         run: cargo test -p thresh-inference --features onnx
+      - name: Run learned-IMM tests (Track B classifier + ONNX stub contract)
+        run: cargo test -p thresh-filter --features learned-imm

@@ -15,7 +15,9 @@ dependencies = [
 
 [project.optional-dependencies]
 training = [
-    "torch>=2.2",
+    # >=2.4: `torch.onnx.export` accepts the `dynamo` kwarg (export_imm.py
+    # passes `dynamo=False` for the legacy exporter).
+    "torch>=2.4",
     "onnx>=1.16",
     "onnxruntime>=1.18",
 ]
@@ -49,6 +51,17 @@ ignore = []
 
 [tool.pyright]
 include = ["acquisition", "training", "export", "eval", "tests"]
+# torch / onnx live in the optional `training` extra, which the default CI lane
+# does not install (training is a non-CI goal per design Decision 7). Exclude
+# the torch-dependent files from strict type-checking so the lane stays green
+# without the heavy extras; they are still linted by ruff and exercised locally
+# (and in the `training`-extra pytest) via `uv run --extra training pytest`.
+exclude = [
+    "training/imm_model.py",
+    "training/train_imm.py",
+    "export/export_imm.py",
+    "tests/test_imm_training.py",
+]
 pythonVersion = "3.11"
 typeCheckingMode = "strict"
 reportMissingImports = "error"
