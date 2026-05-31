@@ -55,3 +55,22 @@ The kind is owned by the `ImmFilter` instance and also drives the
 common-space measurement-update leaf. `ImmFilter::new` defaults to
 `ImmLeafKind::Ekf`, so existing callers and the `thresh-tracker` IMM path
 are unaffected.
+
+## `learned-imm` feature (Track B)
+
+The optional `learned-imm` feature (off by default) adds `imm_adapter`, which
+loads an ONNX mode classifier via `thresh-inference` and lets the IMM use
+*learned* mode probabilities instead of the analytic Markov update:
+
+```sh
+cargo build -p thresh-filter --features learned-imm   # pulls the ort/ONNX stack
+```
+
+`ImmModeAdapter::from_onnx(path)` loads the checkpoint; `LearnedImmFilter` wraps
+an `ImmFilter`, feeding it the classifier's probabilities once a full 10-step
+window of filter-state projections (`project_filter_state`, 12-dim) exists, and
+falling back to the analytic update on any error. The core `ImmFilter` is
+untouched, so the analytic test suite passes unchanged with the feature on. The
+training/export pipeline lives under `python/` (see `TRAINING.md`); the feature
+is feature-gated because the `ort`/ONNX-Runtime stack is heavy. Ships off by
+default until the trained checkpoint meets its exit criterion.

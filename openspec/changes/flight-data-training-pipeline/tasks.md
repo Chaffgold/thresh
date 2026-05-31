@@ -93,11 +93,11 @@
 
 ## 10. Documentation and reproducibility
 
-- [ ] 10.1 Write `TRAINING.md` at repo root: end-to-end reproduction recipe from `uv sync` through `python/eval/run_tracker.py`.
-- [ ] 10.2 Write `LICENSING.md` documenting OpenSky and ADSBx attribution / redistribution posture.
-- [ ] 10.3 Write `test-data/models/MODEL_CARD.md` documenting both trained checkpoints' provenance, training data, and exit-criteria results. Include the explicit note that ADS-B is consumed as system-level truth, never as measurements.
-- [ ] 10.4 Update `CLAUDE.md` to mention the new Python tree under `python/` and the `TRAINING.md` entry point.
-- [ ] 10.5 Update each affected crate's README where the learned feature gates land.
+- [x] 10.1 Write `TRAINING.md` at repo root: end-to-end reproduction recipe from `uv sync` through `python/eval/run_tracker.py`. _Expanded to the full pipeline: bootstrap, acquisition, the Rust `gen-imm-dataset`/`gen-detector-dataset` synth-dataset generation, both training tracks (`train_imm`/`export_imm`, `train_detector`/`export_detector`) with exit criteria, and a forward reference to the Phase 9 eval harness._
+- [x] 10.2 Write `LICENSING.md` documenting OpenSky and ADSBx attribution / redistribution posture. _Created: OpenSky (redistributable, academic, attribution), ADSBx (not redistributable — client only, dev-supplied key), the ADS-B-as-system-level-truth posture, trained-model licensing (Decision 13)._
+- [x] 10.3 Write `test-data/models/MODEL_CARD.md` documenting both trained checkpoints' provenance, training data, and exit-criteria results. Include the explicit note that ADS-B is consumed as system-level truth, never as measurements. _Documents all stubs + both learned models (IMM classifier, detector) — contracts, provenance, exit criteria (6.8/7.9), and the explicit ADS-B-is-truth-never-a-measurement lineage note._
+- [x] 10.4 Update `CLAUDE.md` to mention the new Python tree under `python/` and the `TRAINING.md` entry point. _Added a "Python Training Tree" section (python/ vs thresh-py, the training extra, the gen-* bridge binaries, the `learned-imm`/`onnx` gates, pointers to TRAINING.md/LICENSING.md)._
+- [x] 10.5 Update each affected crate's README where the learned feature gates land. _`thresh-filter/README.md` gains a `learned-imm` section; new `thresh-inference/README.md` (`onnx` + 3-output decoder) and `thresh/README.md` (`training-export` + `gen-*-dataset` binaries)._
 
 ## 11. Wrap-up
 
