@@ -17,6 +17,14 @@ def test_region_key_grids() -> None:
     assert region_key(47.6, -122.3, cell_deg=1.0) != region_key(33.4, -112.0, cell_deg=1.0)
 
 
+def test_region_key_subdegree_no_collision() -> None:
+    # Sub-degree cells must stay distinct (the integer-index keying avoids the
+    # `:.0f` collision where 47.5 and 48.0 both rendered as "48").
+    assert region_key(47.5, -122.0, cell_deg=0.5) != region_key(48.0, -122.0, cell_deg=0.5)
+    # Two points in the same 0.5° cell [47.5, 48.0) × [-122.0, -121.5) share a key.
+    assert region_key(47.5, -122.0, cell_deg=0.5) == region_key(47.9, -121.6, cell_deg=0.5)
+
+
 def test_split_regions_is_disjoint_and_by_region() -> None:
     # Three regions: KSEA-ish (A,B share a region), KPHX-ish (C), KJFK-ish (D).
     traj_to_region = {"A": "47,-122", "B": "47,-122", "C": "33,-112", "D": "40,-73"}

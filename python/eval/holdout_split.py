@@ -38,10 +38,16 @@ class RegionSplit:
 
 
 def region_key(lat: float, lon: float, cell_deg: float = 1.0) -> str:
-    """Coarse grid-cell key for a lat/lon, at `cell_deg` resolution."""
-    lat_cell = math.floor(lat / cell_deg) * cell_deg
-    lon_cell = math.floor(lon / cell_deg) * cell_deg
-    return f"{lat_cell:.0f},{lon_cell:.0f}"
+    """Grid-cell key for a lat/lon at `cell_deg` resolution.
+
+    Keyed by integer cell *indices* (`floor(coord / cell_deg)`), so sub-degree
+    resolutions never collide — unlike formatting the scaled coordinate, where
+    e.g. `47.5` and `48.0` would both round to ``"48"`` and silently merge
+    distinct cells, defeating the no-leakage guarantee.
+    """
+    lat_idx = math.floor(lat / cell_deg)
+    lon_idx = math.floor(lon / cell_deg)
+    return f"{lat_idx},{lon_idx}"
 
 
 def _mean_region_per_trajectory(
