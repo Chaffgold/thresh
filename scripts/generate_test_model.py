@@ -5,8 +5,11 @@ Input:  point_cloud  (1, 1000, 4)  float32  — batch of 1000 points with [x, y,
 Outputs:
   boxes   (1, 100, 7)  float32  — [x, y, z, length, width, height, yaw] per detection
   scores  (1, 100, 1)  float32  — confidence score per detection
+  classes (1, 100, 1)  int64    — class index in [0, 5) per detection
 
 The model uses random weights and is intended for shape-testing only (< 1 MB).
+The three-output contract (boxes + scores + classes) matches the Rust decoder
+in thresh-inference (`OnnxDetector::detect`); see design.md Decision 9.
 """
 
 from pathlib import Path
@@ -25,6 +28,7 @@ HIDDEN_DIM = 32     # small hidden layer
 NUM_DETECTIONS = 100
 BOX_DIM = 7         # x, y, z, length, width, height, yaw
 SCORE_DIM = 1
+NUM_CLASSES = 5     # taxonomy per design.md Decision 8
 
 rng = np.random.default_rng(42)
 
@@ -49,6 +53,10 @@ def build_model() -> onnx.ModelProto:
     w2_score = _rand_init("w2_score", (HIDDEN_DIM, SCORE_DIM))
     b2_score = _rand_init("b2_score", (SCORE_DIM,))
 
+    # Linear 2 for class logits: (HIDDEN_DIM, NUM_CLASSES)
+    w2_class = _rand_init("w2_class", (HIDDEN_DIM, NUM_CLASSES))
+    b2_class = _rand_init("b2_class", (NUM_CLASSES,))
+
     # --- Graph nodes --------------------------------------------------------------
     # hidden = relu(input @ w1 + b1)   shape: (1, 1000, 32)
     matmul1 = helper.make_node("MatMul", ["point_cloud", "w1"], ["mm1"])
@@ -63,6 +71,13 @@ def build_model() -> onnx.ModelProto:
     matmul_score = helper.make_node("MatMul", ["hidden", "w2_score"], ["mm_score"])
     add_score = helper.make_node("Add", ["mm_score", "b2_score"], ["scores_pre_sig"])
     sigmoid_score = helper.make_node("Sigmoid", ["scores_pre_sig"], ["scores_full"])
+
+    # class_idx = argmax(hidden @ w2_class + b2_class)  shape: (1, 1000, 1) int64
+    matmul_class = helper.make_node("MatMul", ["hidden", "w2_class"], ["mm_class"])
+    add_class = helper.make_node("Add", ["mm_class", "b2_class"], ["class_logits"])
+    argmax_class = helper.make_node(
+        "ArgMax", ["class_logits"], ["classes_full"], axis=2, keepdims=1
+    )
 
     # Slice to first NUM_DETECTIONS along axis=1 to get (1, 100, *)
     # axes, starts, ends, steps as constant tensors
@@ -82,6 +97,11 @@ def build_model() -> onnx.ModelProto:
         ["scores_full", "slice_starts", "slice_ends", "slice_axes"],
         ["scores"],
     )
+    slice_class = helper.make_node(
+        "Slice",
+        ["classes_full", "slice_starts", "slice_ends", "slice_axes"],
+        ["classes"],
+    )
 
     # --- Input / output specs -----------------------------------------------------
     input_info = helper.make_tensor_value_info(
@@ -93,6 +113,9 @@ def build_model() -> onnx.ModelProto:
     output_scores = helper.make_tensor_value_info(
         "scores", TensorProto.FLOAT, [BATCH, NUM_DETECTIONS, SCORE_DIM]
     )
+    output_classes = helper.make_tensor_value_info(
+        "classes", TensorProto.INT64, [BATCH, NUM_DETECTIONS, 1]
+    )
 
     # --- Assemble graph -----------------------------------------------------------
     graph = helper.make_graph(
@@ -100,13 +123,14 @@ def build_model() -> onnx.ModelProto:
             matmul1, add1, relu1,
             matmul_box, add_box,
             matmul_score, add_score, sigmoid_score,
-            slice_box, slice_score,
+            matmul_class, add_class, argmax_class,
+            slice_box, slice_score, slice_class,
         ],
         name="test_detector",
         inputs=[input_info],
-        outputs=[output_boxes, output_scores],
+        outputs=[output_boxes, output_scores, output_classes],
         initializer=[
-            w1, b1, w2_box, b2_box, w2_score, b2_score,
+            w1, b1, w2_box, b2_box, w2_score, b2_score, w2_class, b2_class,
             axes_init, starts_init, ends_init,
         ],
     )

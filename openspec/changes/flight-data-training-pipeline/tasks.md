@@ -66,21 +66,21 @@
 
 ## 7. Track A detector training
 
-- [ ] 7.1 Pick the pretrained backbone (RT-DETR / 3DETR / Group-Free-3D); document the decision in `design.md` under Open Questions.
-- [ ] 7.2 Implement `python/training/detector_dataset.py` that materialises `(point_cloud, gt_boxes_3D, gt_classes)` pairs by calling the synth pairing from Phase 4.
-- [ ] 7.3 Implement `python/training/train_detector.py` with set-prediction loss (Hungarian matching + L1 + GIoU-3D + cross-entropy on class).
-- [ ] 7.4 Define class taxonomy in `python/training/classes.py` per Decision 8 in design.md.
-- [ ] 7.5 Run a first training pass on a single airport region (KSEA suggested) for 24–48 GPU-hours.
-- [ ] 7.6 Implement `python/export/export_detector.py`: `torch.onnx.export` matching the contract `(1,1000,4) → (1,100,7) + (1,100,1) + (1,100,1)`.
-- [ ] 7.7 Add an updated `scripts/generate_test_model.py` that emits a stub ONNX with the new three-output contract (still random weights) so the CI shape contract passes before the real model lands.
-- [ ] 7.8 Update Rust-side ONNX parser in `crates/thresh-inference` to read the new `classes` output tensor (default to 0 if absent for backward compatibility).
-- [ ] 7.9 Track A exit criterion: mAP@0.5 ≥ 0.30 on the holdout region AND downstream MOTA improvement on `thresh-eval`'s ADS-B scenario.
+- [x] 7.1 Pick the pretrained backbone (RT-DETR / 3DETR / Group-Free-3D); document the decision in `design.md` under Open Questions. _**3DETR** (point-cloud set-prediction, no RGB/voxelization, fits the (1000,4) input). See design.md Decision 20._
+- [ ] 7.2 Implement `python/training/detector_dataset.py` that materialises `(point_cloud, gt_boxes_3D, gt_classes)` pairs by calling the synth pairing from Phase 4. _Follow-on PR (Phase 7 part 2, Decision 21): needs a Rust `gen-detector-dataset` binary mirroring Phase 5's `gen-imm-dataset` to bridge `RadarSnapshot` → Parquet → torch-free reader._
+- [ ] 7.3 Implement `python/training/train_detector.py` with set-prediction loss (Hungarian matching + L1 + GIoU-3D + cross-entropy on class). _Follow-on PR (part 2)._
+- [x] 7.4 Define class taxonomy in `python/training/classes.py` per Decision 8 in design.md. _`TargetClass` IntEnum (0=light-fixed-wing … 4=other) + `class_for_adsb_category`; index-aligned to the Rust synth/ONNX contract. Torch-free, tested in `tests/test_classes.py`._
+- [ ] 7.5 Run a first training pass on a single airport region (KSEA suggested) for 24–48 GPU-hours. _Deferred (GPU/non-CI, like 6.8/7.9)._
+- [ ] 7.6 Implement `python/export/export_detector.py`: `torch.onnx.export` matching the contract `(1,1000,4) → (1,100,7) + (1,100,1) + (1,100,1)`. _Follow-on PR (part 2)._
+- [x] 7.7 Add an updated `scripts/generate_test_model.py` that emits a stub ONNX with the new three-output contract (still random weights) so the CI shape contract passes before the real model lands. _Adds a class head + `ArgMax` → `classes` (1,100,1, int64); regenerated `test_detector.onnx` (3.3 KB) now emits boxes + scores + classes._
+- [x] 7.8 Update Rust-side ONNX parser in `crates/thresh-inference` to read the new `classes` output tensor (default to 0 if absent for backward compatibility). _`OnnxDetector::detect` is now real (was a placeholder): builds the (1,1000,4) input, runs the session (behind a `Mutex` for `&self`), decodes `boxes`/`scores` (f32) + `classes` (i64, default 0 if only 2 outputs) into `Detection3D`, then confidence-filters + NMS. See design.md Decisions 21/22._
+- [ ] 7.9 Track A exit criterion: mAP@0.5 ≥ 0.30 on the holdout region AND downstream MOTA improvement on `thresh-eval`'s ADS-B scenario. _Deferred (needs the real GPU training run, like Track B's 6.8)._
 
 ## 8. ONNX export and verification
 
-- [ ] 8.1 Update `onnx-tests` workflow to assert the new three-output contract (boxes, scores, classes) for `test_detector.onnx`.
-- [ ] 8.2 Add a similar contract test for `imm_mode_classifier.onnx`: input `(batch, 10, filter_state_dim)`, output `(batch, 4)`.
-- [ ] 8.3 Add a `python/eval/onnx_parity.py` smoke test that runs both Python (`onnxruntime`) and Rust (via `thresh-inference`) on the same fixture batch and asserts outputs match within 1e-5.
+- [x] 8.1 Update `onnx-tests` workflow to assert the new three-output contract (boxes, scores, classes) for `test_detector.onnx`. _`detection.rs::tests::detector_stub_three_output_contract` (feature-gated, run by the `onnx-tests` job via `cargo test -p thresh-inference --features onnx`) loads the stub and asserts it decodes into ≤100 `Detection3D` with class indices in [0,5); plus a `decode_detections` default-class unit test._
+- [x] 8.2 Add a similar contract test for `imm_mode_classifier.onnx`: input `(batch, 10, filter_state_dim)`, output `(batch, 4)`. _`detection.rs::tests::imm_classifier_stub_contract` loads it via `OnnxModel` and asserts (1,10,12) → 4 probabilities summing to 1 (complements the Phase 6 thresh-filter learned-imm test)._
+- [ ] 8.3 Add a `python/eval/onnx_parity.py` smoke test that runs both Python (`onnxruntime`) and Rust (via `thresh-inference`) on the same fixture batch and asserts outputs match within 1e-5. _Follow-on (Phase 8 / part 2)._
 - [ ] 8.4 Replace `test-data/models/test_detector.onnx` with the trained Track A checkpoint (only when exit criterion 7.9 is met).
 - [ ] 8.5 Drop `test-data/models/imm_mode_classifier.onnx` (the trained Track B checkpoint) into the repository.
 

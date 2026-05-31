@@ -195,3 +195,23 @@ If the third bullet fails, ship the model but keep the feature gate off by defau
 **Decision:** `LearnedImmFilter` wraps an `ImmFilter` rather than modifying its hot path: after the analytic `update_with_measurement`, once a full 10-step window of the filter's own `project_filter_state` outputs exists, the classifier's probabilities replace the public `mode_probabilities` field and the public `combine()` is re-run to re-blend. The IMM's `interaction_step` keeps using the analytic transition matrix (internal mode mixing is unchanged — only the likelihood-based mode-probability estimate is replaced). Any classifier error falls back to the analytic result with a one-time warning.
 
 **Rationale:** Leaving the well-tested core `ImmFilter` untouched means every existing analytic-IMM test passes verbatim with the feature on (6.7), and the learned behaviour is cleanly isolated and reversible. Overriding the estimation step but not the mixing matches the spec's intent (the classifier replaces the analytic *mode estimate*, not the bank's internal interaction). The rolling window is the wrapper's responsibility, not the IMM's.
+
+## Decisions made during Phase 7 (Track A detector)
+
+### 20. Detector backbone: 3DETR (resolves the Open Question)
+
+**Decision:** Track A's detector is a **3DETR-style** point-cloud set-prediction model — a Transformer encoder/decoder over the raw `(1000, 4)` point cloud with learned object queries and parallel box / score / class heads, trained with the DETR set-prediction loss (Hungarian matching + L1 box + GIoU-3D + class cross-entropy). This resolves the "which pretrained backbone" Open Question.
+
+**Rationale:** 3DETR consumes unstructured 3D point clouds directly (no voxelization, no RGB/image backbone), so it fits the `(1000, 4)` synthetic-radar input with no preprocessing or domain shift — unlike RT-DETR-R50 (image backbone) or Group-Free-3D (segmentation-oriented). Its set-prediction paradigm matches the loss design already specified in Decision 3, its outputs map cleanly onto the `(boxes, scores, classes)` ONNX contract (Decision 9), and it is small enough to smoke-test on CPU during scaffolding. The real fine-tune (task 7.5, 24–48 GPU-hours) and the exit criterion (7.9) are deferred like Track B's 6.8.
+
+### 21. Phase 7 split: Rust detector contract first, Python training follow-on
+
+**Decision:** Phase 7 lands in two parts. **Part 1 (this change):** the Rust-side ONNX detector contract — the three-output stub (`boxes` + `scores` + `classes`, task 7.7), the real `OnnxDetector::detect` decoder that reads them into `Detection3D` with a backward-compatible `class_id = 0` default (7.8), the class taxonomy (`python/training/classes.py`, 7.4), the backbone decision (7.1), and the ONNX contract tests (8.1/8.2). **Part 2 (follow-on):** the Python detector training scaffolding — `detector_dataset.py` + a Rust `gen-detector-dataset` binary (7.2), `train_detector.py` with the set-prediction loss (7.3), and `export_detector.py` (7.6).
+
+**Rationale:** The Rust contract + decoder is the high-value, fully CI-verifiable core (it makes `OnnxDetector` actually decode detections instead of returning an empty list, and locks the three-output shape contract in CI), and it is independent of the heavier, GPU-gated training scaffolding. Splitting keeps each PR reviewable, mirroring the manageable per-phase cadence of Phases 1–6.
+
+### 22. `classes` ONNX output is int64 via ArgMax
+
+**Decision:** The detector's third output `classes` (1,100,1) is an **int64** class index produced by an `ArgMax` over per-detection class logits. The Rust decoder extracts it with `try_extract_tensor::<i64>` and clamps negatives to 0; `boxes` and `scores` remain float32. A model with only two outputs (pre-7.7) is still accepted, with all `class_id` defaulting to 0.
+
+**Rationale:** An integer class index matches Decision 9's contract ("integer class index in [0, 5)") and keeps the index unambiguous (no float rounding). The `ort::Session::run` signature is `&mut self`, but `DetectionPipeline::detect` is `&self`, so the session is held behind a `Mutex` for interior mutability (also keeping `OnnxDetector` `Sync`).

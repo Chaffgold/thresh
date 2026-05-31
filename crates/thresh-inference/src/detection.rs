@@ -12,9 +12,12 @@
 //! * **[`MockDetector`]** — returns pre-configured detections; useful for unit
 //!   and integration tests without a real model.
 //! * **`OnnxDetector`** (behind the `onnx` feature gate) — loads a pre-trained
-//!   ONNX model via `ort::Session` and runs inference on each frame. In the
-//!   current release this is a placeholder that returns an empty detection list;
-//!   a real deployment supplies a trained RT-DETR (or similar) `.onnx` file.
+//!   ONNX model via `ort::Session` and runs inference on each frame. It decodes
+//!   the three-output detector contract (`boxes` + `scores` + optional
+//!   `classes`; see design Decision 9) into [`Detection3D`]s, then applies
+//!   confidence filtering and NMS. A real deployment supplies a trained 3DETR
+//!   (or similar) `.onnx` file; the checked-in `test_detector.onnx` is a
+//!   random-weight stub for the shape contract.
 //!
 //! # Post-processing
 //!
@@ -227,7 +230,10 @@ impl DetectionPipeline for MockDetector {
 /// RT-DETR (or similar) `.onnx` file at `model_path`.
 #[cfg(feature = "onnx")]
 pub struct OnnxDetector {
-    session: ort::session::Session,
+    // `ort::Session::run` takes `&mut self`, but `DetectionPipeline::detect`
+    // is `&self`, so the session lives behind a `Mutex` for interior
+    // mutability (also keeps `OnnxDetector` `Sync` for use as a trait object).
+    session: std::sync::Mutex<ort::session::Session>,
     confidence_threshold: f64,
     nms_iou_threshold: f64,
 }
@@ -245,15 +251,10 @@ impl OnnxDetector {
     ) -> Result<Self, ort::Error> {
         let session = ort::session::Session::builder()?.commit_from_file(model_path)?;
         Ok(Self {
-            session,
+            session: std::sync::Mutex::new(session),
             confidence_threshold,
             nms_iou_threshold,
         })
-    }
-
-    /// Return a reference to the underlying ORT session.
-    pub fn session(&self) -> &ort::session::Session {
-        &self.session
     }
 
     /// Re-create the ONNX session with weights overridden from a SafeTensors file.
@@ -284,19 +285,125 @@ impl OnnxDetector {
     }
 }
 
+// ONNX detector contract dimensions (Design Decision 9).
+#[cfg(feature = "onnx")]
+const DET_NUM_POINTS: usize = 1000;
+#[cfg(feature = "onnx")]
+const DET_POINT_DIM: usize = 4; // x, y, z, intensity
+#[cfg(feature = "onnx")]
+const DET_MAX_BOXES: usize = 100;
+#[cfg(feature = "onnx")]
+const DET_BOX_DIM: usize = 7; // x, y, z, L, W, H, yaw
+
+#[cfg(feature = "onnx")]
+impl OnnxDetector {
+    /// Flatten a sensor frame into the detector's `(1, 1000, 4)`
+    /// `[x, y, z, intensity]` input tensor (zero-padded or truncated to 1000
+    /// points).
+    fn build_input(input: &SensorInput) -> Vec<f32> {
+        let mut data = vec![0.0_f32; DET_NUM_POINTS * DET_POINT_DIM];
+        for (i, p) in input.points.iter().take(DET_NUM_POINTS).enumerate() {
+            let intensity = input
+                .intensities
+                .as_ref()
+                .and_then(|v| v.get(i))
+                .copied()
+                .unwrap_or(0.0);
+            let base = i * DET_POINT_DIM;
+            data[base] = p[0] as f32;
+            data[base + 1] = p[1] as f32;
+            data[base + 2] = p[2] as f32;
+            data[base + 3] = intensity as f32;
+        }
+        data
+    }
+
+    /// Run the model and decode raw outputs into detections (before filtering).
+    ///
+    /// Reads `boxes` (1,100,7) + `scores` (1,100,1); the optional third
+    /// `classes` output (1,100,1, int64) sets `class_id`, defaulting to 0 for
+    /// backward-compatible 2-output models (task 7.8).
+    fn run_and_decode(&self, input: &SensorInput) -> Result<Vec<Detection3D>, String> {
+        let data = Self::build_input(input);
+        let tensor = ort::value::Tensor::from_array((
+            vec![1_i64, DET_NUM_POINTS as i64, DET_POINT_DIM as i64],
+            data,
+        ))
+        .map_err(|e| format!("input tensor build failed: {e}"))?;
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|_| "session mutex poisoned".to_string())?;
+        let outputs = session
+            .run(ort::inputs![tensor])
+            .map_err(|e| format!("inference failed: {e}"))?;
+        // Guard before positional indexing: a malformed model with < 2 outputs
+        // would otherwise panic past `detect`'s graceful empty-on-error path.
+        if outputs.len() < 2 {
+            return Err(format!(
+                "detector returned {} output(s), expected at least 2 (boxes, scores)",
+                outputs.len()
+            ));
+        }
+        let (_, boxes) = outputs[0]
+            .try_extract_tensor::<f32>()
+            .map_err(|e| format!("boxes extract failed: {e}"))?;
+        let (_, scores) = outputs[1]
+            .try_extract_tensor::<f32>()
+            .map_err(|e| format!("scores extract failed: {e}"))?;
+        let classes: Option<Vec<i64>> = if outputs.len() >= 3 {
+            outputs[2]
+                .try_extract_tensor::<i64>()
+                .ok()
+                .map(|(_, c)| c.to_vec())
+        } else {
+            None
+        };
+        Ok(decode_detections(boxes, scores, classes.as_deref()))
+    }
+}
+
+/// Decode flat `boxes`/`scores`/`classes` tensors into [`Detection3D`]s.
+///
+/// `boxes` is `100 × 7` row-major `[x, y, z, L, W, H, yaw]`; `scores` is the
+/// per-detection confidence; `classes` (when present) is the per-detection
+/// class index. A missing `classes` tensor yields `class_id = 0`.
+#[cfg(feature = "onnx")]
+fn decode_detections(boxes: &[f32], scores: &[f32], classes: Option<&[i64]>) -> Vec<Detection3D> {
+    let n = (boxes.len() / DET_BOX_DIM)
+        .min(scores.len())
+        .min(DET_MAX_BOXES);
+    let mut dets = Vec::with_capacity(n);
+    for i in 0..n {
+        let b = &boxes[i * DET_BOX_DIM..i * DET_BOX_DIM + DET_BOX_DIM];
+        let class_id = classes
+            .and_then(|c| c.get(i))
+            .map(|&c| c.max(0) as u32)
+            .unwrap_or(0);
+        dets.push(Detection3D {
+            position: [b[0] as f64, b[1] as f64, b[2] as f64],
+            dimensions: [b[3] as f64, b[4] as f64, b[5] as f64],
+            yaw: b[6] as f64,
+            class_id,
+            confidence: scores[i] as f64,
+        });
+    }
+    dets
+}
+
 #[cfg(feature = "onnx")]
 impl DetectionPipeline for OnnxDetector {
-    fn detect(&self, _input: &SensorInput) -> Vec<Detection3D> {
-        // Placeholder: a real implementation would:
-        // 1. Pre-process the SensorInput into model-compatible tensors
-        // 2. Run self.session.run(inputs)
-        // 3. Decode output tensors into Detection3D structs
-        // 4. Apply confidence thresholding (self.confidence_threshold)
-        // 5. Apply NMS (nms_3d with self.nms_iou_threshold)
-        let _ = &self.session;
-        let _ = self.confidence_threshold;
-        let _ = self.nms_iou_threshold;
-        Vec::new()
+    fn detect(&self, input: &SensorInput) -> Vec<Detection3D> {
+        let mut dets = match self.run_and_decode(input) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("OnnxDetector inference failed: {e}");
+                return Vec::new();
+            }
+        };
+        filter_by_confidence(&mut dets, self.confidence_threshold);
+        nms_3d(&mut dets, self.nms_iou_threshold);
+        dets
     }
 
     fn name(&self) -> &str {
@@ -451,6 +558,74 @@ mod tests {
         assert!((config.nms_iou_threshold - 0.4).abs() < f64::EPSILON);
         assert_eq!(config.voxel_size, [0.1, 0.1, 0.2]);
         assert_eq!(config.max_points_per_voxel, 35);
+    }
+
+    #[cfg(feature = "onnx")]
+    fn model_path(name: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../test-data/models")
+            .join(name)
+    }
+
+    /// Task 7.8: decoding defaults `class_id` to 0 when no classes tensor is
+    /// present (backward-compatible 2-output models), and reads it otherwise.
+    #[cfg(feature = "onnx")]
+    #[test]
+    fn decode_detections_defaults_class_to_zero() {
+        let boxes = vec![
+            1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0, 0.5, // det 0
+            10.0, 11.0, 12.0, 2.0, 2.0, 2.0, 0.1, // det 1
+        ];
+        let scores = vec![0.9_f32, 0.8];
+        let none = decode_detections(&boxes, &scores, None);
+        assert_eq!(none.len(), 2);
+        assert!(none.iter().all(|d| d.class_id == 0));
+        assert_eq!(none[0].position, [1.0, 2.0, 3.0]);
+        assert_eq!(none[0].dimensions, [4.0, 5.0, 6.0]);
+        let some = decode_detections(&boxes, &scores, Some(&[3, 1]));
+        assert_eq!(some[0].class_id, 3);
+        assert_eq!(some[1].class_id, 1);
+    }
+
+    /// Task 8.1: the committed three-output detector stub loads and decodes
+    /// into `Detection3D`s with class indices in `[0, 5)`.
+    #[cfg(feature = "onnx")]
+    #[test]
+    fn detector_stub_three_output_contract() {
+        let detector =
+            OnnxDetector::load(model_path("test_detector.onnx").to_str().unwrap(), 0.0, 1.0)
+                .expect("load detector stub");
+        let input = SensorInput {
+            points: (0..1000).map(|i| [i as f64 * 0.01, 0.0, 0.0]).collect(),
+            intensities: Some(vec![0.5; 1000]),
+            timestamp: 0.0,
+        };
+        let dets = detector.detect(&input);
+        assert!(!dets.is_empty(), "stub should decode some detections");
+        assert!(
+            dets.len() <= 100,
+            "at most 100 detections, got {}",
+            dets.len()
+        );
+        assert!(
+            dets.iter().all(|d| d.class_id < 5),
+            "class index must be in [0, 5)"
+        );
+    }
+
+    /// Task 8.2: the IMM-classifier stub maps `(1, 10, 12)` to 4 probabilities.
+    #[cfg(feature = "onnx")]
+    #[test]
+    fn imm_classifier_stub_contract() {
+        use crate::session::OnnxModel;
+        let mut model =
+            OnnxModel::load(model_path("imm_mode_classifier.onnx")).expect("load imm stub");
+        let out = model
+            .run_f32(&vec![0.0_f32; 10 * 12], &[1, 10, 12])
+            .expect("run imm classifier");
+        assert_eq!(out.len(), 4, "4 mode probabilities");
+        let sum: f32 = out.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-4, "softmax sums to 1, got {sum}");
     }
 
     #[test]
