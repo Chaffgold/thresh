@@ -5,9 +5,9 @@
 //! [`RadarSnapshot`](thresh_synth::radar_trajectory::RadarSnapshot) from
 //! `from_trajectory` (a `(point_cloud, gt_boxes, gt_valid, gt_classes)` tuple in
 //! the ONNX detector's shapes) becomes one [`DetectorSample`], tagged with its
-//! source trajectory. The Rust-native Parquet writer for these lives in
-//! [`parquet_export`](super::parquet_export) behind the `training-export`
-//! feature; the torch-free `python/training/detector_dataset.py` reads it.
+//! source trajectory. The Rust-native Parquet writer for these lives in the
+//! `parquet_export` module (behind the `training-export` feature); the
+//! torch-free `python/training/detector_dataset.py` reads it.
 
 use rand::SeedableRng;
 use rand::rngs::StdRng;

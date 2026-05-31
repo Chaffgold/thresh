@@ -10,7 +10,7 @@
 //! | `trajectory_id`     | uint32          | source trajectory                  |
 //! | `track_id`          | uint64          | tracker track the feature is from  |
 //! | `time_s`            | float64         | tick time (s)                      |
-//! | `feature`           | list<float64>   | 12-dim filter-state feature        |
+//! | `feature`           | `list<float64>` | 12-dim filter-state feature        |
 //! | `label`             | utf8            | `cv`/`ca`/`ctrv`/`coord_turn`      |
 //! | `label_index`       | int32           | IMM mode index `0..4`              |
 //! | `imm_dominant_mode` | int32 nullable  | analytic IMM's mode (reference)    |
@@ -104,10 +104,10 @@ pub fn write_imm_samples_parquet(
 /// | `trajectory_id` | uint32         | source scene                       |
 /// | `snapshot_index`| uint64         | snapshot within the scene          |
 /// | `time_s`        | float64        | snapshot time (s)                  |
-/// | `point_cloud`   | list<float32>  | 1000×4 flattened `[x,y,z,intensity]` |
-/// | `gt_boxes`      | list<float32>  | 100×7 flattened `[x,y,z,L,W,H,yaw]`  |
-/// | `gt_valid`      | list<bool>     | 100 validity flags                 |
-/// | `gt_classes`    | list<int64>    | 100 class indices                  |
+/// | `point_cloud`   | `list<float32>` | 1000x4 flattened `[x,y,z,intensity]` |
+/// | `gt_boxes`      | `list<float32>` | 100x7 flattened `[x,y,z,L,W,H,yaw]`  |
+/// | `gt_valid`      | `list<bool>`    | 100 validity flags                 |
+/// | `gt_classes`    | `list<int64>`   | 100 class indices                  |
 pub fn detector_samples_to_record_batch(
     samples: &[DetectorSample],
 ) -> Result<RecordBatch, Box<dyn std::error::Error>> {
