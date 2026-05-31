@@ -337,6 +337,14 @@ impl OnnxDetector {
         let outputs = session
             .run(ort::inputs![tensor])
             .map_err(|e| format!("inference failed: {e}"))?;
+        // Guard before positional indexing: a malformed model with < 2 outputs
+        // would otherwise panic past `detect`'s graceful empty-on-error path.
+        if outputs.len() < 2 {
+            return Err(format!(
+                "detector returned {} output(s), expected at least 2 (boxes, scores)",
+                outputs.len()
+            ));
+        }
         let (_, boxes) = outputs[0]
             .try_extract_tensor::<f32>()
             .map_err(|e| format!("boxes extract failed: {e}"))?;
