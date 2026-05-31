@@ -62,7 +62,8 @@ def _mean_region_per_trajectory(
         s[1] += float(lo)
         s[2] += 1.0
     out: dict[str, str] = {}
-    for ic, (lat_sum, lon_sum, n) in sums.items():
+    for ic, acc in sums.items():
+        lat_sum, lon_sum, n = acc[0], acc[1], acc[2]
         if n > 0:
             out[ic] = region_key(lat_sum / n, lon_sum / n, cell_deg)
     return out
