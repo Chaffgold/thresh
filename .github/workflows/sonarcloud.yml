@@ -65,7 +65,7 @@ jobs:
             -Dsonar.tests=crates/
             -Dsonar.test.inclusions=**/*test*/**,**/tests/**
             -Dsonar.exclusions=**/target/**
-            -Dsonar.coverage.exclusions=**/tests/**,**/test*/**
+            -Dsonar.coverage.exclusions=**/tests/**,**/test*/**,**/src/bin/**
             -Dsonar.rust.lcov.reportPaths=lcov.info
             -Dsonar.community.rust.lcov.reportPaths=lcov.info
             -Dsonar.community.rust.clippy.reportPaths=clippy-report.json

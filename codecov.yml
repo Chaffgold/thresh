@@ -1,0 +1,9 @@
+# Codecov configuration.
+#
+# Binaries are thin CLI entry points (run via manual / integration invocation,
+# e.g. `gen-imm-dataset`, `gen-detector-dataset`, `eval-tracker`), not covered
+# by unit tests. Exclude them so patch/project coverage reflects library code;
+# the testable logic lives in library modules (e.g. `thresh::eval_harness`),
+# which the binaries only wrap.
+ignore:
+  - "**/src/bin/**"
