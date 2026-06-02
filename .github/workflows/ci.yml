@@ -305,3 +305,14 @@ jobs:
         run: cargo test -p thresh-inference --features onnx
       - name: Run learned-IMM tests (Track B classifier + ONNX stub contract)
         run: cargo test -p thresh-filter --features learned-imm
+      - name: Set up Python (ONNX parity check)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: 'latest'
+      - name: ONNX cross-language parity (Python onnxruntime vs Rust ort)
+        working-directory: python
+        run: uv run --extra training --group dev pytest tests/test_onnx_parity.py -q
