@@ -55,8 +55,18 @@ def rust_output(
         "cargo", "run", "-q", "-p", "thresh", "--features", "onnx", "--bin", "onnx-infer",
         "--", str(model_path), *[str(d) for d in shape],
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=True, cwd=repo_root)
-    line = next(ln for ln in proc.stdout.splitlines() if ln.strip().startswith("{"))
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=repo_root)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"onnx-infer exited {proc.returncode}\n--- stdout ---\n{proc.stdout}\n"
+            f"--- stderr ---\n{proc.stderr}"
+        )
+    line = next((ln for ln in proc.stdout.splitlines() if ln.strip().startswith("{")), None)
+    if line is None:
+        raise RuntimeError(
+            f"onnx-infer produced no JSON output line\n--- stdout ---\n{proc.stdout}\n"
+            f"--- stderr ---\n{proc.stderr}"
+        )
     return np.asarray(json.loads(line)["output"], dtype=np.float32)
 
 

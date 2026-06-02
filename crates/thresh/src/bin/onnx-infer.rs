@@ -17,9 +17,12 @@
 
 use thresh::inference::session::OnnxModel;
 
-/// Deterministic fixture value at flat index `i` — must match `onnx_parity.py`.
+/// Deterministic fixture value at flat index `i` — must match `onnx_parity.py`
+/// exactly. The sine is computed in **f64** and then cast to f32, mirroring
+/// Python's `float32(math.sin(i * 0.1))`, so the two runtimes see identical
+/// inputs (an f32 sine could round differently and cause spurious mismatches).
 fn fixture_value(i: usize) -> f32 {
-    (i as f32 * 0.1).sin()
+    (i as f64 * 0.1).sin() as f32
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
