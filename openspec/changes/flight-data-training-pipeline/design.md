@@ -229,3 +229,19 @@ If the third bullet fails, ship the model but keep the feature gate off by defau
 **Decision:** The MOT evaluation (task 9.2) lives in `thresh::eval_harness` (umbrella crate) + the `eval-tracker` binary: synth measurements → analytic 4-model IMM tracker → MOTA/MOTP/IDF1 via `thresh-eval`. `python/eval/run_tracker.py` is a thin wrapper that invokes the binary and parses its JSON. Ground truth is built **independently from the trajectory waypoints** (stable per-target id, sensor-frame, range-gated), not from `from_trajectory`'s `gt_boxes` (whose slot assignment is unstable across ticks).
 
 **Rationale:** The literal spec ("via `thresh-py`") is infeasible now: `thresh-py`'s `PyMultiObjectTracker` is CV-only (no IMM, no learned path), the Python synth-measurement binding was deferred (task 4.6), and the `thresh-py` extension does not build in the development environment. A Rust-native engine sidesteps all three, produces **real** baseline numbers (the analytic tracker works), is verifiable in CI and locally, and shares the synth/tracker/eval crates the rest of the change uses. The learned-vs-analytic A/B (task 9.3) is deferred behind two gaps it surfaces: `MultiObjectTracker` needs a learned-IMM constructor (Phase 6's `LearnedImmFilter` is filter-level only), and trained checkpoints are gated on the real GPU runs (Decision 7). The `--learned-*` flags exist and fall back to the analytic baseline until then.
+
+### 25. ONNX parity via an `onnx-infer` binary + JSON, on the IMM classifier
+
+**Decision:** The cross-language ONNX parity check (task 8.3) compares the **Python** runtime (`onnxruntime`) and the **Rust** runtime (`thresh-inference`/`ort`) on the IMM classifier (`(1,10,12)→(1,4)`), using a deterministic `sin(i*0.1)` fixture. Rust runs via a feature-gated `onnx-infer` binary (`thresh --features onnx`) that prints the output as JSON; `python/eval/onnx_parity.py` runs the same fixture under `onnxruntime` and asserts agreement within 1e-5. It runs in the `onnx-tests` CI job.
+
+**Rationale:** A subprocess + JSON boundary keeps the check language-agnostic and avoids a PyO3 round-trip (which doesn't build locally). The IMM classifier is the cleanest target — a single output tensor that `OnnxModel::run_f32` already returns — whereas the detector has three outputs. Observed agreement is exact (max diff 0.00e+00) on CPU. The trained-checkpoint swaps (8.4/8.5) are deferred with the GPU runs.
+
+## Implementation status & deferrals (Phase 11 wrap-up)
+
+As of this change, **Phases 1–10 are implemented**; the two learned tracks are fully scaffolded end-to-end (acquisition → synth → train → export → Rust load/decode → eval), with CI-verified ONNX contracts, a real analytic-tracker MOTA baseline, and Python↔Rust ONNX parity. The following are **deliberately deferred**, all gated on data/hardware rather than on missing design:
+
+- **Real GPU training runs and the trained checkpoints** (tasks 6.8, 7.5, 7.9, 8.4, 8.5). Training is a non-CI goal (Decision 7); only a small synthetic sample is checked in, and the committed models are random-weight stubs. The full pipeline runs end-to-end on synthetic data; the exit-criteria numbers (IMM accuracy ≥ 0.70; detector mAP@0.5 ≥ 0.30 + MOTA gain) await a run on the full external dataset.
+- **Tracker-level learned-IMM integration.** Phase 6's `LearnedImmFilter` is a *filter-level* wrapper; `MultiObjectTracker` has no learned-IMM constructor, so the eval's learned-vs-analytic A/B (9.3) can't run yet. Adding `MultiObjectTracker::new_imm_position_learned(...)` is the missing seam — a small follow-on, independent of training.
+- **Python synth binding** (task 4.6). The Rust→Parquet bridge covers training-data generation; a direct PyO3 synth binding was not needed and stays deferred.
+
+None of these block the rest of the framework: every learned feature is opt-in and off by default, and the classical pipeline is unaffected.

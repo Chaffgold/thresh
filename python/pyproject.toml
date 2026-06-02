@@ -67,6 +67,8 @@ exclude = [
     "training/train_detector.py",
     "export/export_detector.py",
     "tests/test_detector_training.py",
+    "eval/onnx_parity.py",
+    "tests/test_onnx_parity.py",
 ]
 pythonVersion = "3.11"
 typeCheckingMode = "strict"

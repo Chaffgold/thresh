@@ -28,6 +28,8 @@ default = []
 stonesoup = ["thresh-bridge/stonesoup"]
 # Rust-native Parquet writer for IMM-classifier training samples.
 training-export = ["dep:arrow", "dep:parquet"]
+# ONNX inference (ort via thresh-inference) for the cross-language parity check.
+onnx = ["thresh-inference/onnx"]
 
 [dependencies.thresh-bridge]
 path = "../thresh-bridge"
@@ -39,6 +41,10 @@ required-features = ["training-export"]
 [[bin]]
 name = "gen-detector-dataset"
 required-features = ["training-export"]
+
+[[bin]]
+name = "onnx-infer"
+required-features = ["onnx"]
 
 [dev-dependencies]
 nalgebra = { workspace = true }
