@@ -118,9 +118,10 @@ impl EgoMotion {
 
 fn normalize(q: [f64; 4]) -> [f64; 4] {
     let n = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
-    // `is_nan` first: a NaN component would sail past `n < 1e-12` (NaN
-    // comparisons are false) and poison every downstream transform.
-    if n.is_nan() || n < 1e-12 {
+    // Non-finite norms (NaN sails past `n < 1e-12`; ±inf would divide to an
+    // all-zero "quaternion") degrade to identity instead of poisoning every
+    // downstream transform.
+    if !n.is_finite() || n < 1e-12 {
         return [1.0, 0.0, 0.0, 0.0];
     }
     [q[0] / n, q[1] / n, q[2] / n, q[3] / n]
@@ -311,19 +312,21 @@ mod tests {
     }
 
     #[test]
-    fn nan_quaternion_degrades_to_identity_not_nan() {
-        let pose = EgoPose {
-            translation_m: [5.0, 0.0, 0.0],
-            rotation_wxyz: [f64::NAN, 0.0, 0.0, 0.0],
-            time_s: 0.0,
-        };
-        let p = pose.transform_to_world([1.0, 2.0, 3.0]);
-        assert!(
-            p.iter().all(|v| v.is_finite()),
-            "NaN must not propagate: {p:?}"
-        );
-        // Degrades to the identity rotation: translate only.
-        assert!((p[0] - 6.0).abs() < EPS);
-        assert!((p[1] - 2.0).abs() < EPS);
+    fn non_finite_quaternion_degrades_to_identity_not_nan() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let pose = EgoPose {
+                translation_m: [5.0, 0.0, 0.0],
+                rotation_wxyz: [bad, 0.0, 0.0, 0.0],
+                time_s: 0.0,
+            };
+            let p = pose.transform_to_world([1.0, 2.0, 3.0]);
+            assert!(
+                p.iter().all(|v| v.is_finite()),
+                "{bad} must not propagate: {p:?}"
+            );
+            // Degrades to the identity rotation: translate only.
+            assert!((p[0] - 6.0).abs() < EPS);
+            assert!((p[1] - 2.0).abs() < EPS);
+        }
     }
 }

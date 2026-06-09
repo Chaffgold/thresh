@@ -266,13 +266,22 @@ impl MultiObjectTracker {
     /// Identical to [`Self::step`], except unassigned detections birth tracks
     /// with their own [`TargetClass`] instead of [`TargetClass::Unknown`], so
     /// the class-specific head (motion priors, confirmation/deletion policy)
-    /// applies from birth. Detections are world-frame positions `[x, y, z]`.
+    /// applies from birth. Detections are world-frame positions `[x, y, z]`:
+    /// longer vectors (e.g. a 6D LiDAR position+velocity from
+    /// `Measurement::to_vector`) are truncated to their leading position, and
+    /// sub-3D entries (no Cartesian position) are skipped — both would
+    /// otherwise break the 3×6 observation model.
     pub fn step_classed(&mut self, detections: &[(DVector<f64>, TargetClass)], dt: f64) {
-        let positions: Vec<DVector<f64>> = detections.iter().map(|(d, _)| d.clone()).collect();
+        let classed: Vec<(DVector<f64>, TargetClass)> = detections
+            .iter()
+            .filter(|(d, _)| d.len() >= 3)
+            .map(|(d, class)| (DVector::from_column_slice(&[d[0], d[1], d[2]]), *class))
+            .collect();
+        let positions: Vec<DVector<f64>> = classed.iter().map(|(d, _)| d.clone()).collect();
         self.predict_all_tracks(dt);
         let (associated_tracks, associated_dets) = self.associate_and_update(&positions);
         self.apply_lifecycle(&associated_tracks);
-        for (dj, (det, class)) in detections.iter().enumerate() {
+        for (dj, (det, class)) in classed.iter().enumerate() {
             if !associated_dets[dj] {
                 self.birth_track(det, *class);
             }
@@ -1455,6 +1464,21 @@ mod tests {
         );
         assert_eq!(tracker.alive_count(), 1, "only the 3D detection births");
         assert_eq!(tracker.tracks[0].class, TargetClass::Car);
+    }
+
+    #[test]
+    fn step_classed_truncates_6d_lidar_vectors() {
+        // A LiDAR Measurement::to_vector() with velocity is 6D
+        // [x,y,z,vx,vy,vz]; step_classed must truncate to the position rather
+        // than panic indexing the 3x6 observation matrix in birth_track.
+        let mut tracker = MultiObjectTracker::new_automotive_enu(0.5, 16.0);
+        let lidar_6d = DVector::from_column_slice(&[10.0, 5.0, 0.0, 12.0, 0.5, 0.0]);
+        tracker.step_classed(&[(lidar_6d, TargetClass::Car)], 0.1);
+        assert_eq!(tracker.alive_count(), 1);
+        let t = &tracker.tracks[0];
+        assert_eq!(t.class, TargetClass::Car);
+        assert!((t.state[0] - 10.0).abs() < 1e-9, "x from leading position");
+        assert!((t.state[2] - 5.0).abs() < 1e-9, "y from leading position");
     }
 
     #[test]
