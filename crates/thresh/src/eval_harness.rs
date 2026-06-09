@@ -15,7 +15,7 @@
 //! the sensor that tick therefore correctly counts as a false negative.
 //!
 //! **Learned A/B (task 9.3):** [`run_eval_harness`] computes the analytic
-//! baseline; with the `learned-imm` feature, [`run_eval_harness_learned`] runs
+//! baseline; with the `learned-imm` feature, `run_eval_harness_learned` runs
 //! the same scenario through `MultiObjectTracker::new_imm_position_learned`
 //! (the ONNX mode classifier, with analytic fallback) so the two can be
 //! compared on identical inputs. A *representative* comparison still needs a
