@@ -640,18 +640,32 @@ impl MultiObjectTracker {
             self.imm_filters.insert(key, imm);
             return;
         };
+        // Analytic fallback #1: a bank that isn't the 4-model `cv_ca_ctrv_ct`
+        // shape the classifier expects. (The constructor already rejects such a
+        // factory, so this is defensive.)
         if imm.num_models() != NUM_MODES {
             self.imm_filters.insert(key, imm);
             return;
         }
         match ImmModeAdapter::from_onnx(&path) {
-            // Bank size checked above, so `LearnedImmFilter::new` cannot fail;
-            // `if let Ok` keeps the path total regardless.
-            Ok(adapter) => {
-                if let Ok(lf) = LearnedImmFilter::new(imm, adapter) {
+            Ok(adapter) => match LearnedImmFilter::new(imm, adapter) {
+                Ok(lf) => {
                     self.learned_imm_filters.insert(key, lf);
                 }
-            }
+                // `LearnedImmFilter::new` only fails on a wrong bank size, which
+                // the guard above already excludes — so this is unreachable. If
+                // it ever fires, `imm` has been moved into the failed call and
+                // cannot be recovered, so log loudly rather than silently
+                // leaving the track without a filter.
+                Err(e) => {
+                    eprintln!(
+                        "learned-imm: BUG: wrapper init failed for a validated bank ({e}); \
+                         track {key} has no IMM filter"
+                    );
+                }
+            },
+            // Analytic fallback #2: the classifier can't be loaded at birth
+            // (e.g. the file was removed mid-run). `imm` is untouched here.
             Err(e) => {
                 eprintln!(
                     "learned-imm: classifier load failed ({e}); analytic fallback for track {key}"
@@ -1247,7 +1261,10 @@ mod tests {
         let dt = 1.0;
         let speed = 100.0;
         let mut x = 0.0_f64;
-        for _ in 0..20 {
+        // Run comfortably past the classifier's window so the learned update
+        // (not just the warm-up fallback) has engaged, regardless of WINDOW_LEN.
+        let steps = thresh_filter::imm_adapter::WINDOW_LEN + 10;
+        for _ in 0..steps {
             x += speed * dt;
             let det = DVector::from_column_slice(&[x, 0.0, 0.0]);
             tracker.step(std::slice::from_ref(&det), dt);

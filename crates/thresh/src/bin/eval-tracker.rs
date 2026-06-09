@@ -10,10 +10,10 @@
 //! cargo run -p thresh --bin eval-tracker -- --json  # one JSON object per scenario
 //! ```
 //!
-//! `--learned-imm` / `--learned-detector` are accepted for forward
-//! compatibility but currently fall back to the analytic baseline: the tracker
-//! has no learned-IMM constructor yet (Phase 6's `LearnedImmFilter` is
-//! filter-level) and the trained checkpoints are deferred.
+//! With the `learned-imm` feature, `--learned-imm --model <onnx>` runs the
+//! learned-IMM tracker (`MultiObjectTracker::new_imm_position_learned`) instead
+//! of the analytic baseline. `--learned-detector` is accepted but not yet
+//! implemented and falls back to the baseline.
 
 #[cfg(feature = "learned-imm")]
 use thresh::eval_harness::run_eval_harness_learned;
@@ -123,11 +123,11 @@ fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
 fn eval_one(
     targets: &[TargetTrack],
     config: &TrajectoryRadarConfig,
-    learned: bool,
+    learned_imm: bool,
     model: Option<&str>,
 ) -> Result<EvalReport, Box<dyn std::error::Error>> {
     #[cfg(feature = "learned-imm")]
-    if learned && let Some(path) = model {
+    if learned_imm && let Some(path) = model {
         return run_eval_harness_learned(
             targets,
             config,
@@ -138,7 +138,7 @@ fn eval_one(
         )
         .map_err(Into::into);
     }
-    let _ = (learned, model); // analytic baseline ignores these
+    let _ = (learned_imm, model); // analytic baseline ignores these
     run_eval_harness(
         targets,
         config,
@@ -152,20 +152,27 @@ fn eval_one(
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let json = args.iter().any(|a| a == "--json");
-    let learned = args
-        .iter()
-        .any(|a| a == "--learned-imm" || a == "--learned-detector");
+    // `--learned-imm` and `--learned-detector` are distinct flags: only the
+    // former drives the learned-IMM tracker (and needs `--model`); the latter
+    // (a future learned detector) is not implemented and runs the baseline.
+    let learned_imm = args.iter().any(|a| a == "--learned-imm");
+    let learned_detector = args.iter().any(|a| a == "--learned-detector");
     let model = flag_value(&args, "--model");
 
-    #[cfg(not(feature = "learned-imm"))]
-    if learned && !json {
+    if learned_detector && !json {
         eprintln!(
-            "note: --learned-* requested but the `learned-imm` feature is not enabled; \
+            "note: --learned-detector is not implemented yet; running the analytic baseline."
+        );
+    }
+    #[cfg(not(feature = "learned-imm"))]
+    if learned_imm && !json {
+        eprintln!(
+            "note: --learned-imm requested but the `learned-imm` feature is not enabled; \
              running the analytic baseline. Rebuild with `--features learned-imm`."
         );
     }
     #[cfg(feature = "learned-imm")]
-    if learned && model.is_none() {
+    if learned_imm && model.is_none() {
         return Err("--learned-imm requires --model <path-to-imm_mode_classifier.onnx>".into());
     }
 
@@ -174,7 +181,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..TrajectoryRadarConfig::default()
     };
     for (name, targets) in scenarios() {
-        let report = eval_one(&targets, &config, learned, model)?;
+        let report = eval_one(&targets, &config, learned_imm, model)?;
         print_report(name, &report, json);
     }
     Ok(())

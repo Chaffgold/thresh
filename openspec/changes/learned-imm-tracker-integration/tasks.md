@@ -3,7 +3,7 @@
 ## 1. Tracker constructor + seam
 
 - [x] 1.1 Add a `learned-imm` feature to `thresh-tracker` (`= ["thresh-filter/learned-imm"]`). _`crates/thresh-tracker/Cargo.toml`._
-- [x] 1.2 Add gated `MultiObjectTracker::new_imm_position_learned(config_factory, onnx_path, measurement_noise_sigma, gate_threshold) -> Result<Self, String>`. _Validates config, asserts the 4-model `cv_ca_ctrv_ct` bank, and loads the ONNX once up front._
+- [x] 1.2 Add gated `MultiObjectTracker::new_imm_position_learned(config_factory, onnx_path, measurement_noise_sigma, gate_threshold) -> Result<Self, String>`. _Validates config, asserts the 4-model `cv_ca_ctrv_ct` bank, and loads the ONNX once up front to fail fast; each track then loads its own session at birth (sessions are not shared)._
 - [x] 1.3 Add a gated `learned_imm_filters` map + `learned_classifier_path`; wire birth/predict/update/removal to prefer the learned map. _`src/tracker.rs`: `insert_imm_filter` wraps the bank in `LearnedImmFilter` when active, analytic fallback otherwise._
 
 ## 2. Eval harness wiring

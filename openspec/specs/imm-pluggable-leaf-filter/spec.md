@@ -1,7 +1,11 @@
 # imm-pluggable-leaf-filter Specification
 
 ## Purpose
-TBD - created by archiving change imm-pluggable-leaf-filter. Update Purpose after archive.
+Define the pluggable IMM leaf-filter contract in `thresh-filter`: the
+`LeafFilter` trait surface (predict/update plus state accessors and mutators),
+selectable leaf-filter construction (`ImmLeafKind`), and the parity and scope
+guarantees for EKF/UKF/CKF-backed IMM banks.
+
 ## Requirements
 ### Requirement: LeafFilter trait
 

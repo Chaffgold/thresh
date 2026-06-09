@@ -273,6 +273,8 @@ jobs:
             inference:
               - 'crates/thresh-inference/**'
               - 'crates/thresh-filter/**'
+              - 'crates/thresh-tracker/**'
+              - 'crates/thresh/**'
               - 'test-data/models/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
