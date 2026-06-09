@@ -161,6 +161,7 @@ impl NuScenesBridge {
                     let ann =
                         nusc.call_method1("get", ("sample_annotation", ann_token.as_str()))?;
                     let instance_token: String = ann.get_item("instance_token")?.extract()?;
+                    let category: String = ann.get_item("category_name")?.extract()?;
                     let bbox = annotation_to_box(&ann)?;
                     let entry =
                         tracks
@@ -168,6 +169,7 @@ impl NuScenesBridge {
                             .or_insert_with(|| InstanceTrack {
                                 target_id: hash_instance_token(&instance_token),
                                 instance_token: instance_token.clone(),
+                                class: map_category(&category),
                                 samples: Vec::new(),
                             });
                     entry.samples.push((sample.token.clone(), bbox));
@@ -354,6 +356,15 @@ pub struct InstanceTrack {
     pub instance_token: String,
     /// Stable integer ID derived from the instance token.
     pub target_id: u64,
+    /// Object class mapped from the instance's nuScenes category (see
+    /// [`map_category`]); carried directly so consumers don't need to
+    /// round-trip through `BoundingBox3D::class_id`'s numeric discriminant.
+    ///
+    /// Taken from the instance's first annotation in the scene; nuScenes
+    /// instances keep one category for their lifetime (the category lives on
+    /// the `instance` record), so per-annotation divergence cannot occur in
+    /// well-formed data.
+    pub class: TargetClass,
     /// Per-sample annotation boxes for this instance.
     pub samples: Vec<(String, BoundingBox3D)>,
 }
@@ -431,7 +442,7 @@ impl NuScenesDataset {
                         target_id: track.target_id,
                         position: [bbox.x, bbox.y, bbox.z],
                         velocity: bbox.velocity.map(|[vx, vy]| [vx, vy, 0.0]),
-                        class: Some(TargetClass::Unknown),
+                        class: Some(track.class),
                     });
             }
         }

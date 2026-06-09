@@ -4,6 +4,7 @@ pub mod builder;
 pub mod hota;
 pub mod matching;
 pub mod metrics;
+pub mod per_class;
 pub mod report;
 
 pub use builder::{MotMetrics, MotMetricsBuilder};
