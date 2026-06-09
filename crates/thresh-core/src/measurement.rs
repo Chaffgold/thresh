@@ -3,6 +3,8 @@
 use nalgebra::{DMatrix, DVector};
 use serde::{Deserialize, Serialize};
 
+use crate::track::TargetClass;
+
 /// A measurement from a sensor with its observation model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Measurement {
@@ -60,6 +62,47 @@ pub enum Measurement {
         /// Sensor identifier.
         sensor_id: u32,
     },
+    /// LiDAR 3D object detection (automotive).
+    ///
+    /// Positions are in metres in the frame the producer worked in — typically
+    /// the ego/body frame; lift into world ENU via
+    /// [`EgoPose::transform_to_world`](crate::ego::EgoPose::transform_to_world)
+    /// before tracking on a moving platform.
+    Lidar {
+        /// Object center `[x, y, z]` in metres.
+        position: [f64; 3],
+        /// Bounding-box extent `[length, width, height]` in metres.
+        extent: [f64; 3],
+        /// Heading (yaw) in radians.
+        yaw: f64,
+        /// Object class.
+        class: TargetClass,
+        /// Velocity `[vx, vy, vz]` in m/s, if the detector estimates it.
+        velocity: Option<[f64; 3]>,
+        /// Timestamp in seconds.
+        time: f64,
+        /// Sensor ID.
+        sensor_id: u32,
+    },
+    /// Camera object detection (automotive): an image-plane bounding box plus
+    /// an optional monocular 3D estimate (same frame conventions as
+    /// [`Measurement::Lidar`]).
+    Camera {
+        /// Box center `[u, v]` in pixels.
+        center_px: [f64; 2],
+        /// Box extent `[width, height]` in pixels.
+        extent_px: [f64; 2],
+        /// Monocular 3D position estimate `[x, y, z]` in metres, if available.
+        position: Option<[f64; 3]>,
+        /// Heading (yaw) estimate in radians, if available.
+        yaw: Option<f64>,
+        /// Object class.
+        class: TargetClass,
+        /// Timestamp in seconds.
+        time: f64,
+        /// Sensor ID.
+        sensor_id: u32,
+    },
 }
 
 /// Ionospheric propagation mode for OTHR signals.
@@ -81,6 +124,8 @@ impl Measurement {
             Measurement::EoIr { time, .. } => *time,
             Measurement::AdsB { time, .. } => *time,
             Measurement::Othr { time, .. } => *time,
+            Measurement::Lidar { time, .. } => *time,
+            Measurement::Camera { time, .. } => *time,
         }
     }
 
@@ -122,6 +167,35 @@ impl Measurement {
                 doppler_m_s,
                 ..
             } => DVector::from_column_slice(&[*ground_range_m, *azimuth_rad, *doppler_m_s]),
+            Measurement::Lidar {
+                position, velocity, ..
+            } => {
+                if let Some(v) = velocity {
+                    DVector::from_column_slice(&[
+                        position[0],
+                        position[1],
+                        position[2],
+                        v[0],
+                        v[1],
+                        v[2],
+                    ])
+                } else {
+                    DVector::from_column_slice(position)
+                }
+            }
+            Measurement::Camera {
+                center_px,
+                position,
+                ..
+            } => {
+                // Prefer the metric 3D estimate; fall back to the pixel
+                // center (a bearing-like 2D observation) without one.
+                if let Some(p) = position {
+                    DVector::from_column_slice(p)
+                } else {
+                    DVector::from_column_slice(center_px)
+                }
+            }
         }
     }
 
@@ -144,6 +218,20 @@ impl Measurement {
                 }
             }
             Measurement::Othr { .. } => 3,
+            Measurement::Lidar { velocity, .. } => {
+                if velocity.is_some() {
+                    6
+                } else {
+                    3
+                }
+            }
+            Measurement::Camera { position, .. } => {
+                if position.is_some() {
+                    3
+                } else {
+                    2
+                }
+            }
         }
     }
 
@@ -192,6 +280,26 @@ impl Measurement {
                     (1.0_f64.to_radians()).powi(2), // azimuth: 1° std
                     100.0,                          // doppler: 10 m/s std
                 ]))
+            }
+            Measurement::Lidar { velocity, .. } => {
+                // Box-center position: ~0.2 m std; velocity: ~0.5 m/s std.
+                if velocity.is_some() {
+                    DMatrix::from_diagonal(&DVector::from_column_slice(&[
+                        0.04, 0.04, 0.04, 0.25, 0.25, 0.25,
+                    ]))
+                } else {
+                    DMatrix::from_diagonal(&DVector::from_column_slice(&[0.04, 0.04, 0.04]))
+                }
+            }
+            Measurement::Camera { position, .. } => {
+                if position.is_some() {
+                    // Monocular 3D estimate: ~1 m std laterally, ~2 m std in
+                    // depth-dominated z (mono depth is the weak axis).
+                    DMatrix::from_diagonal(&DVector::from_column_slice(&[1.0, 1.0, 4.0]))
+                } else {
+                    // Image-plane center: ~2 px std each axis.
+                    DMatrix::from_diagonal(&DVector::from_column_slice(&[4.0, 4.0]))
+                }
             }
         }
     }
@@ -334,5 +442,114 @@ mod tests {
         let r = radar.default_noise();
         assert_eq!(r.nrows(), radar.dim());
         assert_eq!(r.ncols(), radar.dim());
+    }
+
+    fn lidar_car(velocity: Option<[f64; 3]>) -> Measurement {
+        Measurement::Lidar {
+            position: [10.0, -5.0, 0.8],
+            extent: [4.6, 1.9, 1.6],
+            yaw: 0.4,
+            class: TargetClass::Car,
+            velocity,
+            time: 3.5,
+            sensor_id: 7,
+        }
+    }
+
+    #[test]
+    fn lidar_measurement_vector_and_dim() {
+        let m = lidar_car(None);
+        assert_eq!(m.dim(), 3);
+        let z = m.to_vector();
+        assert_eq!(z.len(), 3);
+        assert_eq!(z[0], 10.0);
+        assert_eq!(z[2], 0.8);
+        assert_eq!(m.time(), 3.5);
+
+        let mv = lidar_car(Some([12.0, 0.5, 0.0]));
+        assert_eq!(mv.dim(), 6);
+        let zv = mv.to_vector();
+        assert_eq!(zv[3], 12.0);
+        assert_eq!(zv[5], 0.0);
+    }
+
+    #[test]
+    fn camera_measurement_prefers_3d_estimate() {
+        let with_3d = Measurement::Camera {
+            center_px: [640.0, 360.0],
+            extent_px: [80.0, 60.0],
+            position: Some([22.0, 1.5, 0.9]),
+            yaw: Some(0.1),
+            class: TargetClass::Pedestrian,
+            time: 1.0,
+            sensor_id: 1,
+        };
+        assert_eq!(with_3d.dim(), 3);
+        assert_eq!(with_3d.to_vector()[0], 22.0);
+
+        let pixels_only = Measurement::Camera {
+            center_px: [640.0, 360.0],
+            extent_px: [80.0, 60.0],
+            position: None,
+            yaw: None,
+            class: TargetClass::Bicycle,
+            time: 1.0,
+            sensor_id: 1,
+        };
+        assert_eq!(pixels_only.dim(), 2);
+        assert_eq!(pixels_only.to_vector()[0], 640.0);
+    }
+
+    #[test]
+    fn automotive_noise_dimensions_match() {
+        let cases = [
+            lidar_car(None),
+            lidar_car(Some([1.0, 0.0, 0.0])),
+            Measurement::Camera {
+                center_px: [0.0, 0.0],
+                extent_px: [1.0, 1.0],
+                position: Some([1.0, 2.0, 3.0]),
+                yaw: None,
+                class: TargetClass::Truck,
+                time: 0.0,
+                sensor_id: 0,
+            },
+            Measurement::Camera {
+                center_px: [0.0, 0.0],
+                extent_px: [1.0, 1.0],
+                position: None,
+                yaw: None,
+                class: TargetClass::Unknown,
+                time: 0.0,
+                sensor_id: 0,
+            },
+        ];
+        for m in cases {
+            let r = m.default_noise();
+            assert_eq!(r.nrows(), m.dim());
+            assert_eq!(r.ncols(), m.dim());
+        }
+    }
+
+    #[test]
+    fn automotive_measurement_serde_roundtrip() {
+        let m = lidar_car(Some([3.0, -1.0, 0.0]));
+        let json = serde_json::to_string(&m).expect("serialize");
+        let m2: Measurement = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(m.to_vector(), m2.to_vector());
+        assert_eq!(m.time(), m2.time());
+
+        let c = Measurement::Camera {
+            center_px: [100.0, 200.0],
+            extent_px: [40.0, 90.0],
+            position: None,
+            yaw: Some(-0.7),
+            class: TargetClass::Motorcycle,
+            time: 9.0,
+            sensor_id: 3,
+        };
+        let json = serde_json::to_string(&c).expect("serialize");
+        let c2: Measurement = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(c.to_vector(), c2.to_vector());
     }
 }

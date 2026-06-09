@@ -71,6 +71,94 @@ impl TrackHead {
             deletion: DeletionPolicy::new(5),
         }
     }
+
+    // --- Automotive heads (automotive-tracking-pipeline, task 2.5) ---------
+    //
+    // All automotive heads keep `state_dim = 6` ([x,vx,y,vy,z,vz]) so they are
+    // compatible with the position tracker's 3x6 observation matrix. The
+    // class-specific motion priors are expressed through:
+    // - `process_noise_sigma` (m/s² agility: motorcycle > car > truck/bus >
+    //   bicycle/pedestrian),
+    // - the velocity entries of `initial_covariance` (speed prior: ~40 m/s for
+    //   car/motorcycle -> var 225; ~30 m/s truck/bus -> 100; ~8 m/s bicycle ->
+    //   25; ~6 m/s pedestrian -> 4), and
+    // - confirmation/deletion (pedestrians appear/occlude quickly, so they
+    //   confirm fast and delete fast).
+    // Position priors assume automotive-grade detections (~2 m std -> var 4);
+    // the vertical channel is tight (ground vehicles stay near the road).
+
+    /// Passenger car head.
+    pub fn car() -> Self {
+        Self {
+            class: TargetClass::Car,
+            state_dim: 6,
+            process_noise_sigma: 2.0,
+            initial_covariance: vec![4.0, 225.0, 4.0, 225.0, 1.0, 1.0],
+            confirmation: ConfirmationPolicy::new(2, 3),
+            deletion: DeletionPolicy::new(5),
+        }
+    }
+
+    /// Truck head (heavier, less agile than a car).
+    pub fn truck() -> Self {
+        Self {
+            class: TargetClass::Truck,
+            state_dim: 6,
+            process_noise_sigma: 1.5,
+            initial_covariance: vec![4.0, 100.0, 4.0, 100.0, 1.0, 1.0],
+            confirmation: ConfirmationPolicy::new(2, 3),
+            deletion: DeletionPolicy::new(5),
+        }
+    }
+
+    /// Bus head (largest, least agile road vehicle).
+    pub fn bus() -> Self {
+        Self {
+            class: TargetClass::Bus,
+            state_dim: 6,
+            process_noise_sigma: 1.0,
+            initial_covariance: vec![4.0, 100.0, 4.0, 100.0, 1.0, 1.0],
+            confirmation: ConfirmationPolicy::new(2, 3),
+            deletion: DeletionPolicy::new(5),
+        }
+    }
+
+    /// Motorcycle head (small and highly agile).
+    pub fn motorcycle() -> Self {
+        Self {
+            class: TargetClass::Motorcycle,
+            state_dim: 6,
+            process_noise_sigma: 3.0,
+            initial_covariance: vec![4.0, 225.0, 4.0, 225.0, 1.0, 1.0],
+            confirmation: ConfirmationPolicy::new(2, 3),
+            deletion: DeletionPolicy::new(4),
+        }
+    }
+
+    /// Bicycle head (slow, moderately agile).
+    pub fn bicycle() -> Self {
+        Self {
+            class: TargetClass::Bicycle,
+            state_dim: 6,
+            process_noise_sigma: 1.5,
+            initial_covariance: vec![4.0, 25.0, 4.0, 25.0, 1.0, 1.0],
+            confirmation: ConfirmationPolicy::new(2, 3),
+            deletion: DeletionPolicy::new(4),
+        }
+    }
+
+    /// Pedestrian head (slowest; confirms and deletes quickly because
+    /// pedestrians enter, occlude, and leave the scene rapidly).
+    pub fn pedestrian() -> Self {
+        Self {
+            class: TargetClass::Pedestrian,
+            state_dim: 6,
+            process_noise_sigma: 1.0,
+            initial_covariance: vec![4.0, 4.0, 4.0, 4.0, 1.0, 1.0],
+            confirmation: ConfirmationPolicy::new(2, 2),
+            deletion: DeletionPolicy::new(3),
+        }
+    }
 }
 
 /// Registry of class-specific track heads.
@@ -86,6 +174,12 @@ impl Default for HeadRegistry {
                 TrackHead::aircraft(),
                 TrackHead::ballistic(),
                 TrackHead::uav(),
+                TrackHead::car(),
+                TrackHead::truck(),
+                TrackHead::bus(),
+                TrackHead::motorcycle(),
+                TrackHead::bicycle(),
+                TrackHead::pedestrian(),
                 TrackHead::unknown(),
             ],
         }
@@ -104,5 +198,90 @@ impl HeadRegistry {
                     .find(|h| h.class == TargetClass::Unknown)
                     .expect("No Unknown head in registry")
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Velocity-prior variance of a 6D head (x,vx,y,vy,z,vz → index 1).
+    fn vel_prior(head: &TrackHead) -> f64 {
+        head.initial_covariance[1]
+    }
+
+    #[test]
+    fn default_registry_contains_all_automotive_classes() {
+        let reg = HeadRegistry::default();
+        for class in [
+            TargetClass::Car,
+            TargetClass::Truck,
+            TargetClass::Bus,
+            TargetClass::Motorcycle,
+            TargetClass::Bicycle,
+            TargetClass::Pedestrian,
+        ] {
+            assert_eq!(reg.get(class).class, class, "missing head for {class:?}");
+        }
+    }
+
+    #[test]
+    fn aerospace_heads_still_present() {
+        let reg = HeadRegistry::default();
+        for class in [
+            TargetClass::Aircraft,
+            TargetClass::Ballistic,
+            TargetClass::Uav,
+            TargetClass::Unknown,
+        ] {
+            assert_eq!(reg.get(class).class, class);
+        }
+    }
+
+    #[test]
+    fn automotive_heads_are_position_tracker_compatible() {
+        // The ENU position tracker births tracks against a 3x6 observation
+        // matrix, so every automotive head MUST be 6-dimensional.
+        for head in [
+            TrackHead::car(),
+            TrackHead::truck(),
+            TrackHead::bus(),
+            TrackHead::motorcycle(),
+            TrackHead::bicycle(),
+            TrackHead::pedestrian(),
+        ] {
+            assert_eq!(head.state_dim, 6, "{:?} head must be 6D", head.class);
+            assert_eq!(head.initial_covariance.len(), 6);
+        }
+    }
+
+    #[test]
+    fn speed_priors_are_ordered_by_class() {
+        // pedestrian < bicycle < truck/bus < car/motorcycle
+        assert!(vel_prior(&TrackHead::pedestrian()) < vel_prior(&TrackHead::bicycle()));
+        assert!(vel_prior(&TrackHead::bicycle()) < vel_prior(&TrackHead::truck()));
+        assert!(vel_prior(&TrackHead::truck()) < vel_prior(&TrackHead::car()));
+        assert_eq!(
+            vel_prior(&TrackHead::car()),
+            vel_prior(&TrackHead::motorcycle())
+        );
+    }
+
+    #[test]
+    fn agility_priors_are_ordered_by_class() {
+        // Process noise (agility): motorcycle > car > truck > bus/pedestrian;
+        // every road user is steadier than the aerospace defaults.
+        assert!(TrackHead::motorcycle().process_noise_sigma > TrackHead::car().process_noise_sigma);
+        assert!(TrackHead::car().process_noise_sigma > TrackHead::truck().process_noise_sigma);
+        assert!(TrackHead::truck().process_noise_sigma > TrackHead::bus().process_noise_sigma);
+        assert!(TrackHead::car().process_noise_sigma < TrackHead::aircraft().process_noise_sigma);
+    }
+
+    #[test]
+    fn unmapped_class_falls_back_to_unknown_head() {
+        let reg = HeadRegistry {
+            heads: vec![TrackHead::car(), TrackHead::unknown()],
+        };
+        assert_eq!(reg.get(TargetClass::Bus).class, TargetClass::Unknown);
     }
 }

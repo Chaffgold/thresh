@@ -18,6 +18,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use thresh_core::detection::BoundingBox3D;
+use thresh_core::ego::EgoPose;
 use thresh_core::track::TargetClass;
 
 // Re-exported so the original `thresh_data::nuscenes::map_category` path keeps
@@ -271,6 +272,38 @@ impl NuScenesBridge {
                 translation: [translation[0], translation[1], translation[2]],
                 rotation_quat: [rotation[0], rotation[1], rotation[2], rotation[3]],
                 camera_intrinsic: intr,
+            })
+        })
+    }
+
+    /// Load the ego pose associated with a sample (automotive-tracking-pipeline,
+    /// task 2.3).
+    ///
+    /// Resolves `sample -> data[channel] -> sample_data.ego_pose_token ->
+    /// ego_pose` and returns it as a thresh [`EgoPose`] (translation in metres,
+    /// `[w, x, y, z]` quaternion, timestamp converted from microseconds to
+    /// seconds). Use `"LIDAR_TOP"` as the channel for the keyframe pose. Pair
+    /// two consecutive poses with
+    /// [`EgoMotion::from_pose_pair`](thresh_core::ego::EgoMotion::from_pose_pair)
+    /// to obtain ego motion.
+    pub fn ego_pose(&self, sample_token: &str, channel: &str) -> PyResult<EgoPose> {
+        Python::with_gil(|py| {
+            let nusc = self.nusc.bind(py);
+            let sample = nusc.call_method1("get", ("sample", sample_token))?;
+            let data_map = sample.get_item("data")?;
+            let sd_token: String = data_map.get_item(channel)?.extract()?;
+            let sample_data = nusc.call_method1("get", ("sample_data", sd_token.as_str()))?;
+            let ep_token: String = sample_data.get_item("ego_pose_token")?.extract()?;
+            let ep = nusc.call_method1("get", ("ego_pose", ep_token.as_str()))?;
+            // Fixed-size extraction: a schema-mismatched record yields a
+            // proper PyErr instead of an out-of-bounds panic.
+            let translation: [f64; 3] = ep.get_item("translation")?.extract()?;
+            let rotation: [f64; 4] = ep.get_item("rotation")?.extract()?;
+            let timestamp_us: i64 = ep.get_item("timestamp")?.extract()?;
+            Ok(EgoPose {
+                translation_m: translation,
+                rotation_wxyz: rotation,
+                time_s: timestamp_us as f64 / 1e6,
             })
         })
     }
