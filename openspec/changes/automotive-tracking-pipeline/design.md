@@ -97,13 +97,24 @@ measurements and ego-motion through the bridge, and the eval driver.
 
 ## Open Questions
 
-- Separate `TrackerVariant`/constructor for automotive, or a config flag on the
-  ENU tracker? (Leaning: an `new_automotive_enu(...)` constructor + ego-motion,
-  paralleling `new_imm_position`.)
-- Generic `Vehicle` superclass vs only concrete classes? (nuScenes has both fine
-  and coarse categories.)
-- Should a future change add a learned automotive detector (Track-A analog) and
-  is a BEV frame warranted, or does ENU + ego-motion suffice for the first cut?
+All three original questions were resolved during implementation:
+
+- ~~Separate `TrackerVariant`/constructor for automotive, or a config flag?~~
+  **Resolved (Phase 2):** `new_automotive_enu(...)` constructor plus the
+  `step_classed` / `step_with_ego` cycle methods — additive, paralleling
+  `new_imm_position` (Decisions 7/9).
+- ~~Generic `Vehicle` superclass vs only concrete classes?~~ **Resolved
+  (Phase 1, maintainer decision):** concrete classes only; coarse nuScenes
+  types fold into the nearest concrete class, and the enum is documented as
+  expected to grow (finer classes split out later).
+- ~~Learned automotive detector / BEV frame?~~ **Resolved (Phase 4):** world
+  ENU + measurement-boundary ego compensation suffices for this change; a
+  learned automotive detector (Track-A analog, bringing score-thresholded
+  AMOTA and detector-fed baseline comparisons) is the natural follow-on
+  change; no BEV frame needed at this scope.
+
+Remaining: none design-level. The nuScenes benchmark numbers (E.3) are
+data-gated on a local download, not on open design.
 
 ## Decisions made during Phase 2 (sensor measurements and ego-motion)
 

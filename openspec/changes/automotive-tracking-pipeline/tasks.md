@@ -33,12 +33,12 @@
 
 ## 5. Documentation and wrap-up
 
-- [ ] 5.1 `docs/automotive/getting-started.md`: class taxonomy, ego-motion semantics, coordinate-frame conventions, a runnable nuScenes-mini example.
-- [ ] 5.2 Final lint/test/`openspec validate` pass; update `design.md` Open Questions with any decisions made during implementation.
+- [x] 5.1 `docs/automotive/getting-started.md`: class taxonomy, ego-motion semantics, coordinate-frame conventions, a runnable nuScenes-mini example. _Covers the class/nuScenes mapping table, world-ENU + measurement-boundary ego semantics (`[w,x,y,z]` quaternions), a synthetic quickstart mirroring the living integration test, per-class evaluation usage, the `eval-nuscenes` mini example, and the deferred list._
+- [x] 5.2 Final lint/test/`openspec validate` pass; update `design.md` Open Questions with any decisions made during implementation. _All three Open Questions resolved (constructor-not-variant; concrete classes only; ENU+ego suffices, detector is a follow-on). Final gate: workspace tests, clippy `-Dwarnings` (default + gated features), fmt, rustdoc `-Dwarnings`, openspec strict._
 
 ## Exit criteria
 
-- [ ] E.1 `TargetClass` includes native automotive classes and `map_category()` is lossless (no automotive category maps to an aerospace class).
-- [ ] E.2 LiDAR and ego-motion are first-class in the type system; the automotive tracker compensates for ego-motion.
-- [ ] E.3 The tracker runs end-to-end over a nuScenes split via `NuScenesBridge`, reporting per-class MOTA + AMOTA, with a credible proof point (e.g. MOTA ≥ 0.50 on the `val` split; prototype on `mini`).
-- [ ] E.4 All code passes clippy/tests/CI; no aerospace regression.
+- [x] E.1 `TargetClass` includes native automotive classes and `map_category()` is lossless (no automotive category maps to an aerospace class). _Met in Phase 1; guarded by `map_category_no_automotive_maps_to_aerospace` over the full nuScenes category list._
+- [x] E.2 LiDAR and ego-motion are first-class in the type system; the automotive tracker compensates for ego-motion. _Met in Phase 2; the spec's no-drift scenario is a passing test (`stationary_object_does_not_drift_under_ego_motion`), and the moving-ego view provably matches the world-frame view (`automotive_integration.rs`)._
+- [ ] E.3 The tracker runs end-to-end over a nuScenes split via `NuScenesBridge`, reporting per-class MOTA + AMOTA, with a credible proof point (e.g. MOTA ≥ 0.50 on the `val` split; prototype on `mini`). _Harness complete (`eval-nuscenes`, Phase 4) and compile-verified; producing the numbers is **data-gated** on a local nuScenes download (Decision 11) — the only remaining item in this change._
+- [x] E.4 All code passes clippy/tests/CI; no aerospace regression. _Every phase merged with green CI; aerospace byte-identity guarded by `plain_step_is_unchanged_by_automotive_entry_points` / `identity_ego_matches_world_frame_step` and the untouched `step`/`step_detections` paths._
