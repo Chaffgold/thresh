@@ -11,6 +11,10 @@ features = ["streaming"]
 [features]
 parallel = ["rayon"]
 streaming = ["tokio"]
+# Learned-IMM tracker path: each track's IMM bank is wrapped by thresh-filter's
+# `LearnedImmFilter` (ONNX mode classifier). Pulls the heavy ort/ONNX stack via
+# thresh-filter, so it is opt-in and kept out of default/CI builds.
+learned-imm = ["thresh-filter/learned-imm"]
 
 [dependencies]
 thresh-core = { path = "../thresh-core" }

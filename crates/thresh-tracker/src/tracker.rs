@@ -10,6 +10,8 @@ use thresh_association::mht::HypothesisTree;
 use thresh_core::detection::Detection3D;
 use thresh_core::track::{TargetClass, TrackState};
 use thresh_filter::imm::{ImmConfig, ImmFilter};
+#[cfg(feature = "learned-imm")]
+use thresh_filter::imm_adapter::{ImmModeAdapter, LearnedImmFilter, NUM_MODES};
 use thresh_filter::kf::KalmanFilter;
 use thresh_filter::models::cv::ConstantVelocity;
 use thresh_filter::traits::{LinearModel, MotionModel};
@@ -73,6 +75,15 @@ pub struct MultiObjectTracker {
     next_imm_key: usize,
     /// MHT hypothesis tree (only used when strategy is `Mht`).
     mht_tree: Option<HypothesisTree>,
+    /// Path to the ONNX IMM mode classifier. `Some` only when built via
+    /// [`Self::new_imm_position_learned`]; new tracks then get a
+    /// `LearnedImmFilter` instead of a plain `ImmFilter`.
+    #[cfg(feature = "learned-imm")]
+    learned_classifier_path: Option<std::path::PathBuf>,
+    /// Per-track learned-IMM filters (parallel to `imm_filters`; a track lives
+    /// in exactly one map). Empty unless the learned path is active.
+    #[cfg(feature = "learned-imm")]
+    learned_imm_filters: HashMap<usize, LearnedImmFilter>,
 }
 
 impl MultiObjectTracker {
@@ -125,6 +136,10 @@ impl MultiObjectTracker {
             imm_filters: HashMap::new(),
             next_imm_key: 0,
             mht_tree,
+            #[cfg(feature = "learned-imm")]
+            learned_classifier_path: None,
+            #[cfg(feature = "learned-imm")]
+            learned_imm_filters: HashMap::new(),
         }
     }
 
@@ -165,7 +180,60 @@ impl MultiObjectTracker {
             imm_filters: HashMap::new(),
             next_imm_key: 0,
             mht_tree: None,
+            #[cfg(feature = "learned-imm")]
+            learned_classifier_path: None,
+            #[cfg(feature = "learned-imm")]
+            learned_imm_filters: HashMap::new(),
         }
+    }
+
+    /// Create an IMM tracker whose per-track mode-probability update is driven
+    /// by a learned ONNX classifier (Track B of the flight-data-training
+    /// pipeline) instead of the analytic Markov update.
+    ///
+    /// Like [`Self::new_imm_position`], but each new track wraps its IMM bank in
+    /// a [`LearnedImmFilter`]: once a `WINDOW_LEN` history of filter-state
+    /// projections exists, the ONNX classifier supplies the mode probabilities;
+    /// before that (and on any classifier error) it falls back to the analytic
+    /// update. The classifier is trained for the 4-model `cv_ca_ctrv_ct` bank,
+    /// so `config_factory` MUST produce a 4-model config.
+    ///
+    /// Note: each track loads its own classifier session from `onnx_path`
+    /// (the adapter is not shared), which is fine for the small target counts in
+    /// evaluation scenarios.
+    ///
+    /// # Errors
+    /// Returns a message if the config is invalid, is not a 4-model bank, or the
+    /// ONNX classifier at `onnx_path` cannot be loaded.
+    #[cfg(feature = "learned-imm")]
+    pub fn new_imm_position_learned(
+        config_factory: impl Fn() -> ImmConfig + 'static,
+        onnx_path: impl AsRef<std::path::Path>,
+        measurement_noise_sigma: f64,
+        gate_threshold: f64,
+    ) -> Result<Self, String> {
+        // Fail fast: valid config, correct bank size, and a loadable classifier.
+        config_factory()
+            .validate()
+            .map_err(|e| format!("invalid ImmConfig from factory: {e}"))?;
+        let probe = ImmFilter::new(
+            config_factory(),
+            &DVector::zeros(6),
+            &DMatrix::identity(6, 6),
+        );
+        if probe.num_models() != NUM_MODES {
+            return Err(format!(
+                "learned IMM requires a {NUM_MODES}-model bank (cv_ca_ctrv_ct), got {}",
+                probe.num_models()
+            ));
+        }
+        let path = onnx_path.as_ref().to_path_buf();
+        ImmModeAdapter::from_onnx(&path)?; // validate the checkpoint up front
+
+        let mut tracker =
+            Self::new_imm_position(config_factory, measurement_noise_sigma, gate_threshold);
+        tracker.learned_classifier_path = Some(path);
+        Ok(tracker)
     }
 
     /// Run one tracking cycle: predict all tracks, associate with detections, update.
@@ -192,12 +260,19 @@ impl MultiObjectTracker {
             if !track.is_alive() {
                 continue;
             }
-            if let Some(key) = track.imm_key
-                && let Some(imm) = self.imm_filters.get_mut(&key)
-            {
-                let (state, cov) = imm.predict(dt);
-                track.state = state;
-                track.covariance = cov;
+            if let Some(key) = track.imm_key {
+                #[cfg(feature = "learned-imm")]
+                if let Some(lf) = self.learned_imm_filters.get_mut(&key) {
+                    let (state, cov) = lf.predict(dt);
+                    track.state = state;
+                    track.covariance = cov;
+                    continue;
+                }
+                if let Some(imm) = self.imm_filters.get_mut(&key) {
+                    let (state, cov) = imm.predict(dt);
+                    track.state = state;
+                    track.covariance = cov;
+                }
             }
         }
     }
@@ -476,14 +551,23 @@ impl MultiObjectTracker {
         is_imm: bool,
     ) {
         if is_imm {
-            if let Some(key) = self.tracks[ti].imm_key
-                && let Some(imm) = self.imm_filters.get_mut(&key)
-            {
-                let result = imm.update_with_measurement(detection, h, r);
-                self.tracks[ti].state = result.state;
-                self.tracks[ti].covariance = result.covariance;
-                self.tracks[ti].dominant_mode = Some(result.dominant_mode);
-                self.tracks[ti].mode_probabilities = Some(result.mode_probabilities);
+            if let Some(key) = self.tracks[ti].imm_key {
+                #[cfg(feature = "learned-imm")]
+                if let Some(lf) = self.learned_imm_filters.get_mut(&key) {
+                    let result = lf.update_with_measurement(detection, h, r);
+                    self.tracks[ti].state = result.state;
+                    self.tracks[ti].covariance = result.covariance;
+                    self.tracks[ti].dominant_mode = Some(result.dominant_mode);
+                    self.tracks[ti].mode_probabilities = Some(result.mode_probabilities);
+                    return;
+                }
+                if let Some(imm) = self.imm_filters.get_mut(&key) {
+                    let result = imm.update_with_measurement(detection, h, r);
+                    self.tracks[ti].state = result.state;
+                    self.tracks[ti].covariance = result.covariance;
+                    self.tracks[ti].dominant_mode = Some(result.dominant_mode);
+                    self.tracks[ti].mode_probabilities = Some(result.mode_probabilities);
+                }
             }
         } else {
             let track = &self.tracks[ti];
@@ -522,16 +606,73 @@ impl MultiObjectTracker {
     /// Remove deleted tracks and clean up their IMM filters.
     fn remove_deleted_tracks(&mut self) {
         let imm_filters = &mut self.imm_filters;
+        #[cfg(feature = "learned-imm")]
+        let learned_imm_filters = &mut self.learned_imm_filters;
         self.tracks.retain(|t| {
             if t.lifecycle == TrackState::Deleted {
                 if let Some(key) = t.imm_key {
                     imm_filters.remove(&key);
+                    #[cfg(feature = "learned-imm")]
+                    learned_imm_filters.remove(&key);
                 }
                 false
             } else {
                 true
             }
         });
+    }
+
+    /// Store a freshly-built IMM bank for a new track under `key`. Analytic
+    /// build: the bank goes straight into `imm_filters`.
+    #[cfg(not(feature = "learned-imm"))]
+    fn insert_imm_filter(&mut self, key: usize, imm: ImmFilter) {
+        self.imm_filters.insert(key, imm);
+    }
+
+    /// Store a freshly-built IMM bank for a new track under `key`. Learned
+    /// build: if the learned path is active and the bank has the expected
+    /// model count, wrap it in a `LearnedImmFilter`; otherwise (no learned
+    /// path, wrong bank size, or an unloadable classifier) fall back to the
+    /// analytic `imm_filters` map.
+    #[cfg(feature = "learned-imm")]
+    fn insert_imm_filter(&mut self, key: usize, imm: ImmFilter) {
+        let Some(path) = self.learned_classifier_path.clone() else {
+            self.imm_filters.insert(key, imm);
+            return;
+        };
+        // Analytic fallback #1: a bank that isn't the 4-model `cv_ca_ctrv_ct`
+        // shape the classifier expects. (The constructor already rejects such a
+        // factory, so this is defensive.)
+        if imm.num_models() != NUM_MODES {
+            self.imm_filters.insert(key, imm);
+            return;
+        }
+        match ImmModeAdapter::from_onnx(&path) {
+            Ok(adapter) => match LearnedImmFilter::new(imm, adapter) {
+                Ok(lf) => {
+                    self.learned_imm_filters.insert(key, lf);
+                }
+                // `LearnedImmFilter::new` only fails on a wrong bank size, which
+                // the guard above already excludes — so this is unreachable. If
+                // it ever fires, `imm` has been moved into the failed call and
+                // cannot be recovered, so log loudly rather than silently
+                // leaving the track without a filter.
+                Err(e) => {
+                    eprintln!(
+                        "learned-imm: BUG: wrapper init failed for a validated bank ({e}); \
+                         track {key} has no IMM filter"
+                    );
+                }
+            },
+            // Analytic fallback #2: the classifier can't be loaded at birth
+            // (e.g. the file was removed mid-run). `imm` is untouched here.
+            Err(e) => {
+                eprintln!(
+                    "learned-imm: classifier load failed ({e}); analytic fallback for track {key}"
+                );
+                self.imm_filters.insert(key, imm);
+            }
+        }
     }
 
     /// Create a new track from a detection.
@@ -553,15 +694,18 @@ impl MultiObjectTracker {
         let cov = DMatrix::from_diagonal(&DVector::from_column_slice(&head.initial_covariance));
         let mut track = Track::new(state.clone(), cov.clone(), class);
 
-        // If in IMM mode, create an ImmFilter for this track.
-        if let Some(factory) = &self.imm_config_factory {
+        // If in IMM mode, create a filter for this track. Build the bank while
+        // the `imm_config_factory` borrow is live, then hand the owned filter to
+        // `insert_imm_filter` (which takes `&mut self`).
+        let new_imm = self.imm_config_factory.as_ref().map(|factory| {
             let config = factory();
-            let imm = ImmFilter::new(config, &state, &cov);
-
+            ImmFilter::new(config, &state, &cov)
+        });
+        if let Some(imm) = new_imm {
             let key = self.next_imm_key;
             self.next_imm_key += 1;
-            self.imm_filters.insert(key, imm);
             track.imm_key = Some(key);
+            self.insert_imm_filter(key, imm);
         }
 
         self.tracks.push(track);
@@ -1058,6 +1202,88 @@ mod tests {
         // the scenario is deterministic and both may perform similarly).
         eprintln!(
             "JPDA position error: {jpda_err:.1}, Hungarian position error: {hungarian_err:.1}"
+        );
+    }
+
+    // --- Learned-IMM tracker seam (feature `learned-imm`) -------------------
+    // These run against the committed random-weight stub classifier, so they
+    // exercise the wiring (constructor -> birth -> predict -> update ->
+    // lifecycle -> removal) rather than classification accuracy.
+
+    #[cfg(feature = "learned-imm")]
+    const STUB_CLASSIFIER: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../test-data/models/imm_mode_classifier.onnx"
+    );
+
+    #[cfg(feature = "learned-imm")]
+    #[test]
+    fn learned_imm_constructor_loads_stub() {
+        let tracker = MultiObjectTracker::new_imm_position_learned(
+            || ImmConfig::cv_ca_ctrv_ct(5.0, 1.0, 2.0, 0.1),
+            STUB_CLASSIFIER,
+            10.0,
+            100.0,
+        );
+        assert!(
+            tracker.is_ok(),
+            "stub classifier should load: {:?}",
+            tracker.err()
+        );
+    }
+
+    #[cfg(feature = "learned-imm")]
+    #[test]
+    fn learned_imm_constructor_errors_on_missing_model() {
+        let tracker = MultiObjectTracker::new_imm_position_learned(
+            || ImmConfig::cv_ca_ctrv_ct(5.0, 1.0, 2.0, 0.1),
+            "/nonexistent/imm_mode_classifier.onnx",
+            10.0,
+            100.0,
+        );
+        assert!(tracker.is_err(), "missing model path should be rejected");
+    }
+
+    #[cfg(feature = "learned-imm")]
+    #[test]
+    fn learned_imm_tracker_tracks_target() {
+        // End-to-end: a learned-IMM tracker confirms and follows a CV target,
+        // proving birth/predict/update/lifecycle all route through the
+        // LearnedImmFilter (with analytic fallback during the WINDOW_LEN warmup).
+        let mut tracker = MultiObjectTracker::new_imm_position_learned(
+            || ImmConfig::cv_ca_ctrv_ct(5.0, 1.0, 2.0, 0.1),
+            STUB_CLASSIFIER,
+            10.0,
+            100.0,
+        )
+        .expect("stub classifier loads");
+
+        let dt = 1.0;
+        let speed = 100.0;
+        let mut x = 0.0_f64;
+        // Run comfortably past the classifier's window so the learned update
+        // (not just the warm-up fallback) has engaged, regardless of WINDOW_LEN.
+        let steps = thresh_filter::imm_adapter::WINDOW_LEN + 10;
+        for _ in 0..steps {
+            x += speed * dt;
+            let det = DVector::from_column_slice(&[x, 0.0, 0.0]);
+            tracker.step(std::slice::from_ref(&det), dt);
+        }
+
+        assert_eq!(tracker.confirmed_count(), 1, "track should be confirmed");
+        assert_eq!(tracker.alive_count(), 1, "exactly one track expected");
+        let track = &tracker.tracks[0];
+        // The learned path populates dominant_mode / mode_probabilities once the
+        // window fills (and the estimate should be near the true x).
+        assert!(track.dominant_mode.is_some(), "dominant mode should be set");
+        assert!(
+            track.mode_probabilities.is_some(),
+            "mode probabilities should be set"
+        );
+        assert!(
+            (track.state[0] - x).abs() < 200.0,
+            "x estimate {} should track the target near {x}",
+            track.state[0]
         );
     }
 }
