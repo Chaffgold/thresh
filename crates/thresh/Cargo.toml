@@ -30,6 +30,10 @@ stonesoup = ["thresh-bridge/stonesoup"]
 training-export = ["dep:arrow", "dep:parquet"]
 # ONNX inference (ort via thresh-inference) for the cross-language parity check.
 onnx = ["thresh-inference/onnx"]
+# Learned-IMM tracker path: exposes `run_eval_harness_learned` and routes the
+# eval-tracker `--learned-imm` flag through `MultiObjectTracker`'s learned
+# constructor. Pulls the ort/ONNX stack via thresh-tracker, so it is opt-in.
+learned-imm = ["thresh-tracker/learned-imm"]
 
 [dependencies.thresh-bridge]
 path = "../thresh-bridge"

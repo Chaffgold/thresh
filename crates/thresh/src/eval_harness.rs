@@ -14,11 +14,12 @@
 //! assignment is unstable across ticks. A target that is in range but missed by
 //! the sensor that tick therefore correctly counts as a false negative.
 //!
-//! **Learned A/B (task 9.3) is not yet runnable** here: Phase 6's
-//! `LearnedImmFilter` is a filter-level wrapper and `MultiObjectTracker` has no
-//! learned-IMM path, and trained checkpoints are deferred. The analytic
-//! baseline is what this driver computes; the learned comparison lands once the
-//! tracker gains a learned-IMM constructor and a trained model exists.
+//! **Learned A/B (task 9.3):** [`run_eval_harness`] computes the analytic
+//! baseline; with the `learned-imm` feature, [`run_eval_harness_learned`] runs
+//! the same scenario through `MultiObjectTracker::new_imm_position_learned`
+//! (the ONNX mode classifier, with analytic fallback) so the two can be
+//! compared on identical inputs. A *representative* comparison still needs a
+//! trained checkpoint (the committed model is a random-weight stub).
 
 use nalgebra::DVector;
 use rand::SeedableRng;
@@ -116,6 +117,50 @@ pub fn run_eval_harness(
     distance_threshold_m: f64,
     seed: u64,
 ) -> Result<EvalReport, TrajectoryRadarError> {
+    let tracker = MultiObjectTracker::new_imm_position(
+        move || ImmConfig::cv_ca_ctrv_ct(imm.sigma_a, imm.sigma_j, imm.sigma_v, imm.sigma_omega),
+        imm.measurement_noise_sigma,
+        imm.gate_threshold,
+    );
+    run_eval_with_tracker(tracker, targets, config, distance_threshold_m, seed)
+}
+
+/// Build a learned-IMM tracker (ONNX mode classifier at `onnx_path`) and run the
+/// same evaluation as [`run_eval_harness`]. Each track wraps its IMM bank in a
+/// `LearnedImmFilter`, which falls back to the analytic mode update during the
+/// warm-up window and on any classifier error.
+///
+/// # Errors
+/// Returns the message if the classifier or IMM config is rejected, or the
+/// synth error (stringified) if measurement generation fails.
+#[cfg(feature = "learned-imm")]
+pub fn run_eval_harness_learned(
+    targets: &[TargetTrack],
+    config: &TrajectoryRadarConfig,
+    imm: ImmTrainingParams,
+    onnx_path: impl AsRef<std::path::Path>,
+    distance_threshold_m: f64,
+    seed: u64,
+) -> Result<EvalReport, String> {
+    let tracker = MultiObjectTracker::new_imm_position_learned(
+        move || ImmConfig::cv_ca_ctrv_ct(imm.sigma_a, imm.sigma_j, imm.sigma_v, imm.sigma_omega),
+        onnx_path,
+        imm.measurement_noise_sigma,
+        imm.gate_threshold,
+    )?;
+    run_eval_with_tracker(tracker, targets, config, distance_threshold_m, seed)
+        .map_err(|e| e.to_string())
+}
+
+/// Shared evaluation loop: drive `tracker` over the synth measurement stream and
+/// compute MOT metrics (MOTA/MOTP/IDF1) against the ground-truth trajectories.
+fn run_eval_with_tracker(
+    mut tracker: MultiObjectTracker,
+    targets: &[TargetTrack],
+    config: &TrajectoryRadarConfig,
+    distance_threshold_m: f64,
+    seed: u64,
+) -> Result<EvalReport, TrajectoryRadarError> {
     let mut rng = StdRng::seed_from_u64(seed);
     let per_tick = measurements_from_trajectory(targets, config, &mut rng)?;
     let dt = 1.0 / config.sample_rate_hz;
@@ -125,12 +170,6 @@ pub fn run_eval_harness(
         .map(|w| w.time)
         .fold(f64::INFINITY, f64::min);
     let sensor = config.sensor.position_enu_m;
-
-    let mut tracker = MultiObjectTracker::new_imm_position(
-        move || ImmConfig::cv_ca_ctrv_ct(imm.sigma_a, imm.sigma_j, imm.sigma_v, imm.sigma_omega),
-        imm.measurement_noise_sigma,
-        imm.gate_threshold,
-    );
 
     let mut frames = Vec::with_capacity(per_tick.len());
     for (i, tick) in per_tick.iter().enumerate() {
