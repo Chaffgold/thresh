@@ -20,9 +20,9 @@
 
 ## 3. Synthetic automotive scenarios
 
-- [ ] 3.1 Add a `KinematicBicycle { steering_angle, acceleration, wheelbase }` `SegmentType` to `crates/thresh-synth/src/trajectory.rs` (2-DOF; reuse `Ctrv` math where applicable).
-- [ ] 3.2 Add road-scenario presets (lane-follow, intersection, multi-agent) with configurable clutter.
-- [ ] 3.3 Generate a synthetic automotive dataset and verify trajectories are physically plausible (speed/turn-rate bounds per class).
+- [x] 3.1 Add a `KinematicBicycle { steering_angle, acceleration, wheelbase }` `SegmentType` to `crates/thresh-synth/src/trajectory.rs` (2-DOF; reuse `Ctrv` math where applicable). _Heading/speed derived from planar velocity like `Ctrv`; `ω = v·tan(δ)/L` evaluated mid-step with midpoint position integration (O(dt²)); speed clamps at standstill (no reversing through a braking segment). Analytic tests: straight acceleration, constant-steering circle of radius `L/tan(δ)`, brake-to-stop distance `v²/2a`._
+- [x] 3.2 Add road-scenario presets (lane-follow, intersection, multi-agent) with configurable clutter. _`thresh-synth::road_scenarios`: `lane_follow(n)` (platoon + lead-car brake-to-stop), `intersection()` (crossing car/truck, left-turning car, crosswalk pedestrian), `multi_agent()` (both scenes + a cyclist, ≥4 classes). Deterministic class-tagged `RoadAgent`s; measurement clutter/noise stays the synth sensor layer's job (`from_trajectory`), keeping GT presets pure._
+- [x] 3.3 Generate a synthetic automotive dataset and verify trajectories are physically plausible (speed/turn-rate bounds per class). _`plausibility::{max_speed_mps, max_turn_rate_radps}` per class; `presets_are_physically_plausible` checks every preset agent against its class bounds (plus on-road-plane and uniqueness tests). End-to-end: `crates/thresh/tests/automotive_integration.rs` tracks the full intersection with `new_automotive_enu` (every agent confirmed with its class) and proves a moving-ego view coincides with the world-frame view._
 
 ## 4. nuScenes-benchmarked evaluation
 
