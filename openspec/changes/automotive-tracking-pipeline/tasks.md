@@ -12,11 +12,11 @@
 
 ## 2. Sensor measurements and ego-motion
 
-- [ ] 2.1 Add a LiDAR 3D-detection measurement variant (position + 3D box + yaw + class) to `crates/thresh-core/src/measurement.rs`.
-- [ ] 2.2 Add a camera (monocular 3D / image-plane) measurement variant.
-- [ ] 2.3 Add an ego-motion type (ego pose + linear & angular velocity) and surface it from `NuScenesBridge` (ego-pose deltas).
-- [ ] 2.4 Add an automotive ENU tracker entry point (e.g. `MultiObjectTracker::new_automotive_enu(...)`) that feeds ego-motion into the prediction step; keep it additive/opt-in so aerospace trackers are unchanged.
-- [ ] 2.5 Class-specific motion priors (e.g. pedestrian ≤ ~6 m/s, car ≤ ~40 m/s) via the existing head/lifecycle registry.
+- [x] 2.1 Add a LiDAR 3D-detection measurement variant (position + 3D box + yaw + class) to `crates/thresh-core/src/measurement.rs`. _`Measurement::Lidar { position, extent, yaw, class, velocity, time, sensor_id }`; arms added to `time`/`to_vector`/`dim`/`default_noise` (3D, or 6D with velocity; ~0.2 m std position noise). The one exhaustive external match (`thresh-data::benchmark::measurement_to_cartesian`) extended._
+- [x] 2.2 Add a camera (monocular 3D / image-plane) measurement variant. _`Measurement::Camera { center_px, extent_px, position: Option<[f64;3]>, yaw: Option<f64>, class, time, sensor_id }` — image-plane box plus optional monocular 3D estimate (per the spec); `to_vector` prefers the metric estimate, else the pixel center._
+- [x] 2.3 Add an ego-motion type (ego pose + linear & angular velocity) and surface it from `NuScenesBridge` (ego-pose deltas). _`thresh_core::ego::{EgoPose, EgoMotion}` (un-gated, fully unit-tested quaternion math; `[w,x,y,z]` matching nuScenes; `EgoMotion::from_pose_pair` finite-differences two poses). `NuScenesBridge::ego_pose(sample, channel)` resolves `sample_data → ego_pose` (µs → s). Design Decision 8._
+- [x] 2.4 Add an automotive ENU tracker entry point (e.g. `MultiObjectTracker::new_automotive_enu(...)`) that feeds ego-motion into the prediction step; keep it additive/opt-in so aerospace trackers are unchanged. _`new_automotive_enu` + `step_with_ego(&[(detection, class)], dt, &EgoMotion)` lift ego-frame detections into world ENU at the measurement boundary (Decision 7: with world-frame tracks, lifting *is* the prediction compensation — verified by `stationary_object_does_not_drift_under_ego_motion`). `step`/`step_detections` byte-identical; `identity_ego_matches_world_frame_step` + `plain_step_is_unchanged_by_automotive_entry_points` guard the aerospace path._
+- [x] 2.5 Class-specific motion priors (e.g. pedestrian ≤ ~6 m/s, car ≤ ~40 m/s) via the existing head/lifecycle registry. _Six automotive `TrackHead` factories (all `state_dim=6`, position-tracker compatible): speed priors as velocity covariance (pedestrian var 4 ≪ car var 225), agility as `process_noise_sigma` (motorcycle 3.0 > car 2.0 > truck 1.5 > bus 1.0), fast confirm/delete for pedestrians. Engaged at birth via `step_classed`. Ordering + compatibility tests in `heads.rs`._
 
 ## 3. Synthetic automotive scenarios
 

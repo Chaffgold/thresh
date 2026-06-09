@@ -8,6 +8,7 @@ use thresh_association::hungarian::hungarian_assignment;
 use thresh_association::jpda::{JpdaTrack, jpda_associate_and_update};
 use thresh_association::mht::HypothesisTree;
 use thresh_core::detection::Detection3D;
+use thresh_core::ego::EgoMotion;
 use thresh_core::track::{TargetClass, TrackState};
 use thresh_filter::imm::{ImmConfig, ImmFilter};
 #[cfg(feature = "learned-imm")]
@@ -236,6 +237,21 @@ impl MultiObjectTracker {
         Ok(tracker)
     }
 
+    /// Create a tracker for automotive ENU tracking (automotive-tracking-pipeline,
+    /// task 2.4).
+    ///
+    /// A CV position tracker whose default [`HeadRegistry`] carries the
+    /// automotive class heads (car/truck/bus/motorcycle/bicycle/pedestrian), so
+    /// per-class motion priors and lifecycle policies engage when detections are
+    /// fed through [`Self::step_classed`] / [`Self::step_with_ego`]. Tracking
+    /// happens in a fixed world ENU frame; on a moving platform, lift ego-frame
+    /// detections with [`Self::step_with_ego`] so stationary world objects do
+    /// not drift due to ego movement. `measurement_noise_sigma` is in metres
+    /// (automotive detections are typically sub-metre).
+    pub fn new_automotive_enu(measurement_noise_sigma: f64, gate_threshold: f64) -> Self {
+        Self::new_cv_position(measurement_noise_sigma, gate_threshold)
+    }
+
     /// Run one tracking cycle: predict all tracks, associate with detections, update.
     pub fn step(&mut self, detections: &[DVector<f64>], dt: f64) {
         self.predict_all_tracks(dt);
@@ -243,6 +259,57 @@ impl MultiObjectTracker {
         self.apply_lifecycle(&associated_tracks);
         self.birth_unassigned(detections, &associated_dets);
         self.remove_deleted_tracks();
+    }
+
+    /// Run one tracking cycle with class-tagged detections.
+    ///
+    /// Identical to [`Self::step`], except unassigned detections birth tracks
+    /// with their own [`TargetClass`] instead of [`TargetClass::Unknown`], so
+    /// the class-specific head (motion priors, confirmation/deletion policy)
+    /// applies from birth. Detections are world-frame positions `[x, y, z]`.
+    pub fn step_classed(&mut self, detections: &[(DVector<f64>, TargetClass)], dt: f64) {
+        let positions: Vec<DVector<f64>> = detections.iter().map(|(d, _)| d.clone()).collect();
+        self.predict_all_tracks(dt);
+        let (associated_tracks, associated_dets) = self.associate_and_update(&positions);
+        self.apply_lifecycle(&associated_tracks);
+        for (dj, (det, class)) in detections.iter().enumerate() {
+            if !associated_dets[dj] {
+                self.birth_track(det, *class);
+            }
+        }
+        self.remove_deleted_tracks();
+    }
+
+    /// Run one tracking cycle for a moving platform (automotive-tracking-pipeline,
+    /// task 2.4): lift ego-frame detections into the world ENU frame via the
+    /// ego pose, then run [`Self::step_classed`].
+    ///
+    /// Tracks live in the world frame, so platform motion is compensated at the
+    /// measurement boundary — a stationary world object observed from a moving
+    /// ego lifts to the same world coordinates every cycle and does not drift.
+    /// The full [`EgoMotion`] is accepted per the ego-motion contract; the lift
+    /// needs only `ego.pose` today, while the linear/angular velocities are
+    /// reserved for measurement-timestamp skew compensation (extrapolating the
+    /// pose to each detection's exact timestamp).
+    ///
+    /// Detections are ego/body-frame positions `[x, y, z]` in metres; entries
+    /// with fewer than 3 dimensions (e.g. a pixel-only camera observation) have
+    /// no Cartesian position and are skipped.
+    pub fn step_with_ego(
+        &mut self,
+        detections_ego: &[(DVector<f64>, TargetClass)],
+        dt: f64,
+        ego: &EgoMotion,
+    ) {
+        let world: Vec<(DVector<f64>, TargetClass)> = detections_ego
+            .iter()
+            .filter(|(d, _)| d.len() >= 3)
+            .map(|(d, class)| {
+                let p = ego.pose.transform_to_world([d[0], d[1], d[2]]);
+                (DVector::from_column_slice(&p), *class)
+            })
+            .collect();
+        self.step_classed(&world, dt);
     }
 
     /// Predict all alive tracks forward by `dt`.
@@ -1285,5 +1352,152 @@ mod tests {
             "x estimate {} should track the target near {x}",
             track.state[0]
         );
+    }
+
+    // --- Automotive ENU + ego-motion (automotive-tracking-pipeline, Phase 2) ---
+
+    use thresh_core::ego::{EgoMotion, EgoPose};
+
+    fn quat_mul(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
+        [
+            a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3],
+            a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2],
+            a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1],
+            a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0],
+        ]
+    }
+
+    /// Ego pose with both yaw and pitch (a road grade), so the tests exercise
+    /// the full quaternion path rather than planar rotation only.
+    fn ego_pose_at(x: f64, y: f64, yaw: f64, pitch: f64, t: f64) -> EgoPose {
+        let qy = [(yaw / 2.0).cos(), 0.0, 0.0, (yaw / 2.0).sin()];
+        let qp = [(pitch / 2.0).cos(), 0.0, (pitch / 2.0).sin(), 0.0];
+        EgoPose {
+            translation_m: [x, y, 0.0],
+            rotation_wxyz: quat_mul(qy, qp),
+            time_s: t,
+        }
+    }
+
+    /// Express a fixed world point in a given ego frame: the exact inverse of
+    /// `EgoPose::transform_to_world` (rotate the offset by the conjugate
+    /// quaternion), so the test inverts the same path production code uses.
+    fn world_to_ego(pose: &EgoPose, p_world: [f64; 3]) -> DVector<f64> {
+        let d = [
+            p_world[0] - pose.translation_m[0],
+            p_world[1] - pose.translation_m[1],
+            p_world[2] - pose.translation_m[2],
+        ];
+        let q = pose.rotation_wxyz;
+        let inverse = EgoPose {
+            translation_m: [0.0; 3],
+            rotation_wxyz: [q[0], -q[1], -q[2], -q[3]],
+            time_s: pose.time_s,
+        };
+        DVector::from_column_slice(&inverse.rotate_to_world(d))
+    }
+
+    /// The capability-spec scenario: a stationary world object observed from a
+    /// moving, turning, pitching ego must not drift in the world frame.
+    #[test]
+    fn stationary_object_does_not_drift_under_ego_motion() {
+        let mut tracker = MultiObjectTracker::new_automotive_enu(0.5, 16.0);
+        let parked_car = [40.0, 12.0, 0.0];
+        let dt = 0.1;
+
+        let mut prev: Option<EgoPose> = None;
+        for k in 0..30 {
+            let t = k as f64 * dt;
+            // Ego drives +x at 10 m/s, slowly yawing, on a 3% grade (pitch).
+            let pose = ego_pose_at(10.0 * t, 0.0, 0.02 * t, 0.03, t);
+            let motion = prev
+                .and_then(|p| EgoMotion::from_pose_pair(&p, &pose))
+                .unwrap_or_else(|| EgoMotion::stationary(pose));
+            let det_ego = world_to_ego(&pose, parked_car);
+            tracker.step_with_ego(&[(det_ego, TargetClass::Car)], dt, &motion);
+            prev = Some(pose);
+        }
+
+        assert_eq!(tracker.alive_count(), 1, "one persistent track expected");
+        let track = &tracker.tracks[0];
+        let est = [track.state[0], track.state[2], track.state[4]];
+        for (i, want) in parked_car.iter().enumerate() {
+            assert!(
+                (est[i] - want).abs() < 0.5,
+                "world axis {i}: estimate {} drifted from {} despite ego motion",
+                est[i],
+                want
+            );
+        }
+        // World-frame velocity of a parked object must be near zero.
+        let speed = (track.state[1].powi(2) + track.state[3].powi(2)).sqrt();
+        assert!(
+            speed < 1.0,
+            "parked object should be static, got {speed} m/s"
+        );
+    }
+
+    #[test]
+    fn step_with_ego_skips_sub_3d_detections() {
+        // A pixel-only camera observation (2D) has no Cartesian position; it
+        // must be skipped, not panic on d[2].
+        let mut tracker = MultiObjectTracker::new_automotive_enu(0.5, 16.0);
+        let pixel_only = DVector::from_column_slice(&[640.0, 360.0]);
+        let lidar = DVector::from_column_slice(&[10.0, 5.0, 0.0]);
+        let motion = EgoMotion::stationary(EgoPose::identity(0.0));
+        tracker.step_with_ego(
+            &[
+                (pixel_only, TargetClass::Pedestrian),
+                (lidar, TargetClass::Car),
+            ],
+            0.1,
+            &motion,
+        );
+        assert_eq!(tracker.alive_count(), 1, "only the 3D detection births");
+        assert_eq!(tracker.tracks[0].class, TargetClass::Car);
+    }
+
+    #[test]
+    fn step_classed_births_with_class_specific_head() {
+        let mut tracker = MultiObjectTracker::new_automotive_enu(0.5, 16.0);
+        let det = DVector::from_column_slice(&[5.0, 2.0, 0.0]);
+        // Pedestrian head confirms after 2 hits (vs 3-of-5 for Unknown).
+        tracker.step_classed(&[(det.clone(), TargetClass::Pedestrian)], 0.1);
+        assert_eq!(tracker.tracks[0].class, TargetClass::Pedestrian);
+        assert_eq!(tracker.confirmed_count(), 0, "not confirmed after 1 hit");
+        tracker.step_classed(&[(det, TargetClass::Pedestrian)], 0.1);
+        assert_eq!(
+            tracker.confirmed_count(),
+            1,
+            "pedestrian head (2-of-2) should confirm on the second hit"
+        );
+    }
+
+    #[test]
+    fn plain_step_is_unchanged_by_automotive_entry_points() {
+        // The classless path still births Unknown — aerospace behavior intact.
+        let mut tracker = MultiObjectTracker::new_cv_position(10.0, 16.0);
+        let det = DVector::from_column_slice(&[100.0, 0.0, 1000.0]);
+        tracker.step(std::slice::from_ref(&det), 1.0);
+        assert_eq!(tracker.tracks[0].class, TargetClass::Unknown);
+    }
+
+    #[test]
+    fn identity_ego_matches_world_frame_step() {
+        // With an identity ego pose, step_with_ego must behave exactly like
+        // step_classed on the same detections.
+        let mut a = MultiObjectTracker::new_automotive_enu(0.5, 16.0);
+        let mut b = MultiObjectTracker::new_automotive_enu(0.5, 16.0);
+        let identity = EgoMotion::stationary(EgoPose::identity(0.0));
+        for k in 0..10 {
+            let det = DVector::from_column_slice(&[10.0 + k as f64, -3.0, 0.0]);
+            a.step_with_ego(&[(det.clone(), TargetClass::Car)], 0.1, &identity);
+            b.step_classed(&[(det, TargetClass::Car)], 0.1);
+        }
+        assert_eq!(a.tracks.len(), b.tracks.len());
+        let (ta, tb) = (&a.tracks[0], &b.tracks[0]);
+        assert!((ta.state[0] - tb.state[0]).abs() < 1e-12);
+        assert!((ta.state[2] - tb.state[2]).abs() < 1e-12);
+        assert_eq!(ta.lifecycle, tb.lifecycle);
     }
 }

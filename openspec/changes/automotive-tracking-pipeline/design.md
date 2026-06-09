@@ -104,3 +104,23 @@ measurements and ego-motion through the bridge, and the eval driver.
   and coarse categories.)
 - Should a future change add a learned automotive detector (Track-A analog) and
   is a BEV frame warranted, or does ENU + ego-motion suffice for the first cut?
+
+## Decisions made during Phase 2 (sensor measurements and ego-motion)
+
+### 7. Ego compensation at the measurement boundary, not inside predict
+
+**Decision:** Tracking happens in a fixed world ENU frame. `MultiObjectTracker::step_with_ego` accepts the full `EgoMotion` (pose + linear/angular velocity, per the spec contract), lifts ego/body-frame detections into the world frame via `EgoPose::transform_to_world` (`p_world = R(q)·p_ego + t`), and then runs the standard cycle; the Kalman predict step itself is untouched. The velocities are unused by the lift today and are reserved for measurement-timestamp skew compensation (extrapolating the pose to each detection's exact timestamp). Sub-3D detections (e.g. pixel-only camera observations) carry no Cartesian position and are skipped.
+
+**Rationale:** With tracks in the world frame, prediction is inherently platform-independent — lifting at the measurement boundary *is* the compensation, and the spec scenario (a stationary world object must not drift under ego motion) is satisfied exactly (`stationary_object_does_not_drift_under_ego_motion`). This is also the standard architecture of nuScenes trackers (e.g. AB3DMOT). The earlier plan's alternative — inflating Q when a compensator is present — was rejected as unprincipled. Existing entry points (`step`, `step_detections`) are byte-identical; aerospace is unaffected.
+
+### 8. Pure ego math in thresh-core; the PyO3 bridge stays thin
+
+**Decision:** `EgoPose` / `EgoMotion` (quaternion transform, finite-difference `from_pose_pair`) live un-gated in `thresh-core::ego` with full unit tests; `NuScenesBridge::ego_pose(sample, channel)` is a thin gated accessor that resolves `sample → sample_data → ego_pose` and converts microseconds → seconds.
+
+**Rationale:** Same lesson as Phase 1's `map_category`: the `nuscenes` module is PyO3-gated and its tests cannot run locally or in CI, so any logic placed there is effectively untested. Quaternions are `[w,x,y,z]` matching the nuScenes `ego_pose` record, so the bridge is a field copy.
+
+### 9. Classed detections via `step_classed`, not a `Measurement`-consuming tracker
+
+**Decision:** Per-class priors engage through a new `step_classed(&[(DVector, TargetClass)], dt)` cycle that births unassigned detections with their own class (the plain `step` still births `Unknown`). Automotive heads all keep `state_dim = 6`.
+
+**Rationale:** The tracker's association/update pipeline operates on position vectors; threading the full `Measurement` enum through it would be a much larger refactor for no Phase-2 benefit. `step_classed` mirrors `step` exactly (verified: `identity_ego_matches_world_frame_step`, `plain_step_is_unchanged_by_automotive_entry_points`). The scouted plan's 9-dim pedestrian head was rejected: `birth_track` indexes the 3×6 observation matrix by `state_dim` columns, so a non-6D head on this tracker would panic — guarded by `automotive_heads_are_position_tracker_compatible`.

@@ -415,6 +415,16 @@ fn measurement_to_cartesian(m: &thresh_core::measurement::Measurement) -> DVecto
             let y = ground_range_m * azimuth_rad.cos();
             DVector::from_column_slice(&[x, y, 0.0])
         }
+        thresh_core::measurement::Measurement::Lidar { position, .. } => {
+            DVector::from_column_slice(position)
+        }
+        thresh_core::measurement::Measurement::Camera { position, .. } => {
+            // Use the monocular 3D estimate when present; a pixel-only camera
+            // detection has no Cartesian position for this benchmark path.
+            position
+                .map(|p| DVector::from_column_slice(&p))
+                .unwrap_or_else(|| DVector::from_column_slice(&[0.0, 0.0, 0.0]))
+        }
     }
 }
 
