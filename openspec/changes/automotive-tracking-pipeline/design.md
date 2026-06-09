@@ -124,3 +124,9 @@ measurements and ego-motion through the bridge, and the eval driver.
 **Decision:** Per-class priors engage through a new `step_classed(&[(DVector, TargetClass)], dt)` cycle that births unassigned detections with their own class (the plain `step` still births `Unknown`). Automotive heads all keep `state_dim = 6`.
 
 **Rationale:** The tracker's association/update pipeline operates on position vectors; threading the full `Measurement` enum through it would be a much larger refactor for no Phase-2 benefit. `step_classed` mirrors `step` exactly (verified: `identity_ego_matches_world_frame_step`, `plain_step_is_unchanged_by_automotive_entry_points`). The scouted plan's 9-dim pedestrian head was rejected: `birth_track` indexes the 3×6 observation matrix by `state_dim` columns, so a non-6D head on this tracker would panic — guarded by `automotive_heads_are_position_tracker_compatible`.
+
+### 10. Bicycle segment integrates with the midpoint rule; clutter stays in the sensor layer
+
+**Decision:** `SegmentType::KinematicBicycle` derives heading/speed from the planar velocity (the `Ctrv` convention), advances heading at `ω = v·tan(δ)/L` with mid-step speed, and integrates position with the midpoint rule; speed clamps at zero so braking segments stop rather than reverse. Road presets (`road_scenarios`) emit deterministic, class-tagged ground truth only — measurement noise/clutter remains the synth sensor layer's concern, as for aerospace scenarios.
+
+**Rationale:** Midpoint integration keeps the constant-steering circle accurate to centimetres at the presets' `dt = 0.1 s` without a closed-form arc (which the varying-speed case lacks); the analytic circle/brake-distance tests pin the behaviour. Keeping clutter out of the GT presets mirrors how aerospace trajectories feed `from_trajectory`, so the same radar/sensor pipelines can consume road scenes unchanged.

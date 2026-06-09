@@ -13,6 +13,7 @@ pub mod radar_equation;
 pub mod radar_scene;
 pub mod radar_trajectory;
 pub mod rcs_compute;
+pub mod road_scenarios;
 pub mod scenario;
 pub mod swerling;
 pub mod trajectory;

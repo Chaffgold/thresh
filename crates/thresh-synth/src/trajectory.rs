@@ -1,4 +1,5 @@
-//! Trajectory generation: CV, CA, CTRV, ballistic segments with stitching.
+//! Trajectory generation: CV, CA, CTRV, ballistic, and kinematic-bicycle
+//! segments with stitching.
 
 use nalgebra::Vector3;
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,23 @@ pub enum SegmentType {
     Ctrv { turn_rate: f64 },
     /// Ballistic (gravity + optional drag).
     Ballistic { drag_coefficient: f64 },
+    /// 2-DOF kinematic bicycle model (automotive-tracking-pipeline, task 3.1).
+    ///
+    /// Ground-vehicle steering kinematics: the heading turns at
+    /// `ω = v · tan(steering_angle) / wheelbase` while the speed changes by
+    /// `acceleration` (speed is clamped at zero — no reversing through a
+    /// braking segment). Altitude follows the vertical velocity like `Ctrv`
+    /// (set `vz = 0` for flat roads). With `steering_angle = 0` this reduces
+    /// to in-lane constant acceleration; with constant speed it traces a
+    /// circle of radius `wheelbase / tan(steering_angle)`.
+    KinematicBicycle {
+        /// Front-wheel steering angle in radians (positive = left).
+        steering_angle: f64,
+        /// Longitudinal acceleration in m/s² (negative = braking).
+        acceleration: f64,
+        /// Wheelbase in metres (typical car ≈ 2.7).
+        wheelbase: f64,
+    },
 }
 
 /// A trajectory segment with duration.
@@ -95,6 +113,11 @@ fn advance_segment_step(
         SegmentType::Ballistic { drag_coefficient } => {
             step_ballistic(pos, vel, *drag_coefficient, dt)
         }
+        SegmentType::KinematicBicycle {
+            steering_angle,
+            acceleration,
+            wheelbase,
+        } => step_bicycle(pos, vel, *steering_angle, *acceleration, *wheelbase, dt),
     }
 }
 
@@ -123,6 +146,39 @@ fn step_ctrv(pos: &mut Vector3<f64>, vel: &mut Vector3<f64>, omega: f64, dt: f64
     }
     vel.x = speed * new_heading.cos();
     vel.y = speed * new_heading.sin();
+}
+
+/// One 2-DOF kinematic-bicycle step. Heading and speed are derived from the
+/// planar velocity (like [`step_ctrv`]); the heading advances at the bicycle
+/// turn rate `ω = v · tan(δ) / L` evaluated mid-step, and the position
+/// integrates with the mid-step speed and heading (midpoint rule, accurate to
+/// O(dt²) for the synth's small `dt`).
+fn step_bicycle(
+    pos: &mut Vector3<f64>,
+    vel: &mut Vector3<f64>,
+    steering_angle: f64,
+    acceleration: f64,
+    wheelbase: f64,
+    dt: f64,
+) {
+    let speed = (vel.x * vel.x + vel.y * vel.y).sqrt();
+    let heading = vel.y.atan2(vel.x);
+
+    let new_speed = (speed + acceleration * dt).max(0.0);
+    let mid_speed = 0.5 * (speed + new_speed);
+    let omega = if wheelbase.abs() > 1e-9 {
+        mid_speed * steering_angle.tan() / wheelbase
+    } else {
+        0.0
+    };
+    let new_heading = heading + omega * dt;
+    let mid_heading = heading + 0.5 * omega * dt;
+
+    pos.x += mid_speed * mid_heading.cos() * dt;
+    pos.y += mid_speed * mid_heading.sin() * dt;
+    pos.z += vel.z * dt;
+    vel.x = new_speed * new_heading.cos();
+    vel.y = new_speed * new_heading.sin();
 }
 
 fn step_ballistic(pos: &mut Vector3<f64>, vel: &mut Vector3<f64>, drag: f64, dt: f64) {
@@ -243,6 +299,109 @@ mod tests {
         assert!(last.position[2] < 10000.0);
         // z = 10000 - 0.5*g*t^2 = 10000 - 490.5 ≈ 9509.5
         assert!((last.position[2] - 9509.5).abs() < 10.0);
+    }
+
+    #[test]
+    fn bicycle_zero_steering_is_straight_acceleration() {
+        // δ=0: in-lane acceleration, x = v0·t + a·t²/2.
+        let traj = Trajectory {
+            target_id: 10,
+            initial_position: [0.0, 0.0, 0.0],
+            initial_velocity: [10.0, 0.0, 0.0],
+            segments: vec![Segment {
+                segment_type: SegmentType::KinematicBicycle {
+                    steering_angle: 0.0,
+                    acceleration: 2.0,
+                    wheelbase: 2.7,
+                },
+                duration: 5.0,
+            }],
+            dt: 0.01,
+        };
+        let last = traj.generate().pop().unwrap();
+        // x = 10*5 + 0.5*2*25 = 75; v = 10 + 2*5 = 20
+        assert!(
+            (last.position[0] - 75.0).abs() < 0.1,
+            "{}",
+            last.position[0]
+        );
+        assert!(last.position[1].abs() < 1e-9);
+        assert!((last.velocity[0] - 20.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn bicycle_constant_steering_traces_circle() {
+        // Constant speed v and steering δ trace a circle of radius L/tan(δ):
+        // after time T the vehicle is at angle θ = vT/R around the circle.
+        let (v, delta, wheelbase) = (10.0, 0.1_f64, 2.7);
+        let radius = wheelbase / delta.tan();
+        let traj = Trajectory {
+            target_id: 11,
+            initial_position: [0.0, 0.0, 0.0],
+            initial_velocity: [v, 0.0, 0.0],
+            segments: vec![Segment {
+                segment_type: SegmentType::KinematicBicycle {
+                    steering_angle: delta,
+                    acceleration: 0.0,
+                    wheelbase,
+                },
+                duration: 5.0,
+            }],
+            dt: 0.001,
+        };
+        let wps = traj.generate();
+        let last = wps.last().unwrap();
+        // Circle centred at (0, R) starting eastbound and turning left.
+        let theta = v * 5.0 / radius;
+        let expect = [radius * theta.sin(), radius * (1.0 - theta.cos())];
+        assert!(
+            (last.position[0] - expect[0]).abs() < 0.05,
+            "x: {} vs {}",
+            last.position[0],
+            expect[0]
+        );
+        assert!(
+            (last.position[1] - expect[1]).abs() < 0.05,
+            "y: {} vs {}",
+            last.position[1],
+            expect[1]
+        );
+        // Speed is preserved with zero acceleration.
+        let sp = (last.velocity[0].powi(2) + last.velocity[1].powi(2)).sqrt();
+        assert!((sp - v).abs() < 1e-6);
+    }
+
+    #[test]
+    fn bicycle_braking_clamps_at_standstill() {
+        // Hard braking from 5 m/s for 10 s must stop, not reverse.
+        let traj = Trajectory {
+            target_id: 12,
+            initial_position: [0.0, 0.0, 0.0],
+            initial_velocity: [5.0, 0.0, 0.0],
+            segments: vec![Segment {
+                segment_type: SegmentType::KinematicBicycle {
+                    steering_angle: 0.0,
+                    acceleration: -2.0,
+                    wheelbase: 2.7,
+                },
+                duration: 10.0,
+            }],
+            dt: 0.01,
+        };
+        let wps = traj.generate();
+        let last = wps.last().unwrap();
+        let sp = (last.velocity[0].powi(2) + last.velocity[1].powi(2)).sqrt();
+        assert!(sp < 1e-9, "vehicle should be stopped, speed {sp}");
+        // Distance to stop: v²/(2a) = 25/4 = 6.25 m.
+        assert!(
+            (last.position[0] - 6.25).abs() < 0.1,
+            "{}",
+            last.position[0]
+        );
+        // x must be monotonically non-decreasing (never reverses).
+        for w in wps.windows(2) {
+            assert!(w[1].position[0] >= w[0].position[0] - 1e-9);
+        }
     }
 
     #[test]
