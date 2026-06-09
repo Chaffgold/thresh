@@ -1,8 +1,8 @@
 # Tasks — Automotive Tracking Pipeline
 
-> Design proposal. Phases are dependency-ordered; nothing is implemented yet.
-> Phases 1–2 unblock everything else; Phase 3 (synth) and Phase 4 (eval) can
-> proceed in parallel once the types land.
+> Phases are dependency-ordered. Phase 1 (class taxonomy) is implemented;
+> Phases 1–2 unblock everything else, and Phase 3 (synth) and Phase 4 (eval)
+> can proceed in parallel once the types land.
 
 ## 1. Class taxonomy
 

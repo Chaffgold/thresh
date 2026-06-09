@@ -20,7 +20,9 @@ use pyo3::types::{PyDict, PyList};
 use thresh_core::detection::BoundingBox3D;
 use thresh_core::track::TargetClass;
 
-use crate::category::map_category;
+// Re-exported so the original `thresh_data::nuscenes::map_category` path keeps
+// working; the canonical home is now the (un-gated) `category` module.
+pub use crate::category::map_category;
 use crate::dataset::{CoordinateFrame, Dataset, DatasetMetadata};
 use crate::frame::{Frame, GroundTruthEntry, SensorInfo};
 

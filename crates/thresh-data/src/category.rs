@@ -22,20 +22,21 @@ use thresh_core::track::TargetClass;
 /// should split out; matching is prefix-based and ordered most-specific-first.
 pub fn map_category(nuscenes_category: &str) -> TargetClass {
     let c = nuscenes_category;
-    if c.starts_with("human.pedestrian") {
+    // Match a category prefix only at a segment boundary, so `vehicle.car`
+    // does not swallow a hypothetical `vehicle.cargo` (unrecognized → Unknown).
+    let is = |p: &str| c == p || c.strip_prefix(p).is_some_and(|rest| rest.starts_with('.'));
+
+    if is("human.pedestrian") {
         TargetClass::Pedestrian
-    } else if c.starts_with("vehicle.bicycle") {
+    } else if is("vehicle.bicycle") {
         TargetClass::Bicycle
-    } else if c.starts_with("vehicle.motorcycle") {
+    } else if is("vehicle.motorcycle") {
         TargetClass::Motorcycle
-    } else if c.starts_with("vehicle.bus") {
+    } else if is("vehicle.bus") {
         TargetClass::Bus
-    } else if c.starts_with("vehicle.truck")
-        || c.starts_with("vehicle.trailer")
-        || c.starts_with("vehicle.construction")
-    {
+    } else if is("vehicle.truck") || is("vehicle.trailer") || is("vehicle.construction") {
         TargetClass::Truck
-    } else if c.starts_with("vehicle.car") || c.starts_with("vehicle.emergency") {
+    } else if is("vehicle.car") || is("vehicle.emergency") {
         TargetClass::Car
     } else {
         TargetClass::Unknown
@@ -57,6 +58,10 @@ mod tests {
         assert_eq!(map_category("movable_object.debris"), TargetClass::Unknown);
         assert_eq!(map_category("animal"), TargetClass::Unknown);
         assert_eq!(map_category("flying.saucer"), TargetClass::Unknown);
+        // Segment-boundary matching: a longer first segment must not be
+        // swallowed by a shorter class prefix.
+        assert_eq!(map_category("vehicle.cargo"), TargetClass::Unknown);
+        assert_eq!(map_category("vehicle.carriage"), TargetClass::Unknown);
     }
 
     #[test]
@@ -116,22 +121,22 @@ mod tests {
             "human.pedestrian.police_officer",
             "human.pedestrian.construction_worker",
         ];
-        let aerospace = [
-            TargetClass::Aircraft,
-            TargetClass::Ballistic,
-            TargetClass::Uav,
-            TargetClass::Orbital,
+        // Assert membership in the allowed automotive set rather than absence
+        // from a hard-coded aerospace list — this stays correct as the enum
+        // grows new (aerospace or other) variants.
+        let automotive_classes = [
+            TargetClass::Car,
+            TargetClass::Truck,
+            TargetClass::Bus,
+            TargetClass::Motorcycle,
+            TargetClass::Bicycle,
+            TargetClass::Pedestrian,
         ];
         for cat in automotive {
             let mapped = map_category(cat);
             assert!(
-                !aerospace.contains(&mapped),
-                "automotive category {cat} wrongly mapped to aerospace class {mapped:?}"
-            );
-            assert_ne!(
-                mapped,
-                TargetClass::Unknown,
-                "automotive category {cat} should map to a concrete automotive class, not Unknown"
+                automotive_classes.contains(&mapped),
+                "automotive category {cat} should map to an automotive class, got {mapped:?}"
             );
         }
     }
