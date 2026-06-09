@@ -1,14 +1,14 @@
 # Tasks — Automotive Tracking Pipeline
 
-> Design proposal. Phases are dependency-ordered; nothing is implemented yet.
-> Phases 1–2 unblock everything else; Phase 3 (synth) and Phase 4 (eval) can
-> proceed in parallel once the types land.
+> Phases are dependency-ordered. Phase 1 (class taxonomy) is implemented;
+> Phases 1–2 unblock everything else, and Phase 3 (synth) and Phase 4 (eval)
+> can proceed in parallel once the types land.
 
 ## 1. Class taxonomy
 
-- [ ] 1.1 Extend `TargetClass` (`crates/thresh-core/src/track.rs:47`) with automotive variants: `Car`, `Truck`, `Bus`, `Motorcycle`, `Bicycle`, `Pedestrian` (and consider a generic `Vehicle`), keeping all aerospace variants and the `serde`/`Hash` derives.
-- [ ] 1.2 Rewrite `thresh-data`'s `map_category()` (`crates/thresh-data/src/nuscenes.rs:377`) to a lossless nuScenes→`TargetClass` mapping (no more `vehicle.car → Aircraft`); cover all nuScenes categories with an explicit `Unknown` fallback only for genuinely unmapped ones.
-- [ ] 1.3 Unit-test the mapping over the full nuScenes category list; assert no automotive category resolves to an aerospace class.
+- [x] 1.1 Extend `TargetClass` (`crates/thresh-core/src/track.rs`) with automotive variants: `Car`, `Truck`, `Bus`, `Motorcycle`, `Bicycle`, `Pedestrian`, keeping all aerospace variants and the `serde`/`Hash` derives. _Concrete classes only (per maintainer decision); doc note flags that the set is expected to grow (Trailer/ConstructionVehicle/EmergencyVehicle/Animal) and SHOULD be matched with a wildcard. No exhaustive `match` sites needed updating (`HeadRegistry::get` falls back to the `Unknown` head; `thresh-viz` uses a wildcard arm)._
+- [x] 1.2 Rewrite `thresh-data`'s `map_category()` (`crates/thresh-data/src/nuscenes.rs`) to a lossless nuScenes→`TargetClass` mapping (no more `vehicle.car → Aircraft`); cover all nuScenes categories with an explicit `Unknown` fallback only for genuinely non-automotive ones. _Coarse types folded into the nearest concrete class for now (`trailer`/`construction` → `Truck`, `emergency.*` → `Car`), prefix-matched most-specific-first._
+- [x] 1.3 Unit-test the mapping over the full nuScenes category list; assert no automotive category resolves to an aerospace class. _`map_category_no_automotive_maps_to_aerospace` iterates the full nuScenes detection category list and asserts none map to an aerospace class or to `Unknown`; plus per-group mapping tests._
 
 ## 2. Sensor measurements and ego-motion
 

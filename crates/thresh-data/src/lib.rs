@@ -4,6 +4,7 @@
 pub mod adsb;
 pub mod benchmark;
 pub mod cache;
+pub mod category;
 pub mod credentials;
 pub mod dataset;
 pub mod frame;

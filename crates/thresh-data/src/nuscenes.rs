@@ -20,6 +20,9 @@ use pyo3::types::{PyDict, PyList};
 use thresh_core::detection::BoundingBox3D;
 use thresh_core::track::TargetClass;
 
+// Re-exported so the original `thresh_data::nuscenes::map_category` path keeps
+// working; the canonical home is now the (un-gated) `category` module.
+pub use crate::category::map_category;
 use crate::dataset::{CoordinateFrame, Dataset, DatasetMetadata};
 use crate::frame::{Frame, GroundTruthEntry, SensorInfo};
 
@@ -365,33 +368,6 @@ pub struct SensorCalibration {
     pub camera_intrinsic: Option<[[f64; 3]; 3]>,
 }
 
-/// Map a nuScenes category name to a thresh [`TargetClass`].
-///
-/// nuScenes is an autonomous-driving dataset, so its categories (car, truck,
-/// pedestrian, etc.) do not correspond exactly to the aerospace-focused
-/// classes thresh tracks. We perform a best-effort mapping that groups
-/// wheeled road vehicles into [`TargetClass::Aircraft`] (the closest
-/// rigid-body analog), small agents into [`TargetClass::Uav`], and leave
-/// everything else as [`TargetClass::Unknown`].
-pub fn map_category(nuscenes_category: &str) -> TargetClass {
-    if nuscenes_category.starts_with("vehicle.car")
-        || nuscenes_category.starts_with("vehicle.truck")
-        || nuscenes_category.starts_with("vehicle.bus")
-        || nuscenes_category.starts_with("vehicle.trailer")
-        || nuscenes_category.starts_with("vehicle.construction")
-        || nuscenes_category.starts_with("vehicle.emergency")
-    {
-        TargetClass::Aircraft
-    } else if nuscenes_category.starts_with("vehicle.motorcycle")
-        || nuscenes_category.starts_with("vehicle.bicycle")
-        || nuscenes_category.starts_with("human.pedestrian")
-    {
-        TargetClass::Uav
-    } else {
-        TargetClass::Unknown
-    }
-}
-
 /// A dataset adapter that exposes a single nuScenes scene through the
 /// [`Dataset`] trait.
 pub struct NuScenesDataset {
@@ -561,29 +537,6 @@ pub fn parse_lidar_bytes(buf: &[u8]) -> std::io::Result<Vec<LidarPoint>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn map_category_default_unknown() {
-        assert_eq!(
-            map_category("static_object.bicycle_rack"),
-            TargetClass::Unknown
-        );
-        assert_eq!(map_category("movable_object.barrier"), TargetClass::Unknown);
-    }
-
-    #[test]
-    fn map_category_vehicles_to_aircraft() {
-        assert_eq!(map_category("vehicle.car"), TargetClass::Aircraft);
-        assert_eq!(map_category("vehicle.truck"), TargetClass::Aircraft);
-        assert_eq!(map_category("vehicle.bus.rigid"), TargetClass::Aircraft);
-    }
-
-    #[test]
-    fn map_category_small_agents_to_uav() {
-        assert_eq!(map_category("human.pedestrian.adult"), TargetClass::Uav);
-        assert_eq!(map_category("vehicle.motorcycle"), TargetClass::Uav);
-        assert_eq!(map_category("vehicle.bicycle"), TargetClass::Uav);
-    }
 
     #[test]
     fn lidar_point_fields() {
