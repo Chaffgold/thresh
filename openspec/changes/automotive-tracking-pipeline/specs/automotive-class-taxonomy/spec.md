@@ -34,8 +34,10 @@ existing aerospace variants and the type's serialization.
 ### Requirement: Lossless nuScenes class mapping
 
 The nuScenes category mapping MUST translate each nuScenes category to a
-semantically faithful `TargetClass`; no automotive category may resolve to an
-aerospace class.
+semantically faithful `TargetClass`. An automotive nuScenes category (vehicle or
+vulnerable-road-user) MUST NOT resolve to an aerospace class. "Lossless" here
+means every automotive category maps to a distinct automotive class; only
+genuinely non-automotive / unrecognized categories use the `Unknown` fallback.
 
 #### Scenario: Road-vehicle categories map to vehicle classes
 
@@ -54,8 +56,10 @@ aerospace class.
 
 **THEN** it maps to `Pedestrian`, `Motorcycle`, or `Bicycle` respectively.
 
-#### Scenario: Genuinely unmapped categories fall back explicitly
+#### Scenario: Genuinely non-automotive categories fall back explicitly
 
-**WHEN** a nuScenes object has a category outside the supported set
+**WHEN** a nuScenes object has a category that is not an automotive vehicle or
+vulnerable-road-user (e.g. `static_object.*`, `movable_object.debris`) or is
+otherwise unrecognized
 
 **THEN** it maps to `Unknown` and ingestion continues without error.

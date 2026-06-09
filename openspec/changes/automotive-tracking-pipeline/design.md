@@ -69,7 +69,7 @@ model; higher fidelity (tire slip, roll) is a later refinement.
 (`src/metrics.rs`). Add per-class aggregation and a nuScenes eval driver over
 held-out scenes (start with the `mini` split), reporting AMOTA alongside
 published baselines (SORT/DeepSORT/AB3DMOT) for context. Target a credible proof
-point (e.g. MOTA ≥ 0.50 on the dev split) rather than SOTA.
+point (e.g. MOTA ≥ 0.50 on the `val` split) rather than SOTA.
 
 ### 5. Alpamayo is out of scope (verified)
 

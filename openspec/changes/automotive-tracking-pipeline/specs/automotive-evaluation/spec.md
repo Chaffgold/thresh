@@ -19,7 +19,7 @@ the existing aggregate metrics.
 
 **THEN** MOTA/MOTP are reported per class as well as in aggregate.
 
-**SHALL** leave the existing aggregate metric functions behaviourally unchanged.
+**SHALL** leave the existing aggregate metric functions' behaviour unchanged.
 
 ### Requirement: nuScenes-benchmarked evaluation driver
 

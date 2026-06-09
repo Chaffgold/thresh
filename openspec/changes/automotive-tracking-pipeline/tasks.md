@@ -40,5 +40,5 @@
 
 - [ ] E.1 `TargetClass` includes native automotive classes and `map_category()` is lossless (no automotive category maps to an aerospace class).
 - [ ] E.2 LiDAR and ego-motion are first-class in the type system; the automotive tracker compensates for ego-motion.
-- [ ] E.3 The tracker runs end-to-end over a nuScenes split via `NuScenesBridge`, reporting per-class MOTA + AMOTA, with a credible proof point (e.g. MOTA ≥ 0.50 on the dev split).
+- [ ] E.3 The tracker runs end-to-end over a nuScenes split via `NuScenesBridge`, reporting per-class MOTA + AMOTA, with a credible proof point (e.g. MOTA ≥ 0.50 on the `val` split; prototype on `mini`).
 - [ ] E.4 All code passes clippy/tests/CI; no aerospace regression.
