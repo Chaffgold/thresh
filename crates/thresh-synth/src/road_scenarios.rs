@@ -279,14 +279,8 @@ pub fn max_turn_rate(waypoints: &[Waypoint]) -> f64 {
         }
         let h0 = w[0].velocity[1].atan2(w[0].velocity[0]);
         let h1 = w[1].velocity[1].atan2(w[1].velocity[0]);
-        let mut dh = h1 - h0;
-        // Wrap to (-π, π].
-        while dh > std::f64::consts::PI {
-            dh -= 2.0 * std::f64::consts::PI;
-        }
-        while dh <= -std::f64::consts::PI {
-            dh += 2.0 * std::f64::consts::PI;
-        }
+        // Wrap the heading delta to (-π, π] in closed form.
+        let dh = (h1 - h0).sin().atan2((h1 - h0).cos());
         max_rate = max_rate.max((dh / dt).abs());
     }
     max_rate
