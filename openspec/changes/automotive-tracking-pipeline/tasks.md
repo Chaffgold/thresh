@@ -26,10 +26,10 @@
 
 ## 4. nuScenes-benchmarked evaluation
 
-- [ ] 4.1 Add per-class MOTA aggregation to `crates/thresh-eval` (alongside the existing `compute_mot_metrics` / `compute_amota`).
-- [ ] 4.2 Add a nuScenes eval driver (over held-out scenes; start with the `mini` split) that runs the automotive tracker through `NuScenesBridge` and reports per-class MOTA + AMOTA.
-- [ ] 4.3 Record published baselines (SORT / DeepSORT / AB3DMOT) for context in an eval report under `docs/eval/`.
-- [ ] 4.4 Document nuScenes acquisition (mirroring `TRAINING.md`); keep heavy data out of CI.
+- [x] 4.1 Add per-class MOTA aggregation to `crates/thresh-eval` (alongside the existing `compute_mot_metrics` / `compute_amota`). _New `per_class` module: `ClassedFrameData`, `split_frames_by_class` (filter-then-evaluate per the nuScenes convention), `compute_per_class_mot` (populates the existing `ClassReport`), `class_averaged_mota`, and `build_classed_report` (fills `EvalReport.per_class`, previously never populated). Tests cover the class-blind-vs-class-averaged split (2/3 vs 0.5 analytic case), cross-class id-collision isolation, and track-only classes._
+- [x] 4.2 Add a nuScenes eval driver (over held-out scenes; start with the `mini` split) that runs the automotive tracker through `NuScenesBridge` and reports per-class MOTA + AMOTA. _`eval-nuscenes` binary behind the new `nuscenes-eval` feature: annotations → class-tagged detections (optional `--noise-sigma` jitter) → `step_classed` in the global frame → class-blind + per-class + class-averaged MOTA. `InstanceTrack` now carries `TargetClass` directly (no numeric-discriminant round-trip). Per-scene track-id offsetting prevents cross-scene id aliasing. Compile/clippy-verified under the feature; running needs a local nuScenes download (data-gated, Decision 11)._
+- [x] 4.3 Record published baselines (SORT / DeepSORT / AB3DMOT) for context in an eval report under `docs/eval/`. _`docs/eval/automotive-tracking.md`: web-verified, cited AMOTA numbers (AB3DMOT 0.151 test / 0.586 sAMOTA val; CenterPoint 0.638; SimpleTrack 0.668; EagerMOT 0.712) with the sAMOTA-vs-AMOTA caveat, and SORT/DeepSORT flagged as 2D-MOT context only._
+- [x] 4.4 Document nuScenes acquisition (mirroring `TRAINING.md`); keep heavy data out of CI. _Same doc: registration/download (mini → trainval), layout, `pip install nuscenes-devkit`, CC BY-NC-SA licensing note; the `nuscenes-eval` feature is opt-in and CI never fetches the dataset._
 
 ## 5. Documentation and wrap-up
 

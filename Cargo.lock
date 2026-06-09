@@ -4622,6 +4622,7 @@ dependencies = [
  "thresh-association",
  "thresh-bridge",
  "thresh-core",
+ "thresh-data",
  "thresh-eval",
  "thresh-filter",
  "thresh-fusion",

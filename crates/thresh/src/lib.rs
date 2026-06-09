@@ -5,6 +5,8 @@
 pub use thresh_association as association;
 pub use thresh_bridge as bridge;
 pub use thresh_core as core;
+#[cfg(feature = "nuscenes-eval")]
+pub use thresh_data as data;
 pub use thresh_eval as eval;
 pub use thresh_filter as filter;
 pub use thresh_fusion as fusion;

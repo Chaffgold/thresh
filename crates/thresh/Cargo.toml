@@ -16,6 +16,7 @@ thresh-synth = { path = "../thresh-synth" }
 thresh-eval = { path = "../thresh-eval" }
 nalgebra = { workspace = true }
 rand = "0.9"
+rand_distr = { version = "0.5", optional = true }
 
 # Parquet export for the Track B training-data pipeline. Heavy and optional,
 # so gated behind `training-export` and kept out of default/CI builds (mirrors
@@ -34,9 +35,16 @@ onnx = ["thresh-inference/onnx"]
 # eval-tracker `--learned-imm` flag through `MultiObjectTracker`'s learned
 # constructor. Pulls the ort/ONNX stack via thresh-tracker, so it is opt-in.
 learned-imm = ["thresh-tracker/learned-imm"]
+# nuScenes evaluation driver (eval-nuscenes): pulls thresh-data's PyO3-gated
+# nuScenes bridge. Needs a local nuScenes download + devkit; never in CI.
+nuscenes-eval = ["dep:thresh-data", "thresh-data/nuscenes", "dep:rand_distr"]
 
 [dependencies.thresh-bridge]
 path = "../thresh-bridge"
+
+[dependencies.thresh-data]
+path = "../thresh-data"
+optional = true
 
 [[bin]]
 name = "gen-imm-dataset"
@@ -49,6 +57,10 @@ required-features = ["training-export"]
 [[bin]]
 name = "onnx-infer"
 required-features = ["onnx"]
+
+[[bin]]
+name = "eval-nuscenes"
+required-features = ["nuscenes-eval"]
 
 [dev-dependencies]
 nalgebra = { workspace = true }
