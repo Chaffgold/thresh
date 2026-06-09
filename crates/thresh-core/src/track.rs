@@ -43,6 +43,13 @@ pub enum TrackState {
 }
 
 /// Target classification.
+///
+/// Spans both the aerospace domain (the original focus) and the automotive
+/// domain (the `automotive-tracking-pipeline` change). The set is expected to
+/// grow — finer automotive types (e.g. `Trailer`, `ConstructionVehicle`,
+/// `EmergencyVehicle`, `Animal`) and other domains may be added — so consumers
+/// SHOULD treat it as non-exhaustive in spirit: match with a wildcard / fall
+/// back to [`TargetClass::Unknown`] rather than enumerating every variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TargetClass {
     /// Fixed-wing aircraft (subsonic–supersonic).
@@ -53,6 +60,19 @@ pub enum TargetClass {
     Uav,
     /// Orbital object or satellite.
     Orbital,
+    /// Passenger car / light wheeled road vehicle.
+    Car,
+    /// Truck or other large/heavy wheeled road vehicle (incl. trailers and
+    /// construction vehicles until finer classes exist).
+    Truck,
+    /// Bus (rigid or bendy).
+    Bus,
+    /// Motorcycle or moped.
+    Motorcycle,
+    /// Bicycle.
+    Bicycle,
+    /// Pedestrian / vulnerable road user on foot.
+    Pedestrian,
     /// Unknown or unclassified target.
     Unknown,
 }
