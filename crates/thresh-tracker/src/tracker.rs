@@ -260,18 +260,19 @@ impl MultiObjectTracker {
             if !track.is_alive() {
                 continue;
             }
-            let Some(key) = track.imm_key else { continue };
-            #[cfg(feature = "learned-imm")]
-            if let Some(lf) = self.learned_imm_filters.get_mut(&key) {
-                let (state, cov) = lf.predict(dt);
-                track.state = state;
-                track.covariance = cov;
-                continue;
-            }
-            if let Some(imm) = self.imm_filters.get_mut(&key) {
-                let (state, cov) = imm.predict(dt);
-                track.state = state;
-                track.covariance = cov;
+            if let Some(key) = track.imm_key {
+                #[cfg(feature = "learned-imm")]
+                if let Some(lf) = self.learned_imm_filters.get_mut(&key) {
+                    let (state, cov) = lf.predict(dt);
+                    track.state = state;
+                    track.covariance = cov;
+                    continue;
+                }
+                if let Some(imm) = self.imm_filters.get_mut(&key) {
+                    let (state, cov) = imm.predict(dt);
+                    track.state = state;
+                    track.covariance = cov;
+                }
             }
         }
     }
@@ -550,24 +551,23 @@ impl MultiObjectTracker {
         is_imm: bool,
     ) {
         if is_imm {
-            let Some(key) = self.tracks[ti].imm_key else {
-                return;
-            };
-            #[cfg(feature = "learned-imm")]
-            if let Some(lf) = self.learned_imm_filters.get_mut(&key) {
-                let result = lf.update_with_measurement(detection, h, r);
-                self.tracks[ti].state = result.state;
-                self.tracks[ti].covariance = result.covariance;
-                self.tracks[ti].dominant_mode = Some(result.dominant_mode);
-                self.tracks[ti].mode_probabilities = Some(result.mode_probabilities);
-                return;
-            }
-            if let Some(imm) = self.imm_filters.get_mut(&key) {
-                let result = imm.update_with_measurement(detection, h, r);
-                self.tracks[ti].state = result.state;
-                self.tracks[ti].covariance = result.covariance;
-                self.tracks[ti].dominant_mode = Some(result.dominant_mode);
-                self.tracks[ti].mode_probabilities = Some(result.mode_probabilities);
+            if let Some(key) = self.tracks[ti].imm_key {
+                #[cfg(feature = "learned-imm")]
+                if let Some(lf) = self.learned_imm_filters.get_mut(&key) {
+                    let result = lf.update_with_measurement(detection, h, r);
+                    self.tracks[ti].state = result.state;
+                    self.tracks[ti].covariance = result.covariance;
+                    self.tracks[ti].dominant_mode = Some(result.dominant_mode);
+                    self.tracks[ti].mode_probabilities = Some(result.mode_probabilities);
+                    return;
+                }
+                if let Some(imm) = self.imm_filters.get_mut(&key) {
+                    let result = imm.update_with_measurement(detection, h, r);
+                    self.tracks[ti].state = result.state;
+                    self.tracks[ti].covariance = result.covariance;
+                    self.tracks[ti].dominant_mode = Some(result.dominant_mode);
+                    self.tracks[ti].mode_probabilities = Some(result.mode_probabilities);
+                }
             }
         } else {
             let track = &self.tracks[ti];
