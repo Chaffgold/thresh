@@ -1,0 +1,4 @@
+2026-05-11 22:46:00,260 - proxmox-mcp.proxmox - INFO - Connecting to Proxmox host: 10.0.1.217
+2026-05-11 22:46:00,472 - proxmox-mcp - INFO - Container command execution disabled (no [ssh] section in config)
+2026-05-11 22:46:00,516 - proxmox-mcp - INFO - Starting Proxmox MCP Server with transport: STDIO
+2026-05-11 22:46:00,538 - mcp.server.lowlevel.server - INFO - Processing request of type ListToolsRequest

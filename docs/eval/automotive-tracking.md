@@ -78,15 +78,43 @@ opt-in and compile-verified only.
    (non-commercial); the dataset and any derived caches stay out of the
    repository (consistent with `LICENSING.md`).
 
-## Exit-criterion status (E.3)
+## Results: v1.0-mini prototype (E.3)
 
-> The tracker runs end-to-end over a nuScenes split via `NuScenesBridge`,
-> reporting per-class MOTA + AMOTA, with a credible proof point (e.g. MOTA ≥
-> 0.50 on the `val` split; prototype on `mini`).
+Run on 2026-06-10 over all 10 `v1.0-mini` scenes (18,538 GT objects, 2 m
+threshold, CPU-only; the mini download is ~4 GB and publicly fetchable —
+no registration or GPU required):
 
-The driver, per-class metrics, and reporting exist and are compile-verified
-under `--features nuscenes-eval`; the synthetic-scenario harness passes in CI.
-Producing the benchmark *numbers* requires the nuScenes download on a local
-machine (data-gated, like the flight-data pipeline's GPU-gated training runs)
-— and a *detector-fed* comparison against the baselines above additionally
-requires the learned automotive detector follow-on.
+| Run | Overall MOTA | Class-avg MOTA | MOTP | IDF1 | HOTA | IDSW |
+|---|---|---|---|---|---|---|
+| Ideal detections (σ = 0) | **0.9251** | 0.8740 | 0.016 m | 0.9708 | 0.9318 | 336 |
+| Perturbed (σ = 0.3 m) | **0.8484** | 0.7566 | 0.442 m | 0.9709 | 0.8273 | 1761 |
+
+Per-class MOTA (ideal): Truck 0.950, Car 0.918, Pedestrian 0.898, Bus 0.873,
+Motorcycle 0.866, Bicycle 0.860, Unknown 0.753 (non-automotive nuScenes
+categories — barriers, cones, debris — correctly bucketed to `Unknown` and,
+as expected, hardest to track). The residual ID switches at σ = 0 come from
+annotation gaps (occlusion) interacting with the confirm/delete lifecycle.
+
+This satisfies E.3's prototype clause (MOTA ≥ 0.50 by a wide margin, per-class
++ class-averaged reporting end-to-end through `NuScenesBridge`). The full
+`val`-split run (~300 GB trainval download) and a *detector-fed* comparison
+against the baselines above remain follow-ons.
+
+### Runtime notes (macOS)
+
+The embedding binary must initialize Python itself — `thresh-data`'s `pyo3`
+carries the `auto-initialize` feature for this. On macOS, build against a
+concrete interpreter and point the embedded runtime at the devkit's
+site-packages:
+
+```sh
+python3.12 -m venv ~/data/nuscenes/venv && ~/data/nuscenes/venv/bin/pip install nuscenes-devkit
+PYO3_PYTHON=$(brew --prefix python@3.12)/bin/python3.12 \
+  cargo build -p thresh --features nuscenes-eval --bin eval-nuscenes
+PYTHONPATH=~/data/nuscenes/venv/lib/python3.12/site-packages \
+  ./target/debug/eval-nuscenes --dataroot ~/data/nuscenes --version v1.0-mini
+```
+
+(Linking the macOS system Python 3.9 fails at load with a
+`@rpath/Python3.framework` dyld error; Homebrew Python links by absolute
+path.)
