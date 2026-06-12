@@ -27,7 +27,7 @@ sgp4 = { workspace = true, optional = true }
 # auto-initialize: thresh-data is consumed by EMBEDDING binaries (eval-nuscenes),
 # which must start the interpreter themselves — unlike thresh-py (an extension
 # module, where Python is already running).
-pyo3 = { version = "0.24", optional = true, features = ["auto-initialize"] }
+pyo3 = { version = "0.29", optional = true, features = ["auto-initialize"] }
 
 # Benchmark scenario runner CLI. Always built (no feature gate) since the
 # synthetic scenario path only needs types from thresh-core / thresh-synth /
