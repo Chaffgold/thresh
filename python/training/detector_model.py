@@ -53,8 +53,18 @@ class DetectorModel(nn.Module):
         memory = self.point_encoder(point_cloud)  # (B, NUM_POINTS, d_model)
         batch = point_cloud.shape[0]
         queries = self.query_embed.unsqueeze(0).expand(batch, -1, -1)  # (B, Q, d)
-        decoded, _ = self.cross_attn(queries, memory, memory)  # (B, Q, d)
-        boxes = self.box_head(decoded)  # (B, Q, 7)
+        decoded, attn = self.cross_attn(
+            queries, memory, memory, need_weights=True, average_attn_weights=True
+        )  # decoded (B, Q, d); attn (B, Q, N), rows sum to 1
+        # Box centres come from the cloud itself (3DETR-style): each query's
+        # attention distribution selects the points it looks at, and the centre
+        # is their weighted mean — a decoder embedding alone cannot regress
+        # absolute positions to the ~25 m accuracy IoU@0.5 demands (an aircraft
+        # box is ~5e-4 of the normalized scene). The head refines with a small
+        # offset and predicts dims + yaw.
+        centres = torch.bmm(attn, point_cloud[..., :3])  # (B, Q, 3) normalized
+        refined = self.box_head(decoded)  # (B, Q, 7) = offset(3) + dims(3) + yaw(1)
+        boxes = torch.cat([centres + refined[..., :3], refined[..., 3:]], dim=-1)
         score_logits = self.score_head(decoded)  # (B, Q, 1)
         class_logits = self.class_head(decoded)  # (B, Q, num_classes)
         return boxes, score_logits, class_logits
