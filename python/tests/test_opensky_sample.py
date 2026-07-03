@@ -17,7 +17,7 @@ from typing import Any
 import httpx
 import pytest
 
-from acquisition.opensky import OPENSKY_BASE_URL, BoundingBox, TimeRange, load_zenodo_dump
+from acquisition.opensky import OPENSKY_BASE_URL, BoundingBox, load_zenodo_dump
 from acquisition.opensky_cli import capture, dedup_sort, main, parse_args, resolve_window
 from acquisition.schema import TrajectoryRecord
 
@@ -86,28 +86,58 @@ class TestDedupSort:
 
 
 class TestCaptureAgainstMockTransport:
-    def _mock_client(self, calls: list[int]) -> httpx.Client:
+    BBOX = BoundingBox(lat_min=47.0, lat_max=48.0, lon_min=-123.0, lon_max=-122.0)
+
+    def _mock_client(self, params_seen: list[dict[str, str]]) -> httpx.Client:
         def handler(request: httpx.Request) -> httpx.Response:
-            calls.append(int(request.url.params["time"]))
-            # Guards the extended=1 fix: without it the API omits the
-            # aircraft-category column that map_category consumes.
-            assert request.url.params["extended"] == "1"
+            params_seen.append(dict(request.url.params))
             payload: dict[str, Any] = {"time": FIXTURE_TIME, "states": [FIXTURE_STATE_ROW]}
             return httpx.Response(200, content=json.dumps(payload))
 
         return httpx.Client(base_url=OPENSKY_BASE_URL, transport=httpx.MockTransport(handler))
 
-    def test_polls_once_per_tick_and_dedups(self) -> None:
-        calls: list[int] = []
-        bbox = BoundingBox(lat_min=47.0, lat_max=48.0, lon_min=-123.0, lon_max=-122.0)
-        # A past window never sleeps (ticks are behind the wall clock).
-        window = TimeRange(start_s=100, end_s=130)
+    def test_polls_current_snapshots_and_dedups(self) -> None:
+        params_seen: list[dict[str, str]] = []
         raw = capture(
-            bbox, window, poll_interval_s=10.0, credentials=None, client=self._mock_client(calls)
+            self.BBOX,
+            3,
+            poll_interval_s=1.0,
+            credentials=None,
+            client=self._mock_client(params_seen),
         )
-        assert calls == [100, 110, 120]
+        assert len(params_seen) == 3
+        for params in params_seen:
+            # Live anonymous polls must never send `time` (OpenSky 403s on
+            # stale values: "Authenticate to get historical data")...
+            assert "time" not in params
+            # ...and must keep extended=1 so aircraft category is included.
+            assert params["extended"] == "1"
         assert len(raw) == 3  # same aircraft repeated per snapshot...
         assert len(dedup_sort(raw)) == 1  # ...collapses on (icao24, timestamp_us)
+
+    def test_mid_run_error_keeps_partial_records(self) -> None:
+        polls = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal polls
+            polls += 1
+            if polls > 2:
+                return httpx.Response(403, content="Authenticate to get historical data")
+            payload: dict[str, Any] = {"time": FIXTURE_TIME, "states": [FIXTURE_STATE_ROW]}
+            return httpx.Response(200, content=json.dumps(payload))
+
+        client = httpx.Client(base_url=OPENSKY_BASE_URL, transport=httpx.MockTransport(handler))
+        raw = capture(
+            self.BBOX,
+            5,
+            poll_interval_s=1.0,
+            credentials=None,
+            client=client,
+            retries=0,
+            backoff_s=0.0,
+        )
+        assert len(raw) == 2, "records before the failure must survive"
+        assert polls == 3, "capture stops polling after the fatal error"
 
 
 class TestCredentialParsing:

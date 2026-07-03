@@ -36,7 +36,9 @@ from acquisition.opensky import (
     DEFAULT_POLL_INTERVAL_S,
     OPENSKY_BASE_URL,
     BoundingBox,
+    OpenSkyError,
     TimeRange,
+    fetch_current_states,
     fetch_state_vectors,
 )
 from acquisition.schema import TrajectoryRecord
@@ -110,29 +112,45 @@ def resolve_window(args: argparse.Namespace, now_s: int) -> TimeRange:
 
 def capture(
     bbox: BoundingBox,
-    window: TimeRange,
+    duration_s: int,
     *,
     poll_interval_s: float,
     credentials: tuple[str, str] | None,
     client: httpx.Client | None = None,
+    retries: int = 3,
+    backoff_s: float = 1.0,
 ) -> list[TrajectoryRecord]:
-    """Collect one snapshot per poll interval across ``window``.
+    """Live-poll *current* snapshots for ``duration_s``, one per interval.
 
-    Ticks in the future are waited out against the wall clock so a
-    live anonymous capture actually spans the window instead of
-    re-reading one snapshot back-to-back.
+    Pacing uses monotonic-clock deltas (never absolute epoch ticks, which
+    break if NTP steps the clock mid-run) and each poll omits the ``time``
+    parameter (anonymous access 403s on even slightly-stale times).
+    A mid-run OpenSky error keeps the records collected so far instead of
+    losing the whole capture.
     """
     owns_client = client is None
     http = client or httpx.Client(base_url=OPENSKY_BASE_URL, timeout=30.0, auth=credentials)
     records: list[TrajectoryRecord] = []
-    step_s = max(int(poll_interval_s), 1)
+    step_s = max(poll_interval_s, 1.0)
+    polls = max(int(duration_s / step_s), 1)
+    started = time.monotonic()
     try:
-        for tick_s in range(window.start_s, window.end_s, step_s):
-            wait_s = tick_s - time.time()
+        for poll in range(polls):
+            wait_s = started + poll * step_s - time.monotonic()
             if wait_s > 0:
                 time.sleep(wait_s)
-            snapshot = TimeRange(start_s=tick_s, end_s=tick_s + 1)
-            records.extend(fetch_state_vectors(bbox, snapshot, poll_interval_s=1.0, client=http))
+            try:
+                records.extend(
+                    fetch_current_states(bbox, client=http, retries=retries, backoff_s=backoff_s)
+                )
+            except OpenSkyError as exc:
+                print(
+                    f"warning: poll {poll + 1}/{polls} failed ({exc}); "
+                    f"keeping {len(records)} records collected so far",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                break
     finally:
         if owns_client:
             http.close()
@@ -164,7 +182,6 @@ def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     lat_min, lat_max, lon_min, lon_max = args.bbox
     bbox = BoundingBox(lat_min=lat_min, lat_max=lat_max, lon_min=lon_min, lon_max=lon_max)
-    window = resolve_window(args, now_s=int(time.time()))
 
     credentials: tuple[str, str] | None = None
     if args.credentials is not None:
@@ -173,20 +190,35 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit("--credentials must be USER:PASS")
         credentials = (user, password)
 
-    raw = capture(
-        bbox,
-        window,
-        poll_interval_s=args.poll_interval_s,
-        credentials=credentials,
-    )
+    if args.time is not None:
+        # Historical replay of an explicit window (needs authenticated access).
+        window = resolve_window(args, now_s=int(time.time()))
+        raw = list(
+            fetch_state_vectors(
+                bbox,
+                window,
+                poll_interval_s=args.poll_interval_s,
+                credentials=credentials,
+            )
+        )
+    else:
+        raw = capture(
+            bbox,
+            args.duration_s,
+            poll_interval_s=args.poll_interval_s,
+            credentials=credentials,
+        )
     records = dedup_sort(raw)
     if not records:
         raise SystemExit("no records captured: empty bbox/window or OpenSky outage")
 
     size_bytes, digest = write_sample(records, args.out)
     aircraft = len({r.icao24 for r in records})
-    print(f"wrote {args.out}: {len(records)} records ({len(raw)} raw), {aircraft} aircraft")
-    print(f"size: {size_bytes} bytes, sha256: {digest}")
+    print(
+        f"wrote {args.out}: {len(records)} records ({len(raw)} raw), {aircraft} aircraft",
+        flush=True,
+    )
+    print(f"size: {size_bytes} bytes, sha256: {digest}", flush=True)
     if size_bytes > SAMPLE_BUDGET_BYTES:
         print(
             f"warning: exceeds the {SAMPLE_BUDGET_BYTES} byte checked-in sample budget "

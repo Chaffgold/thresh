@@ -69,6 +69,8 @@ exclude = [
     "tests/test_detector_training.py",
     "eval/onnx_parity.py",
     "tests/test_onnx_parity.py",
+    "eval/detector_map.py",
+    "eval/imm_accuracy.py",
 ]
 pythonVersion = "3.11"
 typeCheckingMode = "strict"

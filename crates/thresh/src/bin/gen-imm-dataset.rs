@@ -15,11 +15,12 @@
 //! real acquisition-layer trajectories) is wired up in Phase 6; this binary is
 //! the entry point that Phase 6 extends to ingest those trajectories.
 
-use std::path::PathBuf;
-
 use thresh::synth::radar_trajectory::TrajectoryRadarConfig;
 use thresh::synth::trajectory::{Segment, SegmentType, Trajectory};
 use thresh::training::parquet_export::write_imm_samples_parquet;
+use thresh::training::trajectory_ingest::{
+    GenArgs, IngestConfig, generate_per_track, ingest_trajectories,
+};
 use thresh::training::{ImmTrainingParams, ImmTrainingSample, generate_imm_training_samples};
 
 const DEFAULT_OUT: &str = "test-data/training/imm-classifier/imm-samples.parquet";
@@ -58,18 +59,44 @@ fn maneuver() -> Trajectory {
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let out = std::env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_OUT));
+/// Real-data mode: every ingested acquisition track becomes one trajectory run.
+fn samples_from_acquisition(
+    traj_path: &std::path::Path,
+    sample_rate_hz: f64,
+) -> Result<Vec<ImmTrainingSample>, Box<dyn std::error::Error>> {
+    let ingest_config = IngestConfig {
+        sample_rate_hz,
+        ..IngestConfig::default()
+    };
+    let config = TrajectoryRadarConfig {
+        sample_rate_hz,
+        ..TrajectoryRadarConfig::default()
+    };
+    let params = ImmTrainingParams::default();
+    let tracks = ingest_trajectories(traj_path, &ingest_config)?;
+    println!(
+        "ingested {} track segments from {}",
+        tracks.len(),
+        traj_path.display()
+    );
+    Ok(generate_per_track(&tracks, |trajectory_id, track| {
+        generate_imm_training_samples(
+            trajectory_id,
+            &track.waypoints,
+            track.class_id,
+            &config,
+            params,
+            1_000 + trajectory_id as u64,
+        )
+    }))
+}
 
+fn synthetic_samples() -> Result<Vec<ImmTrainingSample>, Box<dyn std::error::Error>> {
     let config = TrajectoryRadarConfig {
         sample_rate_hz: 10.0,
         ..TrajectoryRadarConfig::default()
     };
     let params = ImmTrainingParams::default();
-
     let mut samples: Vec<ImmTrainingSample> = Vec::new();
     for (traj, seed) in [(cruise(), 1_u64), (maneuver(), 2_u64)] {
         let waypoints = traj.generate();
@@ -82,8 +109,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             seed,
         )?);
     }
+    Ok(samples)
+}
 
-    write_imm_samples_parquet(&samples, &out)?;
-    println!("wrote {} samples to {}", samples.len(), out.display());
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = GenArgs::parse(DEFAULT_OUT, 1.0);
+
+    let samples = match &args.trajectories {
+        Some(traj_path) => samples_from_acquisition(traj_path, args.sample_rate_hz)?,
+        None => synthetic_samples()?,
+    };
+
+    write_imm_samples_parquet(&samples, &args.out)?;
+    println!("wrote {} samples to {}", samples.len(), args.out.display());
     Ok(())
 }

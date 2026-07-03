@@ -45,6 +45,9 @@ pub mod detector;
 #[cfg(feature = "training-export")]
 pub mod parquet_export;
 
+#[cfg(feature = "training-export")]
+pub mod trajectory_ingest;
+
 /// One training example: a confirmed-track filter-state feature vector paired
 /// with the analytic ground-truth motion mode at that timestep.
 #[derive(Debug, Clone, PartialEq)]

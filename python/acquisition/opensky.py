@@ -191,16 +191,46 @@ def fetch_state_vectors(
             http.close()
 
 
+def fetch_current_states(
+    bbox: BoundingBox,
+    *,
+    credentials: tuple[str, str] | None = None,
+    client: httpx.Client | None = None,
+    retries: int = DEFAULT_RETRIES,
+    backoff_s: float = DEFAULT_BACKOFF_S,
+) -> list[TrajectoryRecord]:
+    """Fetch one *current* ``/states/all`` snapshot (no ``time`` parameter).
+
+    This is the only form anonymous access reliably supports: sending
+    ``time`` even slightly in the past can be rejected with HTTP 403
+    "Authenticate to get historical data" once a slow request makes the
+    caller's clock lag. Live pollers (``acquisition.opensky_cli``) MUST
+    use this instead of :func:`fetch_state_vectors`.
+    """
+    owns_client = client is None
+    http = client or httpx.Client(base_url=OPENSKY_BASE_URL, timeout=30.0, auth=credentials)
+    try:
+        payload = _fetch_one_snapshot(http, bbox, None, retries=retries, backoff_s=backoff_s)
+    finally:
+        if owns_client:
+            http.close()
+    states = payload.get("states") or []
+    payload_time = int(payload.get("time", time.time()))
+    records = (state_row_to_record(row, payload_time) for row in states)
+    return [rec for rec in records if rec is not None]
+
+
 def _fetch_one_snapshot(
     http: httpx.Client,
     bbox: BoundingBox,
-    timestamp_s: int,
+    timestamp_s: int | None,
     *,
     retries: int,
     backoff_s: float,
 ) -> dict[str, Any]:
     params = bbox.as_query_params()
-    params["time"] = str(timestamp_s)
+    if timestamp_s is not None:
+        params["time"] = str(timestamp_s)
     # Without extended=1 the API omits column 17 (aircraft category),
     # which feeds map_category / the thresh class labels downstream.
     params["extended"] = "1"
@@ -262,6 +292,4 @@ def _verify_sha256(path: Path, expected_hex: str) -> None:
             hasher.update(chunk)
     actual = hasher.hexdigest()
     if actual != expected_hex:
-        raise OpenSkyError(
-            f"checksum mismatch for {path}: expected {expected_hex}, got {actual}"
-        )
+        raise OpenSkyError(f"checksum mismatch for {path}: expected {expected_hex}, got {actual}")

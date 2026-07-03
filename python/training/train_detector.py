@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
 import torch
 from scipy.optimize import linear_sum_assignment
 from torch import nn
@@ -131,33 +132,50 @@ def train(
     d_model: int = 32,
     lr: float = 1e-3,
     seed: int = 42,
+    batch_size: int = 32,
+    device: str | None = None,
 ) -> tuple[DetectorModel, float]:
-    """Train the detector on ``samples``. Returns ``(model, final_loss)``."""
+    """Train the detector on ``samples`` with shuffled mini-batches.
+
+    Returns ``(model, mean_final_epoch_loss)``; the model is moved back to
+    CPU so export stays device-agnostic. The original scaffold ran one
+    full-batch step per epoch, which only works for the tiny checked-in
+    sample — real acquisition datasets need mini-batching.
+    """
+    resolved = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     torch.manual_seed(seed)
-    model = DetectorModel(d_model=d_model)
+    model = DetectorModel(d_model=d_model).to(resolved)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     point_clouds = torch.from_numpy(samples.point_clouds)
     n = len(samples)
+    rng = np.random.default_rng(seed)
 
     final_loss = 0.0
-    for _ in range(epochs):
+    for epoch in range(epochs):
         model.train()
-        all_boxes, all_scores, all_class_logits = model(point_clouds)
-        total = point_clouds.new_zeros(())
-        for i in range(n):
-            mask = samples.gt_valid[i]
-            gt_boxes = torch.from_numpy(samples.gt_boxes[i][mask]).float()
-            gt_classes = torch.from_numpy(samples.gt_classes[i][mask]).long()
-            total = total + set_prediction_loss(
-                all_boxes[i], all_scores[i], all_class_logits[i], gt_boxes, gt_classes
-            )
-        loss = total / max(n, 1)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        final_loss = float(loss.item())
+        order = rng.permutation(n)
+        epoch_loss = 0.0
+        for start in range(0, n, batch_size):
+            idx = order[start : start + batch_size]
+            batch_pcs = point_clouds[idx].to(resolved)
+            all_boxes, all_scores, all_class_logits = model(batch_pcs)
+            total = batch_pcs.new_zeros(())
+            for k, i in enumerate(idx):
+                mask = samples.gt_valid[i]
+                gt_boxes = torch.from_numpy(samples.gt_boxes[i][mask]).float().to(resolved)
+                gt_classes = torch.from_numpy(samples.gt_classes[i][mask]).long().to(resolved)
+                total = total + set_prediction_loss(
+                    all_boxes[k], all_scores[k], all_class_logits[k], gt_boxes, gt_classes
+                )
+            loss = total / max(len(idx), 1)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            epoch_loss += float(loss.item()) * len(idx)
+        final_loss = epoch_loss / max(n, 1)
+        print(f"epoch {epoch + 1}/{epochs}: loss {final_loss:.4f}", flush=True)
 
-    return model, final_loss
+    return model.cpu(), final_loss
 
 
 def main() -> None:
@@ -167,13 +185,27 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--d-model", type=int, default=64)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="torch device (default: cuda when available, else cpu)",
+    )
     args = parser.parse_args()
 
     samples = load_detector_samples(args.data)
     if len(samples) == 0:
         raise SystemExit(f"no detector samples in {args.data}")
 
-    model, final_loss = train(samples, epochs=args.epochs, d_model=args.d_model, seed=args.seed)
+    model, final_loss = train(
+        samples,
+        epochs=args.epochs,
+        d_model=args.d_model,
+        seed=args.seed,
+        batch_size=args.batch_size,
+        device=args.device,
+    )
     torch.save({"state_dict": model.state_dict(), "d_model": args.d_model}, args.out)
     print(f"trained on {len(samples)} snapshots; final loss = {final_loss:.4f}")
     print(f"saved checkpoint → {args.out}")
