@@ -44,7 +44,7 @@ impl std::error::Error for BridgeError {}
 #[cfg(feature = "stonesoup")]
 impl From<pyo3::PyErr> for BridgeError {
     fn from(err: pyo3::PyErr) -> Self {
-        let msg = pyo3::Python::with_gil(|_py| err.to_string());
+        let msg = pyo3::Python::attach(|_py| err.to_string());
         // Check for common import errors to provide better diagnostics.
         if msg.contains("ModuleNotFoundError") && msg.contains("stonesoup") {
             BridgeError::StoneSoupNotInstalled(msg)

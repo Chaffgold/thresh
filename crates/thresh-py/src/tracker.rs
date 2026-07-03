@@ -6,7 +6,7 @@ use thresh_core::track::TrackState;
 use thresh_tracker::tracker::MultiObjectTracker;
 
 /// Python-visible track state snapshot.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone, Debug)]
 pub struct PyTrackState {
     /// Track ID.
@@ -195,6 +195,6 @@ mod tests {
     #[test]
     #[ignore = "requires maturin develop + Python interpreter"]
     fn test_py_module_loads() {
-        // Would use pyo3::Python::with_gil to test module registration.
+        // Would use pyo3::Python::attach to test module registration.
     }
 }

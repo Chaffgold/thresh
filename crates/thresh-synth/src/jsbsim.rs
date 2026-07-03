@@ -220,7 +220,7 @@ impl JsbSimBridge {
     /// Create a new bridge, load the aircraft model and install the initial
     /// conditions.
     pub fn new(model: AircraftModel, ic: &InitialConditions) -> PyResult<Self> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let jsbsim_mod = py.import("jsbsim")?;
             let fdm_class = jsbsim_mod.getattr("FGFDMExec")?;
             let fdm = fdm_class.call0()?.unbind();
@@ -278,7 +278,7 @@ impl JsbSimBridge {
     /// Apply every autopilot waypoint whose `time_s <= time_s` that has not
     /// already been applied.
     pub fn apply_autopilot_at(&self, time_s: f64) -> PyResult<()> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let fdm = self.fdm.bind(py);
             let waypoints = self.waypoints.borrow();
             let mut idx = self.next_wp.borrow_mut();
@@ -336,7 +336,7 @@ impl JsbSimBridge {
     /// Advance the simulation by one integration step of size `dt_s` and
     /// return the resulting state.
     pub fn step(&self, dt_s: f64) -> PyResult<JsbSimState> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let fdm = self.fdm.bind(py);
             fdm.call_method1("set_property_value", ("simulation/dt", dt_s))?;
             fdm.call_method0("run")?;
@@ -352,7 +352,7 @@ impl JsbSimBridge {
         let mut next_out = 0.0_f64;
         let mut t = 0.0_f64;
         // Emit the initial state too.
-        Python::with_gil(|py| -> PyResult<()> {
+        Python::attach(|py| -> PyResult<()> {
             states.push(self.read_state(py)?);
             Ok(())
         })?;

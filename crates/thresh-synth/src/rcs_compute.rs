@@ -556,7 +556,7 @@ impl RcsComputeBridge {
 
     /// Load the STL file via PyPOFacets and return the facet count.
     pub fn load_geometry(&self) -> PyResult<usize> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let pofacets = py.import("pofacets")?;
             let model = pofacets.call_method1("load_stl", (self.stl_path.clone(),))?;
             let count: usize = model.getattr("num_facets")?.extract()?;
@@ -577,7 +577,7 @@ impl RcsComputeBridge {
         elevation_deg: f64,
         polarization: &str,
     ) -> PyResult<RcsSweepResult> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let pofacets = py.import("pofacets")?;
             let raw = pofacets.call_method1(
                 "monostatic_sweep",

@@ -83,7 +83,7 @@ impl PhdFilter {
     /// `detections` is a Python set of `Detection` objects.
     /// Returns the posterior Gaussian mixture intensity.
     pub fn filter(&self, prior: &Py<PyAny>, detections: &Py<PyAny>) -> BridgeResult<Py<PyAny>> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let result = self
                 .py_updater
                 .call_method1(py, "update", (prior.bind(py), detections.bind(py)))

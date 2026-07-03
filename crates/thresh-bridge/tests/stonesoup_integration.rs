@@ -12,7 +12,7 @@ use thresh_bridge::error::BridgeError;
 #[test]
 #[ignore]
 fn stonesoup_importable() {
-    pyo3::Python::with_gil(|py| {
+    pyo3::Python::attach(|py| {
         let result = py.import("stonesoup");
         match result {
             Ok(_) => {} // success
@@ -31,7 +31,7 @@ fn nalgebra_numpy_roundtrip() {
     use nalgebra::{DMatrix, DVector};
     use thresh_bridge::convert;
 
-    pyo3::Python::with_gil(|py| {
+    pyo3::Python::attach(|py| {
         // DVector round-trip
         let v = DVector::from_column_slice(&[1.0, 2.0, 3.0, 4.0]);
         let np_arr = convert::dvector_to_numpy(py, &v).expect("dvector_to_numpy");

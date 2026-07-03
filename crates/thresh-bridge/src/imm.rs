@@ -76,7 +76,7 @@ impl ImmFilter {
     /// `timestamp` is a Python datetime for the prediction target time.
     /// Returns the predicted state.
     pub fn predict(&self, prior: &Py<PyAny>, timestamp: &Py<PyAny>) -> BridgeResult<Py<PyAny>> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let result = self
                 .py_predictor
                 .call_method1(py, "predict", (prior.bind(py), timestamp.bind(py)))

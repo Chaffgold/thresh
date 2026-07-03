@@ -232,7 +232,7 @@ impl RadarScenePyBridge {
             ));
         }
 
-        Python::with_gil(|py| -> PyResult<Vec<RawDetection>> {
+        Python::attach(|py| -> PyResult<Vec<RawDetection>> {
             // Import radarsimpy submodules lazily so that a failure here
             // surfaces as a PyErr rather than a link error.
             let rsp = py.import("radarsimpy")?;
