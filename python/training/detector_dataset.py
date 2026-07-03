@@ -24,6 +24,16 @@ POINT_DIM = 4  # x, y, z, intensity
 MAX_BOXES = 100
 BOX_DIM = 7  # x, y, z, L, W, H, yaw
 NUM_CLASSES = 5
+SCENE_SCALE_M = 100_000.0
+"""Constant scene normalization scale (metres).
+
+Real ingested scenes span ±1e4 to 1e5 m (the synth clutter cube half-extent is
+100 km), which the detector cannot regress in raw units — the first real GPU
+run scored mAP 0.0 (design.md findings §4). The model consumes xyz divided by
+this scale and predicts normalized boxes; training scales ground truth to
+match and the export wrapper multiplies boxes back, so the Parquet dataset
+and the ONNX contract both stay in raw metres. Constant (not per-snapshot
+statistics) so the exported graph needs no data-dependent branches."""
 
 
 @dataclass

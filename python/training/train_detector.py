@@ -24,7 +24,7 @@ import torch
 from scipy.optimize import linear_sum_assignment
 from torch import nn
 
-from training.detector_dataset import DetectorSamples, load_detector_samples
+from training.detector_dataset import SCENE_SCALE_M, DetectorSamples, load_detector_samples
 from training.detector_model import DetectorModel
 
 # Explicit cost/loss weights (DETR balances box vs. class with named
@@ -163,6 +163,9 @@ def train(
             for k, i in enumerate(idx):
                 mask = samples.gt_valid[i]
                 gt_boxes = torch.from_numpy(samples.gt_boxes[i][mask]).float().to(resolved)
+                # The model predicts scene-normalized boxes (see SCENE_SCALE_M);
+                # supervise in the same space so the loss is unit-scale.
+                gt_boxes = torch.cat([gt_boxes[..., :6] / SCENE_SCALE_M, gt_boxes[..., 6:]], dim=-1)
                 gt_classes = torch.from_numpy(samples.gt_classes[i][mask]).long().to(resolved)
                 total = total + set_prediction_loss(
                     all_boxes[k], all_scores[k], all_class_logits[k], gt_boxes, gt_classes

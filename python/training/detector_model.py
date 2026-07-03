@@ -16,7 +16,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from training.detector_dataset import BOX_DIM, MAX_BOXES, NUM_CLASSES, POINT_DIM
+from training.detector_dataset import BOX_DIM, MAX_BOXES, NUM_CLASSES, POINT_DIM, SCENE_SCALE_M
 
 
 class DetectorModel(nn.Module):
@@ -44,7 +44,12 @@ class DetectorModel(nn.Module):
         self.class_head = nn.Linear(d_model, num_classes)
 
     def forward(self, point_cloud: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # point_cloud: (B, NUM_POINTS, point_dim)
+        # point_cloud: (B, NUM_POINTS, point_dim) in raw metres; xyz is scene-
+        # normalized here so the core learns unit-scale geometry, and the box
+        # head predicts in the same normalized space (see SCENE_SCALE_M).
+        point_cloud = torch.cat(
+            [point_cloud[..., :3] / SCENE_SCALE_M, point_cloud[..., 3:]], dim=-1
+        )
         memory = self.point_encoder(point_cloud)  # (B, NUM_POINTS, d_model)
         batch = point_cloud.shape[0]
         queries = self.query_embed.unsqueeze(0).expand(batch, -1, -1)  # (B, Q, d)
@@ -66,6 +71,9 @@ class DetectorExportWrapper(nn.Module):
 
     def forward(self, point_cloud: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         boxes, score_logits, class_logits = self.core(point_cloud)
+        # The core predicts scene-normalized boxes; the deployed contract is
+        # raw metres (centre + dims scale, yaw unchanged).
+        boxes = torch.cat([boxes[..., :6] * SCENE_SCALE_M, boxes[..., 6:]], dim=-1)
         scores = torch.sigmoid(score_logits)
         classes = class_logits.argmax(dim=-1, keepdim=True).to(torch.int64)
         return boxes, scores, classes
