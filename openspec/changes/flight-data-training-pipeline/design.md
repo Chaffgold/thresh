@@ -334,13 +334,34 @@ diagnostics; each version's diagnosis drove the next change:
   detector generalizes — but IoU@0.5 on a 10×10×5 m aircraft box needs
   ~1.5–2 m (a (2, 2, 1) m offset scores IoU 0.34), and at fixed Adam
   lr = 10⁻³ the loss plateaus on optimizer noise.
-- **v5 — cosine LR decay (run pending).** Annealing targets the precision
-  tail; physics allows ~1.25 m (16 returns at 5 m noise). In the same round,
-  `eval/detector_map.py` now mirrors the deployed Rust decode's
-  postprocessing (confidence ≥ 0.5, class-agnostic NMS at IoU 0.4 —
+- **v5 — cosine LR decay (200 epochs).** Annealing targeted the precision
+  tail on the theory that fixed-lr optimizer noise was the floor; physics
+  allows ~1.25 m/axis (16 returns at 5 m noise). In the same round,
+  `eval/detector_map.py` gained the deployed Rust decode's postprocessing
+  (confidence ≥ 0.5, class-agnostic NMS at IoU 0.4 —
   `thresh_inference::DetectorConfig` defaults) before scoring, since raw
   100-query output floods precision with duplicates deployment never emits.
+  **Result (2026-07-03 DGX run): mAP@0.5 = 0.044 — the ≥ 0.30 gate is
+  missed and the optimizer-noise hypothesis is refuted.** Loss fell
+  1.48 → 1.35 over 4× the epochs, but 3D centre error stayed at 3.59 m p50
+  (~1.6 m/axis, ~1.3× the physics bound); v4 at 50 epochs had scored 0.053.
+  Error structure: only 13% of nearest-neighbour matches clear IoU 0.5
+  (median nearest IoU 0.26); 558/5,752 snapshots emit nothing past the 0.5
+  confidence gate; the dims head sits exactly on the 10×10×5 m prior (GT
+  mean 10.5×10.5×5.1 m — harmless, ~0.89 IoU ceiling); class accuracy on
+  matched boxes is 0.985.
 
-The v5 run decides 7.9: mAP@0.5 ≥ 0.30 on the London holdout flips 8.4 (swap
-the trained checkpoint); anything less lands as incremental evidence per
-Decision 11's escape hatch and iteration continues.
+Verdict: 7.9 stays open and this branch lands as incremental evidence per
+Decision 11's escape hatch. The v5 diagnosis shifts the bottleneck from
+optimization to **data and criterion**: (a) localization sits near the
+sensor physics floor — at 16 returns / 5 m noise, IoU@0.5 on a 10×10×5 m
+box demands sub-noise-floor precision, so denser returns (synth radar
+config) or multi-frame accumulation are the levers, not LR schedules;
+(b) the holdout GT is 97.7% class 4 (5,075/5,194 boxes; class 0: 32,
+class 1: 87 — anonymous-quota OpenSky rarely carries an ADS-B category),
+so class-averaged mAP is literally AP₄/3 = 0.044 here, and even a perfect
+common-class detector caps at ~0.33 while the rare classes stay empty.
+Richer captures (findings §1's authenticated-account blocker now binds
+Track A too) or a criterion revisit (distance-gated matching à la nuScenes
+instead of IoU@0.5, or mAP weighted by class support) are the candidate
+follow-ons — the latter is Decision territory, not a training change.
