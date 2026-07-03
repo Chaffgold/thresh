@@ -89,6 +89,9 @@ class TestCaptureAgainstMockTransport:
     def _mock_client(self, calls: list[int]) -> httpx.Client:
         def handler(request: httpx.Request) -> httpx.Response:
             calls.append(int(request.url.params["time"]))
+            # Guards the extended=1 fix: without it the API omits the
+            # aircraft-category column that map_category consumes.
+            assert request.url.params["extended"] == "1"
             payload: dict[str, Any] = {"time": FIXTURE_TIME, "states": [FIXTURE_STATE_ROW]}
             return httpx.Response(200, content=json.dumps(payload))
 

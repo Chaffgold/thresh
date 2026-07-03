@@ -42,7 +42,10 @@ from acquisition.opensky import (
 from acquisition.schema import TrajectoryRecord
 from acquisition.storage import records_to_table
 
-DEFAULT_OUT = Path("../test-data/trajectories/opensky-sample.parquet")
+DEFAULT_OUT = (
+    Path(__file__).resolve().parents[2] / "test-data" / "trajectories" / "opensky-sample.parquet"
+)
+"""Anchored to the repo layout, not the caller's CWD."""
 SAMPLE_BUDGET_BYTES = 5 * 1024 * 1024
 """Design Decision 7: checked-in samples stay under 5 MB."""
 
