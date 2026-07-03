@@ -67,8 +67,7 @@ def verify(onnx_path: Path, *, batch: int = 2) -> None:
     assert (scores >= 0.0).all() and (scores <= 1.0).all(), "scores must be in [0, 1]"
     assert (classes >= 0).all() and (classes < NUM_CLASSES).all(), "classes in [0, NUM_CLASSES)"
     print(
-        f"verified {onnx_path}: boxes {boxes.shape}, scores in [0,1], "
-        f"classes in [0,{NUM_CLASSES})"
+        f"verified {onnx_path}: boxes {boxes.shape}, scores in [0,1], classes in [0,{NUM_CLASSES})"
     )
 
 

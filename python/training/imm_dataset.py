@@ -122,9 +122,7 @@ def trajectory_split(
     rng.shuffle(shuffled)
     n_train = max(1, round(len(shuffled) * train_fraction))
     train_trajs = set(shuffled[:n_train].tolist())
-    train_mask = np.array(
-        [tid in train_trajs for tid in windows.trajectory_ids], dtype=bool
-    )
+    train_mask = np.array([tid in train_trajs for tid in windows.trajectory_ids], dtype=bool)
     train_idx = np.nonzero(train_mask)[0]
     test_idx = np.nonzero(~train_mask)[0]
     return train_idx, test_idx
