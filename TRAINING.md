@@ -72,6 +72,18 @@ from acquisition.opensky import load_zenodo_dump
 records = list(load_zenodo_dump("opensky-traffic-2024.parquet", sha256="abc..."))
 ```
 
+For a quick live capture into a single canonical-schema Parquet file (this is
+how the checked-in `test-data/trajectories/opensky-sample.parquet` CI dry-run
+sample was produced — provenance in `test-data/trajectories/README.md`):
+
+```sh
+uv run python -m acquisition.opensky_cli --bbox 49.0 51.0 7.0 10.0 --duration-s 300
+```
+
+Anonymous access always returns the *current* snapshot, so the CLI paces
+itself against the wall clock (one poll per `--poll-interval-s`, default 10 s)
+and dedups on `(icao24, timestamp_us)`.
+
 ### ADS-B Exchange v2 (live, edge cases, military targets)
 
 ADSBx requires an API key (RapidAPI marketplace listing or a direct ADSBx subscription). The acquisition layer supplies the key via the `x-rapidapi-key` header.

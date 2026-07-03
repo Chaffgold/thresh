@@ -18,7 +18,7 @@
 - [x] 2.4 Implement track stitching. _`stitch_tracks` yields `Track` records with stable IDs of the form `{icao24}-{first_timestamp_iso}`._
 - [x] 2.5 Implement Parquet writer with one file per day, partitioned by source and airport region. _`storage.write_partition` writes at `<root>/source=<src>/date=YYYY-MM-DD/trajectories.parquet` and enforces per-icao monotonicity. Airport-region sub-partitioning is deferred to Phase 3 (ADSBx poller introduces per-airport directories)._
 - [x] 2.6 Add a unit test that round-trips a tiny synthetic state-vector stream through the schema and stitching. _46 unit tests across schema / stitching / storage / opensky; full round-trip in `test_storage.TestRoundTrip`._
-- [ ] 2.7 Check in a small (< 5 MB) OpenSky-derived sample under `test-data/trajectories/opensky-sample.parquet` for CI dry-runs. _Deferred: requires a live OpenSky fetch, which is not available in the implementation sandbox. To be filled in by a contributor with network access — `uv run python -m acquisition.opensky_cli --bbox … --time …` (small CLI to be added)._
+- [x] 2.7 Check in a small (< 5 MB) OpenSky-derived sample under `test-data/trajectories/opensky-sample.parquet` for CI dry-runs. _Done 2026-07-03: `acquisition/opensky_cli.py` added (live wall-clock pacing over `/states/all`, dedup on `(icao24, timestamp_us)`, flat canonical-schema Parquet); sample captured over the Frankfurt area during the European morning departure wave; provenance + OpenSky attribution in `test-data/trajectories/README.md`; validated by `tests/test_opensky_sample.py` in the `python-training-tree` CI lane._
 
 ## 3. Acquisition layer — ADS-B Exchange v2
 
