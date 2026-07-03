@@ -85,6 +85,69 @@ impl Default for IngestConfig {
     }
 }
 
+/// Shared CLI surface for the two dataset-generation binaries:
+/// `gen-* [OUT] [--trajectories CANONICAL.parquet] [--sample-rate-hz F]`.
+#[derive(Debug, Clone)]
+pub struct GenArgs {
+    /// Output Parquet path.
+    pub out: std::path::PathBuf,
+    /// Canonical acquisition trajectories (real-data mode when present).
+    pub trajectories: Option<std::path::PathBuf>,
+    /// Synth grid rate for the real-data mode.
+    pub sample_rate_hz: f64,
+}
+
+impl GenArgs {
+    /// Parse `std::env::args()` with per-binary defaults.
+    pub fn parse(default_out: &str, default_sample_rate_hz: f64) -> Self {
+        let mut parsed = Self {
+            out: std::path::PathBuf::from(default_out),
+            trajectories: None,
+            sample_rate_hz: default_sample_rate_hz,
+        };
+        let mut args = std::env::args().skip(1);
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "--trajectories" => {
+                    parsed.trajectories = args.next().map(std::path::PathBuf::from);
+                }
+                "--sample-rate-hz" => {
+                    parsed.sample_rate_hz = args
+                        .next()
+                        .and_then(|v| v.parse().ok())
+                        .expect("--sample-rate-hz needs a positive number");
+                }
+                other => parsed.out = std::path::PathBuf::from(other),
+            }
+        }
+        parsed
+    }
+}
+
+/// Run `generate` once per ingested track (trajectory_id = index), skipping
+/// degenerate tracks with a warning instead of aborting the whole dataset —
+/// one unluckily-shaped segment must not kill an hours-long generation run.
+pub fn generate_per_track<T, E: std::fmt::Display>(
+    tracks: &[IngestedTrack],
+    mut generate: impl FnMut(u32, &IngestedTrack) -> Result<Vec<T>, E>,
+) -> Vec<T> {
+    let mut samples = Vec::new();
+    let mut skipped = 0usize;
+    for (index, track) in tracks.iter().enumerate() {
+        match generate(index as u32, track) {
+            Ok(track_samples) => samples.extend(track_samples),
+            Err(err) => {
+                skipped += 1;
+                eprintln!("skipping {}#{}: {err}", track.icao24, track.segment);
+            }
+        }
+    }
+    if skipped > 0 {
+        eprintln!("skipped {skipped}/{} track segments", tracks.len());
+    }
+    samples
+}
+
 /// Map an ADS-B emitter category to the thresh class index.
 ///
 /// Mirrors `python/acquisition/schema.py::_CATEGORY_MAP` +

@@ -14,13 +14,13 @@
 //! compression). The full dataset over real acquisition trajectories is wired
 //! up alongside the real training run (task 7.5).
 
-use std::path::PathBuf;
-
 use thresh::synth::radar_trajectory::{TargetTrack, TrajectoryRadarConfig};
 use thresh::synth::trajectory::{Segment, SegmentType, Trajectory};
 use thresh::training::detector::{DetectorSample, generate_detector_samples};
 use thresh::training::parquet_export::write_detector_samples_parquet;
-use thresh::training::trajectory_ingest::{IngestConfig, ingest_trajectories};
+use thresh::training::trajectory_ingest::{
+    GenArgs, IngestConfig, generate_per_track, ingest_trajectories,
+};
 
 const DEFAULT_OUT: &str = "test-data/training/detector/detector-samples.parquet";
 
@@ -43,31 +43,7 @@ fn cv_target(target_id: u32, pos: [f64; 3], vel: [f64; 3], class_id: u32) -> Tar
     }
 }
 
-/// `gen-detector-dataset [OUT] [--trajectories CANONICAL.parquet] [--sample-rate-hz F]`
-fn parse_args() -> (PathBuf, Option<PathBuf>, f64) {
-    let mut out = PathBuf::from(DEFAULT_OUT);
-    let mut trajectories = None;
-    // Real-data default: one snapshot every 5 s bounds the dataset size while
-    // still yielding hundreds of snapshots per captured track.
-    let mut sample_rate_hz = 0.2;
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--trajectories" => trajectories = args.next().map(PathBuf::from),
-            "--sample-rate-hz" => {
-                sample_rate_hz = args
-                    .next()
-                    .and_then(|v| v.parse().ok())
-                    .expect("--sample-rate-hz needs a positive number");
-            }
-            other => out = PathBuf::from(other),
-        }
-    }
-    (out, trajectories, sample_rate_hz)
-}
-
 /// Real-data mode: one single-target scene per ingested acquisition track.
-/// Degenerate tracks (synth errors) are skipped with a warning, not fatal.
 fn samples_from_acquisition(
     traj_path: &std::path::Path,
     sample_rate_hz: f64,
@@ -86,48 +62,37 @@ fn samples_from_acquisition(
         tracks.len(),
         traj_path.display()
     );
-
-    let mut samples = Vec::new();
-    let mut skipped = 0usize;
-    for (index, track) in tracks.iter().enumerate() {
-        let trajectory_id = index as u32;
+    Ok(generate_per_track(&tracks, |trajectory_id, track| {
         let target = TargetTrack {
             waypoints: track.waypoints.clone(),
             class_id: track.class_id,
             size_override: None,
         };
-        match generate_detector_samples(
+        generate_detector_samples(
             trajectory_id,
             std::slice::from_ref(&target),
             &config,
             2_000 + trajectory_id as u64,
-        ) {
-            Ok(track_samples) => samples.extend(track_samples),
-            Err(err) => {
-                skipped += 1;
-                eprintln!("skipping {}#{}: {err}", track.icao24, track.segment);
-            }
-        }
-    }
-    if skipped > 0 {
-        eprintln!("skipped {skipped}/{} track segments", tracks.len());
-    }
-    Ok(samples)
+        )
+    }))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (out, trajectories, sample_rate_hz) = parse_args();
+    // Real-data default: one snapshot every 5 s bounds the dataset size while
+    // still yielding hundreds of snapshots per captured track.
+    let args = GenArgs::parse(DEFAULT_OUT, 0.2);
 
-    if let Some(traj_path) = &trajectories {
-        let samples = samples_from_acquisition(traj_path, sample_rate_hz)?;
-        write_detector_samples_parquet(&samples, &out)?;
+    if let Some(traj_path) = &args.trajectories {
+        let samples = samples_from_acquisition(traj_path, args.sample_rate_hz)?;
+        write_detector_samples_parquet(&samples, &args.out)?;
         println!(
             "wrote {} detector samples to {}",
             samples.len(),
-            out.display()
+            args.out.display()
         );
         return Ok(());
     }
+    let out = args.out;
 
     // Low sample rate + short scenes keep the committed sample tiny.
     let config = TrajectoryRadarConfig {
