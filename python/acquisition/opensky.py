@@ -201,6 +201,9 @@ def _fetch_one_snapshot(
 ) -> dict[str, Any]:
     params = bbox.as_query_params()
     params["time"] = str(timestamp_s)
+    # Without extended=1 the API omits column 17 (aircraft category),
+    # which feeds map_category / the thresh class labels downstream.
+    params["extended"] = "1"
     last_error: Exception | None = None
     for attempt in range(retries + 1):
         try:
