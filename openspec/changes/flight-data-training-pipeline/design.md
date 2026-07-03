@@ -245,3 +245,57 @@ As of this change, **Phases 1–10 are implemented**; the two learned tracks are
 - **Python synth binding** (task 4.6). The Rust→Parquet bridge covers training-data generation; a direct PyO3 synth binding was not needed and stays deferred.
 
 None of these block the rest of the framework: every learned feature is opt-in and off by default, and the classical pipeline is unaffected.
+
+## Findings from the first real GPU runs (2026-07-03, DGX Spark GB10)
+
+The deferred real-data runs (6.8 / 7.5 / 7.9) were executed on live OpenSky
+captures. The **pipeline is proven end-to-end** — acquisition → canonical
+Parquet → Rust trajectory ingestion (`thresh::training::trajectory_ingest`,
+new) → `gen-imm-dataset`/`gen-detector-dataset --trajectories` → GPU training →
+ONNX export → holdout metrics → `eval-tracker` MOTA A/B — but **neither
+trained checkpoint met its swap criterion**, so 8.4/8.5 stay deferred and the
+committed models remain stubs. Findings, most load-bearing first:
+
+1. **Anonymous OpenSky quota is the binding constraint.** In practice ~55
+   bbox polls/day/IP (not the documented 400 credits), yielding ~23 min of
+   airspace across two regions (Frankfurt train: 7.2k records/~180 aircraft;
+   London holdout: 3.4k records/201 aircraft). Cruise-dominated: the analytic
+   labels are 92.9% `cv`, 6.9% `ca`, 0.17% `ctrv`, 0.06% `coord_turn`. A turn
+   classifier cannot be trained from data that contains no turns. **Next
+   step:** an authenticated OpenSky account (4k–8k credits/day + historical
+   API) and captures over terminal areas.
+
+2. **Track B (IMM classifier): accuracy gate passes, MOTA gate fails.** Six
+   candidates were swept ({real 1 Hz, mixed real+synth, real 10 Hz} ×
+   {unweighted, class-balanced CE}). Best held-out accuracies 0.905/0.768
+   (≥ 0.70 ✅). Feature standardization **baked into the exported graph**
+   (new in `SoftmaxClassifier`; the Rust adapter contract is unchanged) was
+   decisive: with it, the balanced 1 Hz candidate matches the analytic
+   baseline MOTA *exactly* on both cruise scenarios (0.9037/0.8937) with
+   ~3× better MOTP (5.9 m vs 20.6 m) — evidence the learned path adds value
+   in-distribution. Every candidate fails the `maneuvering` scenario
+   (best 0.10 vs analytic 0.890 at 1 Hz real; mixing regimes without a dt
+   feature poisons both regimes, cruise MOTA going negative).
+
+3. **The 12-dim feature vector is not sample-rate invariant.** Windows at
+   1 Hz (real, 10 s cadence upsampled) and 10 Hz (harness) encode different
+   physics for identical labels; a single GRU cannot serve both. Candidate
+   fixes for the follow-on: add dt (or dt-normalized deltas) to the feature
+   projection, or commit the deployment sample rate and train only there —
+   with real turning traffic (finding 1) so the regime is learnable at all.
+
+4. **Track A (detector): mAP@0.5 = 0.0 — the scaffold cannot regress real
+   ENU scales.** Training loss plateaued (~1000) by epoch 18/50; zero box
+   matches on 5,752 holdout snapshots. Root cause mirrors Track B: the
+   3DETR-style scaffold regresses raw coordinates and was smoke-tested on
+   ±5 km synthetic scenes, while real ingested scenes span ±10⁴–10⁵ m.
+   Fix for the follow-on: per-snapshot scene normalization (center/scale by
+   the input cloud) applied symmetrically at train and inside the exported
+   graph, keeping the Rust decode contract in raw metres.
+
+Per Decision 11's escape hatch (iterate or abandon without blocking), the
+checkpoint swaps wait for the follow-on: authenticated data acquisition, a
+dt-aware or single-regime Track B retrain, and scene normalization for
+Track A. All infrastructure from this run (ingestion, capture robustness,
+GPU training support, `eval/detector_map.py`, `eval/imm_accuracy.py`,
+balanced-loss + normalized-export training) is landed and reusable.
