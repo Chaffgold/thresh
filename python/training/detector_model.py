@@ -43,9 +43,7 @@ class DetectorModel(nn.Module):
         self.score_head = nn.Linear(d_model, 1)
         self.class_head = nn.Linear(d_model, num_classes)
 
-    def forward(
-        self, point_cloud: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, point_cloud: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # point_cloud: (B, NUM_POINTS, point_dim)
         memory = self.point_encoder(point_cloud)  # (B, NUM_POINTS, d_model)
         batch = point_cloud.shape[0]
@@ -66,9 +64,7 @@ class DetectorExportWrapper(nn.Module):
         super().__init__()
         self.core = core
 
-    def forward(
-        self, point_cloud: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, point_cloud: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         boxes, score_logits, class_logits = self.core(point_cloud)
         scores = torch.sigmoid(score_logits)
         classes = class_logits.argmax(dim=-1, keepdim=True).to(torch.int64)

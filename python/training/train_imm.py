@@ -75,6 +75,15 @@ def train(
     x_train, y_train = x[train_idx].to(resolved), y[train_idx].to(resolved)
     x_test, y_test = x[test_idx].to(resolved), y[test_idx].to(resolved)
 
+    # Standardize features from the training set; the stats ride along in the
+    # checkpoint and are baked into the exported graph (SoftmaxClassifier), so
+    # the deployed contract still takes raw filter-state features.
+    feature_mean = x_train.reshape(-1, x_train.shape[-1]).mean(dim=0)
+    feature_std = x_train.reshape(-1, x_train.shape[-1]).std(dim=0).clamp(min=1e-6)
+    x_train = (x_train - feature_mean) / feature_std
+    if x_test.shape[0]:
+        x_test = (x_test - feature_mean) / feature_std
+
     model = ImmModeClassifier(hidden_dim=hidden_dim).to(resolved)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     if balanced:
@@ -118,7 +127,12 @@ def train(
         x_test if test_idx.size else x_train,
         y_test if test_idx.size else y_train,
     )
-    return model.cpu(), best_acc
+    model = model.cpu()
+    # Plain attributes (not buffers): saved alongside the state dict by main()
+    # and consumed by export_imm to bake normalization into the ONNX graph.
+    model.feature_mean = feature_mean.cpu()
+    model.feature_std = feature_std.cpu()
+    return model, best_acc
 
 
 def main() -> None:
@@ -162,7 +176,15 @@ def main() -> None:
         balanced=args.balanced,
         balance_power=args.balance_power,
     )
-    torch.save({"state_dict": model.state_dict(), "hidden_dim": args.hidden_dim}, args.out)
+    torch.save(
+        {
+            "state_dict": model.state_dict(),
+            "hidden_dim": args.hidden_dim,
+            "feature_mean": getattr(model, "feature_mean", None),
+            "feature_std": getattr(model, "feature_std", None),
+        },
+        args.out,
+    )
     print(f"trained on {len(windows)} windows; best held-out accuracy = {best_acc:.3f}")
     print(f"saved checkpoint → {args.out}")
     # Exit criterion 6.8 (first bullet): held-out accuracy ≥ 0.70.

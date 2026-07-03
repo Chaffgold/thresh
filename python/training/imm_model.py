@@ -49,11 +49,27 @@ class ImmModeClassifier(nn.Module):
 
 class SoftmaxClassifier(nn.Module):
     """Inference wrapper that softmaxes the core model's logits, so the exported
-    ONNX graph emits a probability distribution that sums to 1 per row."""
+    ONNX graph emits a probability distribution that sums to 1 per row.
 
-    def __init__(self, core: ImmModeClassifier) -> None:
+    Optionally standardizes features inside the graph (fixed mean/std buffers
+    exported as ONNX constants): the Rust ``ImmModeAdapter`` keeps feeding raw
+    ``project_filter_state`` outputs, while the core sees the standardized
+    distribution it was trained on — raw filter-state scales span orders of
+    magnitude and wreck out-of-distribution robustness otherwise."""
+
+    def __init__(
+        self,
+        core: ImmModeClassifier,
+        feature_mean: torch.Tensor | None = None,
+        feature_std: torch.Tensor | None = None,
+    ) -> None:
         super().__init__()
         self.core = core
+        mean = torch.zeros(FEATURE_DIM) if feature_mean is None else feature_mean.float()
+        std = torch.ones(FEATURE_DIM) if feature_std is None else feature_std.float()
+        self.register_buffer("feature_mean", mean)
+        self.register_buffer("feature_std", std.clamp(min=1e-6))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = (x - self.feature_mean) / self.feature_std
         return torch.softmax(self.core(x), dim=1)

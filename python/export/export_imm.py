@@ -32,7 +32,9 @@ def export(checkpoint: Path, out_path: Path, *, opset: int = 17) -> None:
     core = ImmModeClassifier(hidden_dim=int(ckpt.get("hidden_dim", 64)))
     core.load_state_dict(ckpt["state_dict"])
     core.eval()
-    model = SoftmaxClassifier(core)
+    # Bake the training-set feature standardization (when present) into the
+    # graph so the Rust adapter keeps feeding raw filter-state features.
+    model = SoftmaxClassifier(core, ckpt.get("feature_mean"), ckpt.get("feature_std"))
     model.eval()
 
     dummy = torch.zeros(1, WINDOW_LEN, FEATURE_DIM, dtype=torch.float32)

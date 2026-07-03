@@ -61,17 +61,13 @@ def load_detector_samples(path: Path | str) -> DetectorSamples:
         rows = cols[column]
         arr = np.asarray([list(r) for r in rows], dtype=dtype)
         if arr.shape != (n, width):
-            raise ValueError(
-                f"column {column!r} has shape {arr.shape}, expected {(n, width)}"
-            )
+            raise ValueError(f"column {column!r} has shape {arr.shape}, expected {(n, width)}")
         return arr
 
     point_clouds = _stack("point_cloud", NUM_POINTS * POINT_DIM, np.float32).reshape(
         n, NUM_POINTS, POINT_DIM
     )
-    gt_boxes = _stack("gt_boxes", MAX_BOXES * BOX_DIM, np.float32).reshape(
-        n, MAX_BOXES, BOX_DIM
-    )
+    gt_boxes = _stack("gt_boxes", MAX_BOXES * BOX_DIM, np.float32).reshape(n, MAX_BOXES, BOX_DIM)
     gt_valid = _stack("gt_valid", MAX_BOXES, np.bool_)
     gt_classes = _stack("gt_classes", MAX_BOXES, np.int64)
     trajectory_ids = np.asarray(cols["trajectory_id"], dtype=np.uint32)
