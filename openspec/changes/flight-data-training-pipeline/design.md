@@ -296,6 +296,51 @@ committed models remain stubs. Findings, most load-bearing first:
 Per Decision 11's escape hatch (iterate or abandon without blocking), the
 checkpoint swaps wait for the follow-on: authenticated data acquisition, a
 dt-aware or single-regime Track B retrain, and scene normalization for
-Track A. All infrastructure from this run (ingestion, capture robustness,
-GPU training support, `eval/detector_map.py`, `eval/imm_accuracy.py`,
-balanced-loss + normalized-export training) is landed and reusable.
+Track A (since implemented — next section). All infrastructure from this run
+(ingestion, capture robustness, GPU training support, `eval/detector_map.py`,
+`eval/imm_accuracy.py`, balanced-loss + normalized-export training) is landed
+and reusable.
+
+## Track A follow-on: scene normalization + box-head iteration (2026-07-03)
+
+Findings §4's fix was implemented and iterated against per-round DGX holdout
+diagnostics; each version's diagnosis drove the next change:
+
+- **v2 — constant scene normalization.** One deliberate divergence from §4's
+  prescription: a *constant* `SCENE_SCALE_M` (100 km, the synth clutter cube
+  half-extent) instead of per-snapshot statistics, so the exported graph has
+  no data-dependent branches. Normalization happens inside
+  `DetectorModel.forward`, training supervises boxes in the same normalized
+  space, and `DetectorExportWrapper` scales centres/dims back to raw metres —
+  the Parquet dataset and the ONNX/Rust decode contract are unchanged.
+  Result: the loss finally learns (plateau ~1000 → 0.95) but holdout mAP
+  stayed 0.0 — the IoU term saturates because an aircraft box is ~5×10⁻⁴ of
+  the normalized scene, and a decoder embedding cannot regress absolute
+  position to the ~25 m accuracy IoU@0.5 demands.
+- **v3 — 3DETR-style attention-weighted centres.** Each query's (averaged)
+  cross-attention distribution weights the input xyz, and the box head
+  refines with a small offset plus dims and yaw; the attention-weights path
+  survives ONNX export (smoke-verified on the DGX). Diagnosis: centres land
+  within ~460 m of targets 5–10 km out — localization works — but predicted
+  dims were negative garbage, and box-loss terms at 10⁻³ normalized were
+  invisible next to the saturated IoU and CE losses (zero gradient pressure
+  below ~500 m).
+- **v4 — box-prior loss units.** Centre-refinement offsets bounded to a
+  500 m scale (the measured gap); dims predicted as 10 m-prior × exp(head),
+  positive and O(prior); L1 expressed in box-prior units (centres per 100 m,
+  dims per 10 m) so errors are O(1) exactly when box-sized; matcher cost =
+  centre distance in prior units (assignment is about *where*, not shape).
+  Diagnosis: holdout centre error 3.6 m median, identical to train — the
+  detector generalizes — but IoU@0.5 on a 10×10×5 m aircraft box needs
+  ~1.5–2 m (a (2, 2, 1) m offset scores IoU 0.34), and at fixed Adam
+  lr = 10⁻³ the loss plateaus on optimizer noise.
+- **v5 — cosine LR decay (run pending).** Annealing targets the precision
+  tail; physics allows ~1.25 m (16 returns at 5 m noise). In the same round,
+  `eval/detector_map.py` now mirrors the deployed Rust decode's
+  postprocessing (confidence ≥ 0.5, class-agnostic NMS at IoU 0.4 —
+  `thresh_inference::DetectorConfig` defaults) before scoring, since raw
+  100-query output floods precision with duplicates deployment never emits.
+
+The v5 run decides 7.9: mAP@0.5 ≥ 0.30 on the London holdout flips 8.4 (swap
+the trained checkpoint); anything less lands as incremental evidence per
+Decision 11's escape hatch and iteration continues.

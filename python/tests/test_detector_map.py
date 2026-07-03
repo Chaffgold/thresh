@@ -1,8 +1,9 @@
 """Unit tests for the detector holdout evaluator (task 7.9 metrics).
 
-Torch- and onnxruntime-free: exercises the pure-numpy IoU / AP / matching /
-aggregation pieces with hand-built detections, so it runs in the default CI
-lane. The ONNX inference path is exercised by the real evaluation run.
+Torch- and onnxruntime-free: exercises the pure-numpy IoU / AP / postprocess /
+matching / aggregation pieces with hand-built detections, so it runs in the
+default CI lane. The ONNX inference path is exercised by the real evaluation
+run.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from eval.detector_map import (
     average_precision,
     evaluate,
     iou_3d_axis_aligned,
+    postprocess,
 )
 from training.detector_dataset import DetectorSamples
 
@@ -52,6 +54,61 @@ class TestAveragePrecision:
 
     def test_no_gt_is_nan(self) -> None:
         assert np.isnan(average_precision(np.array([]), np.array([]), total_gt=0))
+
+
+def _detections(
+    boxes: list[list[float]], scores: list[float], classes: list[int]
+) -> dict[str, np.ndarray]:
+    return {
+        "boxes": np.array(boxes),
+        "scores": np.array(scores),
+        "classes": np.array(classes, dtype=np.int64),
+    }
+
+
+class TestPostprocess:
+    def test_confidence_filter_drops_low_scores(self) -> None:
+        det = _detections([_box(0.0, 0.0, 0.0), _box(10.0, 0.0, 0.0)], [0.9, 0.4], [1, 2])
+        out = postprocess(det, score_threshold=0.5, nms_iou=0.4)
+        assert out["boxes"].shape == (1, 7)
+        assert out["classes"].tolist() == [1]
+
+    def test_nms_suppresses_near_duplicates(self) -> None:
+        # Boxes 1 and 2 nearly coincide (IoU ≈ 0.9 > 0.4): only the higher
+        # score survives; the distant third box is untouched.
+        det = _detections(
+            [_box(0.0, 0.0, 0.0), _box(0.1, 0.0, 0.0), _box(50.0, 0.0, 0.0)],
+            [0.8, 0.9, 0.6],
+            [1, 2, 3],
+        )
+        out = postprocess(det, score_threshold=0.5, nms_iou=0.4)
+        assert out["scores"].tolist() == [0.9, 0.6]
+        assert out["classes"].tolist() == [2, 3]
+
+    def test_nms_is_class_agnostic(self) -> None:
+        # Coincident boxes with different classes still suppress each other,
+        # mirroring the Rust decode.
+        det = _detections([_box(0.0, 0.0, 0.0), _box(0.0, 0.0, 0.0)], [0.9, 0.8], [1, 2])
+        out = postprocess(det, score_threshold=0.5, nms_iou=0.4)
+        assert out["boxes"].shape[0] == 1
+        assert out["classes"].tolist() == [1]
+
+    def test_empty_when_all_below_threshold(self) -> None:
+        det = _detections([_box(0.0, 0.0, 0.0)], [0.3], [1])
+        out = postprocess(det, score_threshold=0.5, nms_iou=0.4)
+        assert out["boxes"].shape[0] == 0
+        assert out["scores"].shape[0] == 0
+        assert out["classes"].shape[0] == 0
+
+    def test_output_sorted_by_descending_score(self) -> None:
+        det = _detections(
+            [_box(0.0, 0.0, 0.0), _box(50.0, 0.0, 0.0), _box(100.0, 0.0, 0.0)],
+            [0.6, 0.9, 0.7],
+            [1, 2, 3],
+        )
+        out = postprocess(det, score_threshold=0.5, nms_iou=0.4)
+        assert out["scores"].tolist() == [0.9, 0.7, 0.6]
+        assert out["classes"].tolist() == [2, 3, 1]
 
 
 def _samples_one_snapshot(gt_centres: list[list[float]], classes: list[int]) -> DetectorSamples:
