@@ -161,6 +161,10 @@ def train(
     torch.manual_seed(seed)
     model = DetectorModel(d_model=d_model).to(resolved)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    # Cosine decay to ~0: at a fixed 1e-3 the loss plateaus on optimizer
+    # noise (~3.6 m centre error) while IoU@0.5 on aircraft-sized boxes
+    # needs ~1.5-2 m — the tail of training must anneal.
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     point_clouds = torch.from_numpy(samples.point_clouds)
     n = len(samples)
     rng = np.random.default_rng(seed)
@@ -190,6 +194,7 @@ def train(
             loss.backward()
             optimizer.step()
             epoch_loss += float(loss.item()) * len(idx)
+        scheduler.step()
         final_loss = epoch_loss / max(n, 1)
         print(f"epoch {epoch + 1}/{epochs}: loss {final_loss:.4f}", flush=True)
 

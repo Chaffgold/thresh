@@ -71,6 +71,26 @@ def run_onnx(model_path: Path, point_clouds: np.ndarray) -> list[dict[str, np.nd
     return detections
 
 
+def postprocess(
+    det: dict[str, np.ndarray], *, score_threshold: float, nms_iou: float
+) -> dict[str, np.ndarray]:
+    """Confidence filter + class-agnostic greedy NMS, mirroring the deployed
+    Rust decode (`thresh_inference::DetectorConfig`: confidence 0.5, NMS IoU
+    0.4). Raw query outputs are 100 near-duplicates per snapshot; evaluating
+    them directly floods precision with false positives that deployment
+    never emits."""
+    keep = det["scores"] >= score_threshold
+    boxes, scores, classes = det["boxes"][keep], det["scores"][keep], det["classes"][keep]
+    order = np.argsort(-scores)
+    boxes, scores, classes = boxes[order], scores[order], classes[order]
+    kept: list[int] = []
+    for i in range(boxes.shape[0]):
+        if all(float(iou_3d_axis_aligned(boxes[i : i + 1], boxes[j])[0]) < nms_iou for j in kept):
+            kept.append(i)
+    idx = np.array(kept, dtype=np.int64)
+    return {"boxes": boxes[idx], "scores": scores[idx], "classes": classes[idx]}
+
+
 def average_precision(
     matched_flags: np.ndarray,
     scores: np.ndarray,
@@ -179,13 +199,30 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Detector holdout mAP@0.5 (task 7.9).")
     parser.add_argument("--data", required=True, type=Path, help="holdout detector-samples Parquet")
     parser.add_argument("--model", required=True, type=Path, help="detector ONNX path")
+    parser.add_argument(
+        "--score-threshold",
+        type=float,
+        default=0.5,
+        help="confidence filter, matching the Rust DetectorConfig default (0.5)",
+    )
+    parser.add_argument(
+        "--nms-iou",
+        type=float,
+        default=0.4,
+        help="class-agnostic NMS IoU, matching the Rust DetectorConfig default (0.4)",
+    )
     args = parser.parse_args()
 
     samples = load_detector_samples(args.data)
     if len(samples) == 0:
         raise SystemExit(f"no detector samples in {args.data}")
-    detections = run_onnx(args.model, samples.point_clouds)
-    print(json.dumps(evaluate(samples, detections), indent=2), flush=True)
+    detections = [
+        postprocess(det, score_threshold=args.score_threshold, nms_iou=args.nms_iou)
+        for det in run_onnx(args.model, samples.point_clouds)
+    ]
+    result = evaluate(samples, detections)
+    result["detections_after_nms"] = int(sum(d["boxes"].shape[0] for d in detections))
+    print(json.dumps(result, indent=2), flush=True)
 
 
 if __name__ == "__main__":
