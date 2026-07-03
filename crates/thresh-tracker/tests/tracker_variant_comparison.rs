@@ -13,12 +13,12 @@
 //! produces a track and lands within a loose error bound (100 km) so none
 //! of the variants silently blow up.
 //!
-//! The ECEF tracker (`MultiObjectTrackerEcef`) is listed in the
-//! [`thresh_tracker::tracker_variant::TrackerVariant`] enum for
-//! forward compatibility, but its implementation lives on a future task
-//! (8.A) and is not yet part of the crate. The comparison table marks it
-//! as "not yet implemented" to keep this test honest without holding up
-//! the selection/documentation work in task 8.E.
+//! The ECEF tracker ([`thresh_tracker::ecef_tracker::MultiObjectTrackerEcef`],
+//! task 8.A) exists, but it consumes 3-D ECEF *position* detections through a
+//! linear observation model — it has no OTHR (ground-range/azimuth/Doppler)
+//! observation model — so it cannot consume the raw OTHR measurement stream
+//! this test feeds the other variants. The comparison table marks it "n/a"
+//! rather than silently comparing unlike observation paths.
 
 use nalgebra::{DMatrix, DVector};
 use rand::SeedableRng;
@@ -274,7 +274,7 @@ fn tracker_variant_comparison_on_othr_aircraft_scenario() {
         enu_err_m / 1000.0,
         "ok"
     );
-    eprintln!("  {:<16} {:>18}  {:>12}", "ECEF", "n/a", "pending 8.A");
+    eprintln!("  {:<16} {:>18}  {:>12}", "ECEF", "n/a", "no OTHR model");
     eprintln!(
         "  {:<16} {:>18.2}  {:>12}",
         "Great-Circle",
