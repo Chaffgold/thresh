@@ -197,4 +197,30 @@ mod tests {
     fn test_py_module_loads() {
         // Would use pyo3::Python::attach to test module registration.
     }
+
+    /// Round-trip PyTrackState through a Python object to lock in the
+    /// `#[pyclass(from_py_object)]` opt-in: pyo3 0.29 makes the automatic
+    /// `FromPyObject` impl for Clone pyclasses opt-in, and dropping the
+    /// attribute would silently break extraction. Embeds the interpreter
+    /// directly (no maturin needed), so it runs in the workspace test lane.
+    #[test]
+    fn test_py_track_state_extract_roundtrip() {
+        Python::initialize();
+        Python::attach(|py| {
+            let state = PyTrackState {
+                id: 7,
+                position: [1.0, 2.0, 3.0],
+                velocity: [0.1, 0.2, 0.3],
+                is_confirmed: true,
+            };
+            let obj = Py::new(py, state).expect("Py::new(PyTrackState)");
+            let extracted: PyTrackState = obj
+                .extract(py)
+                .expect("FromPyObject impl from #[pyclass(from_py_object)]");
+            assert_eq!(extracted.id, 7);
+            assert_eq!(extracted.position, [1.0, 2.0, 3.0]);
+            assert_eq!(extracted.velocity, [0.1, 0.2, 0.3]);
+            assert!(extracted.is_confirmed);
+        });
+    }
 }
