@@ -42,18 +42,21 @@ def train(
     lr: float = 1e-3,
     batch_size: int = 64,
     seed: int = 42,
+    device: str | None = None,
 ) -> tuple[ImmModeClassifier, float]:
     """Train on ``windows`` with a trajectory-grouped split. Returns the best
-    model (by held-out accuracy) and that accuracy."""
+    model (by held-out accuracy, moved back to CPU for device-agnostic
+    export) and that accuracy."""
+    resolved = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     torch.manual_seed(seed)
     train_idx, test_idx = trajectory_split(windows, seed=seed)
 
     x = torch.from_numpy(windows.x)
     y = torch.from_numpy(windows.y)
-    x_train, y_train = x[train_idx], y[train_idx]
-    x_test, y_test = x[test_idx], y[test_idx]
+    x_train, y_train = x[train_idx].to(resolved), y[train_idx].to(resolved)
+    x_test, y_test = x[test_idx].to(resolved), y[test_idx].to(resolved)
 
-    model = ImmModeClassifier(hidden_dim=hidden_dim)
+    model = ImmModeClassifier(hidden_dim=hidden_dim).to(resolved)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.CrossEntropyLoss()
 
@@ -82,7 +85,7 @@ def train(
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
 
     model.load_state_dict(best_state)
-    return model, best_acc
+    return model.cpu(), best_acc
 
 
 def main() -> None:
@@ -93,13 +96,25 @@ def main() -> None:
     parser.add_argument("--hidden-dim", type=int, default=64)
     parser.add_argument("--window", type=int, default=WINDOW_LEN)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="torch device (default: cuda when available, else cpu)",
+    )
     args = parser.parse_args()
 
     windows = build_windows(args.data, window=args.window)
     if len(windows) == 0:
         raise SystemExit(f"no windows built from {args.data} (need ≥{args.window} steps per track)")
 
-    model, best_acc = train(windows, epochs=args.epochs, hidden_dim=args.hidden_dim, seed=args.seed)
+    model, best_acc = train(
+        windows,
+        epochs=args.epochs,
+        hidden_dim=args.hidden_dim,
+        seed=args.seed,
+        device=args.device,
+    )
     torch.save({"state_dict": model.state_dict(), "hidden_dim": args.hidden_dim}, args.out)
     print(f"trained on {len(windows)} windows; best held-out accuracy = {best_acc:.3f}")
     print(f"saved checkpoint → {args.out}")
