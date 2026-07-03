@@ -32,7 +32,7 @@ pub struct MhtTracker {
 impl MhtTracker {
     /// Create a new MHT tracker.
     pub fn new(config: &MhtConfig) -> BridgeResult<Self> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let ss_tracker = py
                 .import("stonesoup.tracker.simple")
                 .map_err(BridgeError::from)?;
@@ -56,7 +56,7 @@ impl MhtTracker {
     /// `timestamp` is a Python datetime.
     /// Returns the updated set of tracks.
     pub fn run(&self, detections: &Py<PyAny>, timestamp: &Py<PyAny>) -> BridgeResult<Py<PyAny>> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let result = self
                 .py_tracker
                 .call_method1(py, "track", (detections.bind(py), timestamp.bind(py)))

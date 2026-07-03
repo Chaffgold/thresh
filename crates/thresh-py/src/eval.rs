@@ -143,6 +143,6 @@ mod tests {
     #[test]
     #[ignore = "requires maturin develop + Python interpreter"]
     fn test_py_function_callable() {
-        // Would test via pyo3::Python::with_gil.
+        // Would test via pyo3::Python::attach.
     }
 }

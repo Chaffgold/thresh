@@ -6,7 +6,7 @@
 //! `thresh-data` without requiring a Python installation.
 //!
 //! The bridge follows the same pattern as `thresh-bridge`: every Python
-//! interaction is wrapped in `Python::with_gil` and returns `PyResult<T>`.
+//! interaction is wrapped in `Python::attach` and returns `PyResult<T>`.
 
 use std::collections::hash_map::DefaultHasher;
 use std::fs::File;
@@ -40,7 +40,7 @@ pub struct NuScenesBridge {
 impl NuScenesBridge {
     /// Load a nuScenes dataset via the devkit.
     pub fn new(version: &str, dataroot: &str) -> PyResult<Self> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let nuscenes_mod = py.import("nuscenes.nuscenes")?;
             let nusc_class = nuscenes_mod.getattr("NuScenes")?;
             let kwargs = PyDict::new(py);
@@ -58,18 +58,18 @@ impl NuScenesBridge {
 
     /// Get the number of scenes in the loaded split.
     pub fn scene_count(&self) -> PyResult<usize> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let scene = self.nusc.bind(py).getattr("scene")?;
-            let list: &Bound<'_, PyList> = scene.downcast()?;
+            let list: &Bound<'_, PyList> = scene.cast()?;
             Ok(list.len())
         })
     }
 
     /// Return all scene tokens in iteration order.
     pub fn scene_tokens(&self) -> PyResult<Vec<String>> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let scene = self.nusc.bind(py).getattr("scene")?;
-            let list: &Bound<'_, PyList> = scene.downcast()?;
+            let list: &Bound<'_, PyList> = scene.cast()?;
             let mut out = Vec::with_capacity(list.len());
             for item in list.iter() {
                 let token: String = item.get_item("token")?.extract()?;
@@ -81,7 +81,7 @@ impl NuScenesBridge {
 
     /// Look up a scene record by token.
     pub fn get_scene(&self, scene_token: &str) -> PyResult<NuScenesScene> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let rec = self
                 .nusc
                 .bind(py)
@@ -96,7 +96,7 @@ impl NuScenesBridge {
 
     /// Walk the linked list of samples belonging to a scene.
     pub fn iter_samples(&self, scene_token: &str) -> PyResult<Vec<NuScenesSample>> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let nusc = self.nusc.bind(py);
             let scene = nusc.call_method1("get", ("scene", scene_token))?;
             let first_token: String = scene.get_item("first_sample_token")?.extract()?;
@@ -126,11 +126,11 @@ impl NuScenesBridge {
 
     /// Return all 3D annotation bounding boxes for a sample.
     pub fn sample_annotations(&self, sample_token: &str) -> PyResult<Vec<BoundingBox3D>> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let nusc = self.nusc.bind(py);
             let sample = nusc.call_method1("get", ("sample", sample_token))?;
             let anns = sample.get_item("anns")?;
-            let anns_list: &Bound<'_, PyList> = anns.downcast()?;
+            let anns_list: &Bound<'_, PyList> = anns.cast()?;
             let mut out = Vec::with_capacity(anns_list.len());
             for tok in anns_list.iter() {
                 let token: String = tok.extract()?;
@@ -148,14 +148,14 @@ impl NuScenesBridge {
     /// instance token.
     pub fn scene_instance_tracks(&self, scene_token: &str) -> PyResult<Vec<InstanceTrack>> {
         use std::collections::HashMap;
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let nusc = self.nusc.bind(py);
             let samples = self.iter_samples(scene_token)?;
             let mut tracks: HashMap<String, InstanceTrack> = HashMap::new();
             for sample in &samples {
                 let sample_rec = nusc.call_method1("get", ("sample", sample.token.as_str()))?;
                 let anns = sample_rec.get_item("anns")?;
-                let anns_list: &Bound<'_, PyList> = anns.downcast()?;
+                let anns_list: &Bound<'_, PyList> = anns.cast()?;
                 for tok in anns_list.iter() {
                     let ann_token: String = tok.extract()?;
                     let ann =
@@ -213,7 +213,7 @@ impl NuScenesBridge {
     ) -> PyResult<Vec<RadarPoint>> {
         let rel = self.sample_data_filename(sample_token, channel)?;
         let path = PathBuf::from(&self.dataroot).join(rel);
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let module = py.import("nuscenes.utils.data_classes")?;
             let cls = module.getattr("RadarPointCloud")?;
             let cloud = cls.call_method1("from_file", (path.to_string_lossy().as_ref(),))?;
@@ -247,7 +247,7 @@ impl NuScenesBridge {
         sample_token: &str,
         sensor_channel: &str,
     ) -> PyResult<SensorCalibration> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let nusc = self.nusc.bind(py);
             let sample = nusc.call_method1("get", ("sample", sample_token))?;
             let data_map = sample.get_item("data")?;
@@ -289,7 +289,7 @@ impl NuScenesBridge {
     /// [`EgoMotion::from_pose_pair`](thresh_core::ego::EgoMotion::from_pose_pair)
     /// to obtain ego motion.
     pub fn ego_pose(&self, sample_token: &str, channel: &str) -> PyResult<EgoPose> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let nusc = self.nusc.bind(py);
             let sample = nusc.call_method1("get", ("sample", sample_token))?;
             let data_map = sample.get_item("data")?;
@@ -312,7 +312,7 @@ impl NuScenesBridge {
 
     /// Resolve the on-disk filename for a given sample/channel combo.
     fn sample_data_filename(&self, sample_token: &str, channel: &str) -> PyResult<String> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let nusc = self.nusc.bind(py);
             let sample = nusc.call_method1("get", ("sample", sample_token))?;
             let data_map = sample.get_item("data")?;

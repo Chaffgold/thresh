@@ -15,7 +15,7 @@ cargo test -p thresh-filter      # Test a single crate
 cargo clippy --workspace --all-targets -- -D warnings  # Lint (CI-strict: warnings are errors)
 cargo fmt --all                  # Format
 cargo doc --workspace --no-deps  # Build docs (CI uses RUSTDOCFLAGS=-Dwarnings)
-openspec validate --all --strict --no-interactive      # Validate OpenSpec artifacts
+openspec validate --all --strict # Validate OpenSpec artifacts
 ```
 
 CI enforces: `RUSTFLAGS=-Dwarnings` globally — all warnings are compile errors.
@@ -26,7 +26,7 @@ Installed via `pre-commit install`. On commit: fmt, clippy, cargo check, openspe
 
 ## Architecture
 
-Cargo workspace with 10 crates. Dependency flow (lower depends on higher):
+Cargo workspace with 13 crates. Dependency flow (lower depends on higher):
 
 ```
 thresh-core          (types: state vectors, measurements, covariance, coords, sensors, tracks, time)
@@ -39,8 +39,11 @@ thresh-tracker       (track lifecycle, M-of-N confirmation, class-specific heads
     ↓
 thresh-inference     (ONNX Runtime pipeline — feature-gated: `onnx`)
 thresh-bridge        (PyO3 → Stone Soup JPDA/MHT/IMM — feature-gated: `stonesoup`)
-thresh-synth         (synthetic radar, EO/IR, ADS-B data generation)
+thresh-synth         (synthetic radar, EO/IR, ADS-B data generation; PyO3 bridges — feature-gated: `jsbsim`, `rcs-compute`, `radar-scene`)
 thresh-eval          (MOT metrics: MOTA, MOTP, IDF1, HOTA, AMOTA)
+thresh-data          (dataset bridges: nuScenes via PyO3 — feature-gated: `nuscenes`)
+thresh-viz           (track dashboard; GUI deps optional)
+thresh-py            (maturin-built Python bindings over core/filter/tracker/eval/association)
     ↓
 thresh               (umbrella re-export crate + integration tests)
 ```
@@ -54,7 +57,7 @@ Key design choices:
 
 Design specs live in `openspec/changes/`. Each active change contains proposal, design, tasks, and capability specs; completed changes are moved to `openspec/changes/archive/`.
 
-Claude Code commands for OpenSpec: `/opsx:explore`, `/opsx:propose`, `/opsx:apply`, `/opsx:archive`.
+Claude Code commands for OpenSpec: `/opsx:explore`, `/opsx:new`, `/opsx:ff`, `/opsx:continue`, `/opsx:apply`, `/opsx:verify`, `/opsx:sync`, `/opsx:archive`, `/opsx:bulk-archive`.
 
 ## Branch Strategy
 

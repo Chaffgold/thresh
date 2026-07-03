@@ -35,7 +35,7 @@ impl JpdaAssociator {
     /// Initialises the underlying Stone Soup `JPDAHypothesiser` and
     /// `GNNWith2DAssignment` data associator.
     pub fn new(config: &JpdaConfig) -> BridgeResult<Self> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let ss_hyp = py
                 .import("stonesoup.hypothesiser.probability")
                 .map_err(BridgeError::from)?;
@@ -72,7 +72,7 @@ impl JpdaAssociator {
         detections: &Py<PyAny>,
         timestamp: &Py<PyAny>,
     ) -> BridgeResult<Py<PyAny>> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let result = self
                 .py_associator
                 .call_method1(

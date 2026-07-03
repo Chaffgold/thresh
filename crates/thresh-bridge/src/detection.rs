@@ -4,7 +4,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use crate::convert::dvector_to_numpy;
-use crate::error::BridgeResult;
+use crate::error::{BridgeError, BridgeResult};
 use thresh_core::measurement::Measurement;
 
 /// Convert a `Measurement` to a Stone Soup `Detection` Python object.
@@ -12,6 +12,9 @@ use thresh_core::measurement::Measurement;
 /// The resulting object is a `stonesoup.types.detection.Detection` with:
 /// - `state_vector`: numpy column vector built from `Measurement::to_vector()`
 /// - `metadata`: dict containing sensor type and sensor-specific fields
+///
+/// Only `Radar`, `EoIr`, and `AdsB` measurements are mapped; other variants
+/// are rejected with [`BridgeError::ConversionError`].
 pub fn measurement_to_detection(
     py: Python<'_>,
     measurement: &Measurement,
@@ -68,6 +71,13 @@ pub fn measurement_to_detection(
             metadata.set_item("alt", *alt)?;
             metadata.set_item("velocity", *velocity)?;
             metadata.set_item("time", *time)?;
+        }
+        Measurement::Othr { .. } | Measurement::Lidar { .. } | Measurement::Camera { .. } => {
+            return Err(BridgeError::ConversionError(
+                "measurement type not supported by the Stone Soup bridge \
+                 (only Radar, EoIr, and AdsB are mapped to Detection metadata)"
+                    .to_string(),
+            ));
         }
     }
 
