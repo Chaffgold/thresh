@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use thresh::synth::radar_trajectory::TrajectoryRadarConfig;
 use thresh::synth::trajectory::{Segment, SegmentType, Trajectory};
 use thresh::training::parquet_export::write_imm_samples_parquet;
+use thresh::training::trajectory_ingest::{IngestConfig, ingest_trajectories};
 use thresh::training::{ImmTrainingParams, ImmTrainingSample, generate_imm_training_samples};
 
 const DEFAULT_OUT: &str = "test-data/training/imm-classifier/imm-samples.parquet";
@@ -58,18 +59,80 @@ fn maneuver() -> Trajectory {
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let out = std::env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_OUT));
+/// `gen-imm-dataset [OUT] [--trajectories CANONICAL.parquet] [--sample-rate-hz F]`
+fn parse_args() -> (PathBuf, Option<PathBuf>, f64) {
+    let mut out = PathBuf::from(DEFAULT_OUT);
+    let mut trajectories = None;
+    let mut sample_rate_hz = 1.0;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--trajectories" => trajectories = args.next().map(PathBuf::from),
+            "--sample-rate-hz" => {
+                sample_rate_hz = args
+                    .next()
+                    .and_then(|v| v.parse().ok())
+                    .expect("--sample-rate-hz needs a positive number");
+            }
+            other => out = PathBuf::from(other),
+        }
+    }
+    (out, trajectories, sample_rate_hz)
+}
 
+/// Real-data mode: every ingested acquisition track becomes one trajectory run.
+/// Degenerate tracks (synth errors) are skipped with a warning, not fatal.
+fn samples_from_acquisition(
+    traj_path: &std::path::Path,
+    sample_rate_hz: f64,
+) -> Result<Vec<ImmTrainingSample>, Box<dyn std::error::Error>> {
+    let ingest_config = IngestConfig {
+        sample_rate_hz,
+        ..IngestConfig::default()
+    };
+    let config = TrajectoryRadarConfig {
+        sample_rate_hz,
+        ..TrajectoryRadarConfig::default()
+    };
+    let params = ImmTrainingParams::default();
+    let tracks = ingest_trajectories(traj_path, &ingest_config)?;
+    println!(
+        "ingested {} track segments from {}",
+        tracks.len(),
+        traj_path.display()
+    );
+
+    let mut samples = Vec::new();
+    let mut skipped = 0usize;
+    for (index, track) in tracks.iter().enumerate() {
+        let trajectory_id = index as u32;
+        match generate_imm_training_samples(
+            trajectory_id,
+            &track.waypoints,
+            track.class_id,
+            &config,
+            params,
+            1_000 + trajectory_id as u64,
+        ) {
+            Ok(track_samples) => samples.extend(track_samples),
+            Err(err) => {
+                skipped += 1;
+                eprintln!("skipping {}#{}: {err}", track.icao24, track.segment);
+            }
+        }
+    }
+    if skipped > 0 {
+        eprintln!("skipped {skipped}/{} track segments", tracks.len());
+    }
+    Ok(samples)
+}
+
+fn synthetic_samples() -> Result<Vec<ImmTrainingSample>, Box<dyn std::error::Error>> {
     let config = TrajectoryRadarConfig {
         sample_rate_hz: 10.0,
         ..TrajectoryRadarConfig::default()
     };
     let params = ImmTrainingParams::default();
-
     let mut samples: Vec<ImmTrainingSample> = Vec::new();
     for (traj, seed) in [(cruise(), 1_u64), (maneuver(), 2_u64)] {
         let waypoints = traj.generate();
@@ -82,6 +145,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             seed,
         )?);
     }
+    Ok(samples)
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let (out, trajectories, sample_rate_hz) = parse_args();
+
+    let samples = match &trajectories {
+        Some(traj_path) => samples_from_acquisition(traj_path, sample_rate_hz)?,
+        None => synthetic_samples()?,
+    };
 
     write_imm_samples_parquet(&samples, &out)?;
     println!("wrote {} samples to {}", samples.len(), out.display());
