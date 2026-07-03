@@ -18,6 +18,16 @@ from torch import nn
 
 from training.detector_dataset import BOX_DIM, MAX_BOXES, NUM_CLASSES, POINT_DIM, SCENE_SCALE_M
 
+CENTRE_OFFSET_SCALE_M = 500.0
+"""Refinement-offset range (metres): attention centres land within ~500 m of
+the target (measured on the first real run), so an O(1) head output must move
+the centre by that order — a raw normalized offset would jump 100 km."""
+
+DIMS_PRIOR_M = 10.0
+"""Box-dimension prior (metres): dims are predicted as ``prior · exp(head)``,
+positive by construction and O(prior)-scaled — aircraft boxes are ~1e-4 of the
+normalized scene, far too small for a linear head to find from zero."""
+
 
 class DetectorModel(nn.Module):
     """Minimal point-cloud set-prediction detector."""
@@ -64,7 +74,9 @@ class DetectorModel(nn.Module):
         # offset and predicts dims + yaw.
         centres = torch.bmm(attn, point_cloud[..., :3])  # (B, Q, 3) normalized
         refined = self.box_head(decoded)  # (B, Q, 7) = offset(3) + dims(3) + yaw(1)
-        boxes = torch.cat([centres + refined[..., :3], refined[..., 3:]], dim=-1)
+        offset = refined[..., :3] * (CENTRE_OFFSET_SCALE_M / SCENE_SCALE_M)
+        dims = (DIMS_PRIOR_M / SCENE_SCALE_M) * torch.exp(refined[..., 3:6].clamp(-4.0, 4.0))
+        boxes = torch.cat([centres + offset, dims, refined[..., 6:]], dim=-1)
         score_logits = self.score_head(decoded)  # (B, Q, 1)
         class_logits = self.class_head(decoded)  # (B, Q, num_classes)
         return boxes, score_logits, class_logits

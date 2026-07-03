@@ -25,7 +25,15 @@ from scipy.optimize import linear_sum_assignment
 from torch import nn
 
 from training.detector_dataset import SCENE_SCALE_M, DetectorSamples, load_detector_samples
-from training.detector_model import DetectorModel
+from training.detector_model import DIMS_PRIOR_M, DetectorModel
+
+# Per-component L1 units (normalized space). Dividing box errors by these puts
+# them at O(1) exactly when they are box-sized: a 100 m centre error or a
+# 10 m dims error contributes ~1.0 to the loss. Without this the first real
+# run stalled at 460 m centre error — box terms at 1e-3 normalized were
+# invisible next to the saturated IoU and CE terms.
+CENTRE_UNIT = 100.0 / SCENE_SCALE_M
+DIMS_UNIT = DIMS_PRIOR_M / SCENE_SCALE_M
 
 # Explicit cost/loss weights (DETR balances box vs. class with named
 # coefficients rather than relying on implicit normalisation). The matcher cost
@@ -68,10 +76,10 @@ def _match(
     """Hungarian match queries → GT (cost = L1 box + class-mismatch). Returns
     ``(query_idx, gt_idx)`` long tensors of length ``M``."""
     with torch.no_grad():
-        # Per-dimension mean-abs L1 (divide by box DoF) so the box cost is on a
-        # comparable scale to the class cost (a probability in [0, 1]); the
-        # named weights make the balance explicit and tunable.
-        box_cost = torch.cdist(pred_boxes, gt_boxes, p=1) / pred_boxes.shape[1]  # (Q, M)
+        # Centre-distance cost in centre-prior units (a 100 m error costs ~1,
+        # comparable to the class cost's [0, 1]); dims/yaw are excluded from
+        # matching — assignment should be about *where*, not box shape.
+        box_cost = torch.cdist(pred_boxes[:, :3], gt_boxes[:, :3], p=1) / (3.0 * CENTRE_UNIT)
         class_prob = torch.softmax(class_logits, dim=-1)  # (Q, C)
         class_cost = 1.0 - class_prob[:, gt_classes]  # (Q, M)
         cost = (MATCH_COST_BOX * box_cost + MATCH_COST_CLASS * class_cost).cpu().numpy()
@@ -112,7 +120,14 @@ def set_prediction_loss(
     matched_pred, matched_gt = boxes[qi], gt_boxes[gi]
     # L1 supervises all 7 DoF including yaw (the only yaw supervision); the IoU
     # term is an axis-aligned proxy that ignores yaw by design (Decision 23).
-    box_l1 = (matched_pred - matched_gt).abs().mean()
+    # Centre/dims errors are expressed in box-prior units (see CENTRE_UNIT /
+    # DIMS_UNIT) so the loss keeps gradient pressure down to metre scale.
+    diff = (matched_pred - matched_gt).abs()
+    box_l1 = (
+        diff[:, :3].sum(dim=1) / (3.0 * CENTRE_UNIT)
+        + diff[:, 3:6].sum(dim=1) / (3.0 * DIMS_UNIT)
+        + diff[:, 6]
+    ).mean() / 3.0
     iou_loss = (1.0 - axis_aligned_iou_3d(matched_pred, matched_gt)).mean()
     class_loss = nn.functional.cross_entropy(class_logits[qi], gt_classes[gi])
     obj_target[qi] = 1.0
