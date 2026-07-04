@@ -416,3 +416,23 @@ follow-ons — the latter is Decision territory, not a training change.
 *The criterion revisit is now resolved by Decision 26 (distance-gated,
 micro-averaged, baseline-relative); tasks 7.10/7.11 carry the implied eval
 work.*
+
+First bracket measurement (2026-07-03, v5 on the London holdout, micro
+distance-AP): **stub 0.000 · learned 0.667 · classical 0.916 · oracle
+0.923 — the Decision 26 gate fails (learned < classical).** The metric now
+discriminates where IoU mAP crushed everything into 0–0.05, and the failure
+is interpretable: position-only DBSCAN sits *at the oracle* because
+single-target sparse-clutter scenes are solvable at the CRLB by clustering —
+this dataset cannot demonstrate learned-detector value, mirroring Track B
+(cruise-only data cannot demonstrate turn classification). The learned path
+justifies itself only on scenes clustering can't solve: multi-target,
+dense/structured clutter, variable density — which the anonymous-quota
+captures don't contain. Learned per-gate {2.5 m: 0.244, 5 m: 0.760,
+10 m: 0.997}: recall is essentially complete at 10 m; the entire deficit is
+the precision tail. Two corrections/cross-checks from the bracket: the 558
+zero-detection snapshots are exactly the 558 clutter-only snapshots
+(5,752 − 5,194 GT) — correct behaviour, not a recall hole as v5's first
+diagnostic implied; and under the old gate the oracle scores IoU mAP 0.60
+(GT classes lift the rare-class APs) while the realistic-classification
+classical scores 0.166 — the two straddle 0.30 for reasons unrelated to
+detection quality, confirming the recalibration was necessary.
