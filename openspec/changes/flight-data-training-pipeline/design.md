@@ -236,6 +236,54 @@ If the third bullet fails, ship the model but keep the feature gate off by defau
 
 **Rationale:** A subprocess + JSON boundary keeps the check language-agnostic and avoids a PyO3 round-trip (which doesn't build locally). The IMM classifier is the cleanest target — a single output tensor that `OnnxModel::run_f32` already returns — whereas the detector has three outputs. Observed agreement is exact (max diff 0.00e+00) on CPU. The trained-checkpoint swaps (8.4/8.5) are deferred with the GPU runs.
 
+### 26. Track A detection metric recalibrated: distance-gated, baseline-relative (amends Decision 11)
+
+**Decision:** The mAP@0.5(3D-IoU) ≥ 0.30 bullet of Decision 11 is replaced. Task
+7.9's detection gate becomes:
+
+- **Matching:** centre-distance-gated AP on the deployment-postprocessed output
+  (confidence ≥ 0.5, class-agnostic NMS 0.4 — unchanged), averaged over gates
+  {0.5σ, 1σ, 2σ} of `return_position_noise_m` — {2.5, 5, 10} m at today's
+  σ = 5 m. IoU-based mAP stays as a *reported* diagnostic for continuity.
+- **Aggregation:** micro-averaged (all classes pooled) for the gate. Per-class
+  AP is reported diagnostically; a class only ever joins a macro gate with
+  ≥ 100 GT boxes in the holdout.
+- **Gate (baseline-relative):** the learned detector's micro distance-AP must be
+  **strictly greater than a classical baseline** — DBSCAN-clustered centroids
+  over the same point clouds (task 7.10) — on the same holdout. The **oracle
+  ceiling** (centroid of GT-segmented target returns, the CRLB-achieving
+  estimator) is computed and reported alongside, so every future run is located
+  on the bracket `random stub … classical baseline … learned … oracle`.
+- **Unchanged:** class accuracy ≥ 0.50 on matched boxes (v5: 0.985 ✅) and the
+  downstream bullet (strictly better signal than the random stub on
+  `thresh-eval` MOTA — still requires the `eval-tracker --learned-detector`
+  seam). Dims/yaw remain reported diagnostics only: `Detection3D::to_measurement()`
+  is position-only, so no deployment path consumes extent until the deferred
+  BEV-fusion work does.
+
+**Rationale:** Decision 11's stated intent was *"meaningfully better than
+random … intentionally modest"*, but the v5 evidence shows the absolute IoU
+gate never measured that on this sensor configuration: a CRLB-achieving
+centroid over perfectly segmented returns (1.25 m/axis at 16 returns / 5 m
+noise) clears the ~1.8 m IoU@0.5 offset budget only ~44% of the time, and with
+the holdout's 97.7%-class-4 skew (anonymous OpenSky rarely carries an ADS-B
+category) the class-averaged gate caps a *perfect* common-class detector at
+~0.33 — the old gate was oracle-hard, not modest. The recalibration preserves
+the intent while fixing all three broken layers: distance matching aligns the
+metric with what deployment consumes (position + score + class) and with the
+framework's own idiom (`thresh-eval` HOTA integrates position-error thresholds
+0.5–9.5 m; GT boxes are near-constant 10.5×10.5×5.1 m, so IoU was centre
+distance repackaged through a cliff); micro-averaging removes the
+32-sample-class statistical noise; and a baseline-relative gate — the exact
+symmetry of Track B's "MOTA no worse than analytic" — is self-calibrating, so
+it travels with the data when authenticated captures change geometry, density,
+and class mix. Sanity forecast at today's σ (estimates, to be replaced by
+task 7.10 numbers): oracle micro distance-AP ≈ 0.9, v5 ≈ 0.5–0.6, random
+stub ≈ 0. Sensor realism (are 16 returns / 5 m noise anchored to a reference
+radar?) is deliberately **not** changed here — revisiting the synth radar
+config to fit the metric would invert the relationship; it stays an open
+question for the radar-scene spec.
+
 ## Implementation status & deferrals (Phase 11 wrap-up)
 
 As of this change, **Phases 1–10 are implemented**; the two learned tracks are fully scaffolded end-to-end (acquisition → synth → train → export → Rust load/decode → eval), with CI-verified ONNX contracts, a real analytic-tracker MOTA baseline, and Python↔Rust ONNX parity. The following are **deliberately deferred**, all gated on data/hardware rather than on missing design:
@@ -365,3 +413,6 @@ Richer captures (findings §1's authenticated-account blocker now binds
 Track A too) or a criterion revisit (distance-gated matching à la nuScenes
 instead of IoU@0.5, or mAP weighted by class support) are the candidate
 follow-ons — the latter is Decision territory, not a training change.
+*The criterion revisit is now resolved by Decision 26 (distance-gated,
+micro-averaged, baseline-relative); tasks 7.10/7.11 carry the implied eval
+work.*
