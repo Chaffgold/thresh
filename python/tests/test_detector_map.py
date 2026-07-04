@@ -12,6 +12,7 @@ import numpy as np
 
 from eval.detector_map import (
     average_precision,
+    distance_gated_ap,
     evaluate,
     iou_3d_axis_aligned,
     postprocess,
@@ -127,6 +128,61 @@ def _samples_one_snapshot(gt_centres: list[list[float]], classes: list[int]) -> 
         gt_classes=gt_classes,
         trajectory_ids=np.zeros(1, dtype=np.uint32),
     )
+
+
+class TestDistanceGatedAp:
+    def test_exact_hit_scores_one_at_every_gate(self) -> None:
+        samples = _samples_one_snapshot([[0.0, 0.0, 0.0]], [1])
+        detections = [_detections([_box(0.0, 0.0, 0.0)], [0.9], [1])]
+        result = distance_gated_ap(samples, detections, noise_sigma_m=5.0)
+        assert result["micro_distance_ap"] == 1.0
+        assert result["distance_ap_per_gate"] == {"2.5m": 1.0, "5m": 1.0, "10m": 1.0}
+
+    def test_three_metre_miss_passes_only_wider_gates(self) -> None:
+        # 3 m offset: outside the 2.5 m gate, inside 5 m and 10 m → micro 2/3.
+        samples = _samples_one_snapshot([[0.0, 0.0, 0.0]], [1])
+        detections = [_detections([_box(3.0, 0.0, 0.0)], [0.9], [1])]
+        result = distance_gated_ap(samples, detections, noise_sigma_m=5.0)
+        per_gate = result["distance_ap_per_gate"]
+        assert per_gate["2.5m"] == 0.0
+        assert per_gate["5m"] == 1.0
+        assert per_gate["10m"] == 1.0
+        assert abs(float(result["micro_distance_ap"]) - 2.0 / 3.0) < 1e-9
+
+    def test_matching_is_class_agnostic(self) -> None:
+        # Wrong class must not prevent a distance match (micro pools classes).
+        samples = _samples_one_snapshot([[0.0, 0.0, 0.0]], [1])
+        detections = [_detections([_box(0.0, 0.0, 0.0)], [0.9], [3])]
+        result = distance_gated_ap(samples, detections, noise_sigma_m=5.0)
+        assert result["micro_distance_ap"] == 1.0
+
+    def test_high_scoring_false_positive_halves_ap(self) -> None:
+        # FP outranks the TP: precision at full recall is 0.5 at every gate.
+        samples = _samples_one_snapshot([[0.0, 0.0, 0.0]], [1])
+        detections = [
+            _detections(
+                [_box(500.0, 0.0, 0.0), _box(0.0, 0.0, 0.0)], [0.9, 0.8], [1, 1]
+            )
+        ]
+        result = distance_gated_ap(samples, detections, noise_sigma_m=5.0)
+        assert abs(float(result["micro_distance_ap"]) - 0.5) < 1e-9
+
+    def test_one_gt_matches_at_most_once(self) -> None:
+        # Two detections on one GT: the higher score takes it, the other is FP.
+        samples = _samples_one_snapshot([[0.0, 0.0, 0.0]], [1])
+        detections = [
+            _detections([_box(0.0, 0.0, 0.0), _box(1.0, 0.0, 0.0)], [0.9, 0.8], [1, 1])
+        ]
+        result = distance_gated_ap(samples, detections, noise_sigma_m=5.0)
+        # TP first: AP stays 1.0 under all-points interpolation.
+        assert result["micro_distance_ap"] == 1.0
+
+    def test_evaluate_includes_distance_metrics(self) -> None:
+        samples = _samples_one_snapshot([[0.0, 0.0, 0.0]], [1])
+        detections = [_detections([_box(0.0, 0.0, 0.0)], [0.9], [1])]
+        result = evaluate(samples, detections)
+        assert result["micro_distance_ap"] == 1.0
+        assert "distance_ap_per_gate" in result
 
 
 class TestEvaluate:

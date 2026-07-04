@@ -13,6 +13,13 @@ use — yaw is ignored by design). AP uses all-points interpolation per class;
 mAP averages over classes that appear in the ground truth. Class accuracy is
 computed over class-agnostic IoU≥0.5 matches so it is independent of the
 classifier head's effect on matching.
+
+The gate metric (Decision 26) is ``micro_distance_ap``: class-agnostic AP at
+centre-distance gates {0.5, 1, 2} x the synth return-noise sigma, averaged. With
+``--bracket`` the classical DBSCAN baseline and GT-segmented oracle ceiling
+(`eval.detector_baselines`) are scored under the identical postprocess +
+matching, and the verdict ``learned > classical`` is reported; ``--stub-model``
+adds the random-stub floor. Legacy IoU mAP stays as a reported diagnostic.
 """
 
 from __future__ import annotations
@@ -26,6 +33,9 @@ import numpy as np
 from training.detector_dataset import DetectorSamples, load_detector_samples
 
 IOU_THRESHOLD = 0.5
+# Decision 26: distance gates are {0.5, 1, 2} x the synth return noise sigma.
+DISTANCE_GATE_FACTORS = (0.5, 1.0, 2.0)
+DEFAULT_NOISE_SIGMA_M = 5.0  # thresh-synth TrajectoryRadarConfig default
 
 
 def _interval_overlap(
@@ -144,10 +154,69 @@ def _greedy_match(
     return flags, gt_index
 
 
-def evaluate(
-    samples: DetectorSamples, detections: list[dict[str, np.ndarray]]
+def _greedy_match_distance(
+    det_boxes: np.ndarray, gt_boxes: np.ndarray, gate_m: float
+) -> np.ndarray:
+    """Greedily match detections (already in desc-score order) to the nearest
+    unmatched GT centre within ``gate_m``. Returns per-detection match flags."""
+    flags = np.zeros(det_boxes.shape[0], dtype=bool)
+    taken = np.zeros(gt_boxes.shape[0], dtype=bool)
+    for d in range(det_boxes.shape[0]):
+        if gt_boxes.shape[0] == 0 or taken.all():
+            break
+        dists = np.linalg.norm(gt_boxes[:, :3] - det_boxes[d, :3], axis=1)
+        dists[taken] = np.inf
+        best = int(np.argmin(dists))
+        if dists[best] <= gate_m:
+            flags[d] = True
+            taken[best] = True
+    return flags
+
+
+def distance_gated_ap(
+    samples: DetectorSamples,
+    detections: list[dict[str, np.ndarray]],
+    *,
+    noise_sigma_m: float = DEFAULT_NOISE_SIGMA_M,
 ) -> dict[str, object]:
-    """Compute mAP@0.5 per class + class-agnostic-match class accuracy."""
+    """Micro-averaged (class-agnostic, all classes pooled) distance-gated AP.
+
+    Decision 26's detection metric: AP at centre-distance gates
+    ``{0.5, 1, 2} x noise_sigma_m``, averaged. Matching pools every detection
+    and every GT box regardless of class — class quality is scored separately
+    (class accuracy), extent not at all (deployment consumes positions only).
+    """
+    gates = [f * noise_sigma_m for f in DISTANCE_GATE_FACTORS]
+    total_gt = sum(int(samples.gt_valid[i].sum()) for i in range(len(samples)))
+    per_gate: dict[str, float] = {}
+    for gate in gates:
+        flags_all: list[np.ndarray] = []
+        scores_all: list[np.ndarray] = []
+        for i, det in enumerate(detections):
+            order = np.argsort(-det["scores"])
+            det_boxes = det["boxes"][order]
+            gt_boxes = samples.gt_boxes[i][samples.gt_valid[i]]
+            flags_all.append(_greedy_match_distance(det_boxes, gt_boxes, gate))
+            scores_all.append(det["scores"][order])
+        per_gate[f"{gate:g}m"] = average_precision(
+            np.concatenate(flags_all), np.concatenate(scores_all), total_gt
+        )
+    finite = [ap for ap in per_gate.values() if not np.isnan(ap)]
+    return {
+        "micro_distance_ap": float(np.mean(finite)) if finite else float("nan"),
+        "distance_ap_per_gate": per_gate,
+    }
+
+
+def evaluate(
+    samples: DetectorSamples,
+    detections: list[dict[str, np.ndarray]],
+    *,
+    noise_sigma_m: float = DEFAULT_NOISE_SIGMA_M,
+) -> dict[str, object]:
+    """Score one detection source: Decision 26's micro distance-gated AP (the
+    gate metric) plus legacy per-class IoU mAP@0.5 and class accuracy
+    (diagnostics)."""
     classes_in_gt = sorted(
         {int(c) for i in range(len(samples)) for c in samples.gt_classes[i][samples.gt_valid[i]]}
     )
@@ -187,6 +256,7 @@ def evaluate(
 
     valid_aps = [ap for ap in per_class_ap.values() if not np.isnan(ap)]
     return {
+        **distance_gated_ap(samples, detections, noise_sigma_m=noise_sigma_m),
         "map_50": float(np.mean(valid_aps)) if valid_aps else 0.0,
         "per_class_ap": per_class_ap,
         "class_accuracy": (correct / matched) if matched else 0.0,
@@ -195,8 +265,31 @@ def evaluate(
     }
 
 
+def _detection_sources(
+    args: argparse.Namespace, samples: DetectorSamples
+) -> dict[str, list[dict[str, np.ndarray]]]:
+    """Build every requested detection source, all through the same deployment
+    postprocess so they score under identical matching (Decision 26)."""
+
+    def post(dets: list[dict[str, np.ndarray]]) -> list[dict[str, np.ndarray]]:
+        return [
+            postprocess(d, score_threshold=args.score_threshold, nms_iou=args.nms_iou)
+            for d in dets
+        ]
+
+    sources = {"learned": post(run_onnx(args.model, samples.point_clouds))}
+    if args.bracket:
+        from eval.detector_baselines import classical_detections_batch, oracle_detections_batch
+
+        sources["classical"] = post(classical_detections_batch(samples))
+        sources["oracle"] = post(oracle_detections_batch(samples))
+    if args.stub_model is not None:
+        sources["stub"] = post(run_onnx(args.stub_model, samples.point_clouds))
+    return sources
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Detector holdout mAP@0.5 (task 7.9).")
+    parser = argparse.ArgumentParser(description="Detector holdout eval (task 7.9, Decision 26).")
     parser.add_argument("--data", required=True, type=Path, help="holdout detector-samples Parquet")
     parser.add_argument("--model", required=True, type=Path, help="detector ONNX path")
     parser.add_argument(
@@ -211,18 +304,48 @@ def main() -> None:
         default=0.4,
         help="class-agnostic NMS IoU, matching the Rust DetectorConfig default (0.4)",
     )
+    parser.add_argument(
+        "--noise-sigma",
+        type=float,
+        default=DEFAULT_NOISE_SIGMA_M,
+        help="synth return-noise sigma (m); distance gates are {0.5, 1, 2} x this",
+    )
+    parser.add_argument(
+        "--bracket",
+        action="store_true",
+        help="also score the classical DBSCAN baseline and the GT-segmented oracle "
+        "ceiling (eval.detector_baselines), reporting the Decision 26 gate verdict",
+    )
+    parser.add_argument(
+        "--stub-model",
+        type=Path,
+        default=None,
+        help="optional random-stub ONNX to score as the bracket floor",
+    )
     args = parser.parse_args()
 
     samples = load_detector_samples(args.data)
     if len(samples) == 0:
         raise SystemExit(f"no detector samples in {args.data}")
-    detections = [
-        postprocess(det, score_threshold=args.score_threshold, nms_iou=args.nms_iou)
-        for det in run_onnx(args.model, samples.point_clouds)
-    ]
-    result = evaluate(samples, detections)
-    result["detections_after_nms"] = int(sum(d["boxes"].shape[0] for d in detections))
-    print(json.dumps(result, indent=2), flush=True)
+    sources = _detection_sources(args, samples)
+    results: dict[str, object] = {}
+    for name, dets in sources.items():
+        scored = evaluate(samples, dets, noise_sigma_m=args.noise_sigma)
+        scored["detections_after_nms"] = int(sum(d["boxes"].shape[0] for d in dets))
+        results[name] = scored
+    if len(results) == 1:
+        output = results["learned"]  # single-source: flat, as before
+    else:
+        output = dict(results)
+        if "classical" in results:
+            learned_ap = results["learned"]["micro_distance_ap"]  # type: ignore[index]
+            classical_ap = results["classical"]["micro_distance_ap"]  # type: ignore[index]
+            output["decision26_gate"] = {
+                "learned_micro_distance_ap": learned_ap,
+                "classical_micro_distance_ap": classical_ap,
+                "passes": bool(learned_ap > classical_ap),  # type: ignore[operator]
+            }
+    print(json.dumps(output, indent=2), flush=True)
 
 
 if __name__ == "__main__":
