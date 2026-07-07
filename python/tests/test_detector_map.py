@@ -8,6 +8,8 @@ run.
 
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 
 from eval.detector_map import (
@@ -143,11 +145,11 @@ class TestDistanceGatedAp:
         samples = _samples_one_snapshot([[0.0, 0.0, 0.0]], [1])
         detections = [_detections([_box(3.0, 0.0, 0.0)], [0.9], [1])]
         result = distance_gated_ap(samples, detections, noise_sigma_m=5.0)
-        per_gate = result["distance_ap_per_gate"]
+        per_gate = cast(dict[str, float], result["distance_ap_per_gate"])
         assert per_gate["2.5m"] == 0.0
         assert per_gate["5m"] == 1.0
         assert per_gate["10m"] == 1.0
-        assert abs(float(result["micro_distance_ap"]) - 2.0 / 3.0) < 1e-9
+        assert abs(cast(float, result["micro_distance_ap"]) - 2.0 / 3.0) < 1e-9
 
     def test_matching_is_class_agnostic(self) -> None:
         # Wrong class must not prevent a distance match (micro pools classes).
@@ -165,7 +167,7 @@ class TestDistanceGatedAp:
             )
         ]
         result = distance_gated_ap(samples, detections, noise_sigma_m=5.0)
-        assert abs(float(result["micro_distance_ap"]) - 0.5) < 1e-9
+        assert abs(cast(float, result["micro_distance_ap"]) - 0.5) < 1e-9
 
     def test_one_gt_matches_at_most_once(self) -> None:
         # Two detections on one GT: the higher score takes it, the other is FP.
