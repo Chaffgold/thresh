@@ -646,9 +646,9 @@ impl ThreshVizApp {
         for track in &frame.tracks {
             let color = id_to_color(track.id);
             let radius = if self.selected_track == Some(track.id) {
-                9.0
+                9.0_f32
             } else {
-                6.0
+                6.0_f32
             };
             plot_ui.points(
                 Points::new(vec![[track.position[0], track.position[1]]])
@@ -676,7 +676,7 @@ impl ThreshVizApp {
                 plot_ui.line(
                     Line::new(PlotPoints::new(trail))
                         .color(id_to_color(track.id))
-                        .width(1.5),
+                        .width(1.5_f32),
                 );
             }
         }
@@ -696,7 +696,7 @@ impl ThreshVizApp {
             plot_ui.line(
                 Line::new(PlotPoints::new(pts))
                     .color(id_to_color(track.id).gamma_multiply(0.6))
-                    .width(1.0),
+                    .width(1.0_f32),
             );
         }
     }
@@ -715,7 +715,7 @@ impl ThreshVizApp {
                     [track.position[0], track.position[1]],
                 ]))
                 .color(id_to_color(track.id).gamma_multiply(0.4))
-                .width(1.0),
+                .width(1.0_f32),
             );
         }
     }
@@ -732,7 +732,7 @@ impl ThreshVizApp {
         if !pts.is_empty() {
             plot_ui.points(
                 Points::new(pts)
-                    .radius(4.0)
+                    .radius(4.0_f32)
                     .color(egui::Color32::GRAY)
                     .shape(MarkerShape::Diamond)
                     .name("Detections"),
@@ -752,7 +752,7 @@ impl ThreshVizApp {
         if !pts.is_empty() {
             plot_ui.points(
                 Points::new(pts)
-                    .radius(5.0)
+                    .radius(5.0_f32)
                     .color(egui::Color32::GREEN)
                     .shape(MarkerShape::Cross)
                     .name("Ground Truth"),
@@ -807,7 +807,7 @@ impl ThreshVizApp {
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style())
                     .fill(egui::Color32::from_rgb(15, 23, 42))
-                    .stroke(egui::Stroke::new(1.0, ACCENT))
+                    .stroke(egui::Stroke::new(1.0_f32, ACCENT))
                     .corner_radius(egui::CornerRadius::same(8))
                     .inner_margin(egui::Margin::symmetric(14, 10))
                     .show(ui, |ui| {
