@@ -340,6 +340,60 @@ pub struct TemeState {
     pub time_since_epoch_min: f64,
 }
 
+/// Convert a TLE-represented [`thresh_core::orbital::OrbitalState`] into a
+/// Cartesian one by propagating with SGP4 to the state's `epoch_jd`.
+///
+/// `thresh-core`'s `as_cartesian()` deliberately returns
+/// [`ElementError::RequiresSgp4`](thresh_core::orbital::ElementError::RequiresSgp4)
+/// for the `Tle` variant — SGP4 lives here, behind the `orbital` feature,
+/// next to the rest of the TLE pipeline (design Decision 2 of the
+/// `orbital-ballistic-filter-models` change). The returned state carries
+/// Cartesian elements in metres / m/s and is tagged
+/// [`OrbitalFrame::Teme`](thresh_core::orbital::OrbitalFrame::Teme) — SGP4
+/// output is TEME by definition, whatever the input state was tagged with.
+/// `mu` and `epoch_jd` carry over from the input.
+///
+/// Returns [`OrbitalError::InvalidInput`] when the input's elements are not
+/// the `Tle` variant.
+pub fn tle_to_cartesian(
+    state: &thresh_core::orbital::OrbitalState,
+) -> Result<thresh_core::orbital::OrbitalState> {
+    use thresh_core::orbital::{OrbitalElements, OrbitalFrame};
+
+    let OrbitalElements::Tle { line1, line2 } = &state.elements else {
+        return Err(OrbitalError::InvalidInput(
+            "tle_to_cartesian requires OrbitalElements::Tle".to_string(),
+        ));
+    };
+
+    // Minutes from the TLE's own epoch (encoded in line 1) to the state's.
+    let (epoch_year, epoch_day) = parse_epoch_from_line1(line1)?;
+    let tle_epoch_jd = tle_epoch_to_jd(epoch_year, epoch_day);
+    let minutes_since_epoch = (state.epoch_jd - tle_epoch_jd) * 1440.0;
+
+    let elements = sgp4::Elements::from_tle(None, line1.as_bytes(), line2.as_bytes())?;
+    let constants = sgp4::Constants::from_elements(&elements)?;
+    let prediction = constants.propagate(minutes_since_epoch)?;
+
+    Ok(thresh_core::orbital::OrbitalState {
+        elements: OrbitalElements::Cartesian {
+            position: nalgebra::Vector3::new(
+                prediction.position[0] * 1000.0,
+                prediction.position[1] * 1000.0,
+                prediction.position[2] * 1000.0,
+            ),
+            velocity: nalgebra::Vector3::new(
+                prediction.velocity[0] * 1000.0,
+                prediction.velocity[1] * 1000.0,
+                prediction.velocity[2] * 1000.0,
+            ),
+        },
+        mu: state.mu,
+        frame: OrbitalFrame::Teme,
+        epoch_jd: state.epoch_jd,
+    })
+}
+
 /// Propagate a TLE using SGP4 at the given times (minutes since epoch).
 ///
 /// Returns TEME-frame position/velocity at each requested time.
@@ -1095,6 +1149,67 @@ ISS (ZARYA)
                 "ISS velocity {v_km_s} km/s out of expected range"
             );
         }
+    }
+
+    // ── tle_to_cartesian (orbital-ballistic-filter-models task 2.7) ──────
+
+    #[test]
+    fn tle_to_cartesian_matches_sgp4_pipeline() {
+        use thresh_core::orbital::{GravityModel, OrbitalElements, OrbitalFrame, OrbitalState};
+
+        let tles = parse_tle(ISS_TLE_2LE).unwrap();
+        let tle = &tles[0];
+        let minutes = 30.0;
+
+        let state = OrbitalState {
+            elements: OrbitalElements::Tle {
+                line1: tle.line1.clone(),
+                line2: tle.line2.clone(),
+            },
+            mu: GravityModel::EARTH_WGS84.mu,
+            frame: OrbitalFrame::Teme,
+            epoch_jd: tle.epoch_jd() + minutes / 1440.0,
+        };
+
+        let cartesian = tle_to_cartesian(&state).unwrap();
+        assert_eq!(cartesian.frame, OrbitalFrame::Teme, "SGP4 output is TEME");
+        assert_eq!(cartesian.mu.to_bits(), state.mu.to_bits());
+        assert_eq!(cartesian.epoch_jd, state.epoch_jd);
+
+        // Must agree with the existing SGP4 pipeline at the same offset.
+        // Tolerance covers only the JD→minutes float round trip: one ulp of
+        // a Julian Date (~2.4e6 days) is ~4e-5 s, i.e. ~0.3 m at 7.7 km/s.
+        let expected = &propagate_tle(tle, &[minutes]).unwrap()[0];
+        let (pos, vel) = cartesian.as_cartesian().unwrap();
+        for i in 0..3 {
+            assert!(
+                (pos[i] - expected.position_km[i] * 1000.0).abs() < 1.0,
+                "position component {i} differs from the SGP4 pipeline"
+            );
+            assert!(
+                (vel[i] - expected.velocity_km_s[i] * 1000.0).abs() < 1e-3,
+                "velocity component {i} differs from the SGP4 pipeline"
+            );
+        }
+    }
+
+    #[test]
+    fn tle_to_cartesian_rejects_non_tle_elements() {
+        use thresh_core::orbital::{GravityModel, OrbitalElements, OrbitalFrame, OrbitalState};
+
+        let state = OrbitalState {
+            elements: OrbitalElements::Cartesian {
+                position: nalgebra::Vector3::new(7_000_000.0, 0.0, 0.0),
+                velocity: nalgebra::Vector3::new(0.0, 7_500.0, 0.0),
+            },
+            mu: GravityModel::EARTH_WGS84.mu,
+            frame: OrbitalFrame::Teme,
+            epoch_jd: 2_460_310.5,
+        };
+        assert!(matches!(
+            tle_to_cartesian(&state),
+            Err(OrbitalError::InvalidInput(_))
+        ));
     }
 
     // ── Task 4.11: Coordinate chain ──────────────────────────────────────

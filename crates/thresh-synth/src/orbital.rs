@@ -1,79 +1,39 @@
 //! High-fidelity orbital propagation with J2 perturbations, atmospheric drag,
 //! impulsive maneuvers, and ground-station visibility analysis.
 
+use nalgebra::Vector3;
 use serde::{Deserialize, Serialize};
 use thresh_core::eci::{SECONDS_PER_DAY, eci_to_enu};
+use thresh_core::orbital::{
+    ElementError, GravityModel, OrbitalElements, OrbitalFrame, cartesian_to_keplerian,
+    j2_acceleration, keplerian_to_cartesian, rk4_step, two_body_acceleration,
+};
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
+//
+// The force-math constants moved to `thresh_core::orbital::GravityModel`
+// (design Decision 1 of `orbital-ballistic-filter-models`); the aliases below
+// keep the Keplerian element conversions and tests reading naturally until
+// they migrate to `thresh_core::orbital::state` in a later phase.
 
 /// Earth gravitational parameter (m³/s²).
-const GM_EARTH: f64 = 3.986_004_418e14;
+const GM_EARTH: f64 = GravityModel::EARTH_WGS84.mu;
 
 /// Earth equatorial radius (m), WGS-84.
-const EARTH_RADIUS: f64 = 6_378_137.0;
-
-/// J2 zonal harmonic coefficient.
-const J2: f64 = 1.082_63e-3;
+pub const EARTH_RADIUS: f64 = GravityModel::EARTH_WGS84.equatorial_radius;
 
 // ---------------------------------------------------------------------------
-// Exponential atmosphere model reference data
+// Exponential atmosphere model
 // ---------------------------------------------------------------------------
-
-/// (base altitude km, nominal density kg/m³, scale height km)
-const ATMOSPHERE_TABLE: &[(f64, f64, f64)] = &[
-    (0.0, 1.225, 7.249),
-    (25.0, 3.899e-2, 6.349),
-    (30.0, 1.774e-2, 6.682),
-    (40.0, 3.972e-3, 7.554),
-    (50.0, 1.057e-3, 8.382),
-    (60.0, 3.206e-4, 7.714),
-    (70.0, 8.770e-5, 6.549),
-    (80.0, 1.905e-5, 5.799),
-    (90.0, 3.396e-6, 5.382),
-    (100.0, 5.297e-7, 5.877),
-    (110.0, 9.661e-8, 7.263),
-    (120.0, 2.438e-8, 9.473),
-    (130.0, 8.484e-9, 12.636),
-    (140.0, 3.845e-9, 16.149),
-    (150.0, 2.070e-9, 22.523),
-    (180.0, 5.464e-10, 29.740),
-    (200.0, 2.789e-10, 37.105),
-    (250.0, 7.248e-11, 45.546),
-    (300.0, 2.418e-11, 53.628),
-    (350.0, 9.518e-12, 53.298),
-    (400.0, 3.725e-12, 58.515),
-    (450.0, 1.585e-12, 60.828),
-    (500.0, 6.967e-13, 63.822),
-    (600.0, 1.454e-13, 71.835),
-    (700.0, 3.614e-14, 88.667),
-    (800.0, 1.170e-14, 124.64),
-    (900.0, 5.245e-15, 181.05),
-    (1000.0, 3.019e-15, 268.00),
-];
 
 /// Compute atmospheric density (kg/m³) at a given geometric altitude (m)
 /// using a piecewise-exponential model.
-fn atmosphere_density(alt_m: f64) -> f64 {
-    let alt_km = alt_m / 1000.0;
-    if alt_km < 0.0 {
-        return ATMOSPHERE_TABLE[0].1;
-    }
-    if alt_km > 1000.0 {
-        return 0.0;
-    }
-    // Find the bracket
-    let mut idx = 0;
-    for (i, &(h, _, _)) in ATMOSPHERE_TABLE.iter().enumerate() {
-        if h <= alt_km {
-            idx = i;
-        } else {
-            break;
-        }
-    }
-    let (h0, rho0, scale_h) = ATMOSPHERE_TABLE[idx];
-    rho0 * (-((alt_km - h0) / scale_h)).exp()
+///
+/// Thin shim delegating to [`thresh_core::orbital::atmosphere_density`].
+pub fn atmosphere_density(alt_m: f64) -> f64 {
+    thresh_core::orbital::atmosphere_density(alt_m)
 }
 
 // ---------------------------------------------------------------------------
@@ -81,6 +41,12 @@ fn atmosphere_density(alt_m: f64) -> f64 {
 // ---------------------------------------------------------------------------
 
 /// A spacecraft state in the ECI frame.
+///
+/// This is the propagator's lightweight Cartesian sample type — it appears
+/// in serialized outputs and the inner RK4 loop. The frame-disciplined
+/// element-representation type is [`thresh_core::orbital::OrbitalState`];
+/// `From` / `TryFrom` conversions between the two are provided below, and
+/// consolidating them is owned by the `astro-time-and-frames` change.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrbitalState {
     /// Position in ECI (metres).
@@ -103,6 +69,10 @@ impl OrbitalState {
 
     /// Create from Keplerian orbital elements.
     ///
+    /// Thin shim delegating to
+    /// [`thresh_core::orbital::keplerian_to_cartesian`] with Earth's
+    /// gravitational parameter.
+    ///
     /// # Arguments
     /// * `sma` — semi-major axis (metres)
     /// * `ecc` — eccentricity
@@ -120,42 +90,10 @@ impl OrbitalState {
         true_anom: f64,
         epoch_jd: f64,
     ) -> Self {
-        let nu = true_anom;
-        let p = sma * (1.0 - ecc * ecc); // semi-latus rectum
-        let r_mag = p / (1.0 + ecc * nu.cos());
-
-        // Position and velocity in the perifocal frame (PQW)
-        let r_pqw = [r_mag * nu.cos(), r_mag * nu.sin(), 0.0];
-        let v_coeff = (GM_EARTH / p).sqrt();
-        let v_pqw = [v_coeff * (-nu.sin()), v_coeff * (ecc + nu.cos()), 0.0];
-
-        // Rotation from PQW to ECI: R = R3(-Ω) R1(-i) R3(-ω)
-        let (so, co) = raan.sin_cos();
-        let (si, ci) = inc.sin_cos();
-        let (sw, cw) = argp.sin_cos();
-
-        // Rotation matrix columns
-        let r11 = co * cw - so * sw * ci;
-        let r12 = -(co * sw + so * cw * ci);
-        let r21 = so * cw + co * sw * ci;
-        let r22 = -(so * sw - co * cw * ci);
-        let r31 = sw * si;
-        let r32 = cw * si;
-
-        let pos = [
-            r11 * r_pqw[0] + r12 * r_pqw[1],
-            r21 * r_pqw[0] + r22 * r_pqw[1],
-            r31 * r_pqw[0] + r32 * r_pqw[1],
-        ];
-        let vel = [
-            r11 * v_pqw[0] + r12 * v_pqw[1],
-            r21 * v_pqw[0] + r22 * v_pqw[1],
-            r31 * v_pqw[0] + r32 * v_pqw[1],
-        ];
-
+        let (pos, vel) = keplerian_to_cartesian(sma, ecc, inc, raan, argp, true_anom, GM_EARTH);
         Self {
-            position: pos,
-            velocity: vel,
+            position: [pos.x, pos.y, pos.z],
+            velocity: [vel.x, vel.y, vel.z],
             epoch_jd,
         }
     }
@@ -176,102 +114,59 @@ impl OrbitalState {
     /// Convert this state to Keplerian elements.
     ///
     /// Returns `(sma, ecc, inc, raan, argp, true_anom)`.
+    ///
+    /// Thin shim delegating to
+    /// [`thresh_core::orbital::cartesian_to_keplerian`] (where the
+    /// `compute_raan` / `compute_argp` / `compute_true_anomaly` phase
+    /// helpers now live) with Earth's gravitational parameter.
     pub fn to_keplerian(&self) -> (f64, f64, f64, f64, f64, f64) {
-        let r = self.position;
-        let v = self.velocity;
-        let r_mag = self.radius();
-        let v2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
-
-        let h = cross3(&r, &v);
-        let h_mag = mag3(&h);
-
-        let n = [-h[1], h[0], 0.0];
-        let n_mag = (n[0] * n[0] + n[1] * n[1]).sqrt();
-
-        let rdotv = dot3(&r, &v);
-        let e_vec = eccentricity_vector(&r, &v, r_mag, v2, rdotv);
-        let ecc = mag3(&e_vec);
-
-        let sma = 1.0 / (2.0 / r_mag - v2 / GM_EARTH);
-        let inc = (h[2] / h_mag).acos();
-        let raan = compute_raan(&n, n_mag);
-        let argp = compute_argp(&n, n_mag, &e_vec, ecc);
-        let true_anom = compute_true_anomaly(&e_vec, ecc, &r, r_mag, rdotv);
-
-        (sma, ecc, inc, raan, argp, true_anom)
+        let pos = Vector3::new(self.position[0], self.position[1], self.position[2]);
+        let vel = Vector3::new(self.velocity[0], self.velocity[1], self.velocity[2]);
+        cartesian_to_keplerian(&pos, &vel, GM_EARTH)
     }
 }
 
 // ---------------------------------------------------------------------------
-// Vector helpers for Keplerian conversion
+// Conversions to/from the thresh-core representation type
 // ---------------------------------------------------------------------------
 
-/// Cross product of two 3-element arrays.
-fn cross3(a: &[f64; 3], b: &[f64; 3]) -> [f64; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
-
-/// Dot product of two 3-element arrays.
-fn dot3(a: &[f64; 3], b: &[f64; 3]) -> f64 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-/// Euclidean magnitude of a 3-element array.
-fn mag3(v: &[f64; 3]) -> f64 {
-    (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
-}
-
-/// Compute the eccentricity vector from position, velocity, and derived scalars.
-fn eccentricity_vector(r: &[f64; 3], v: &[f64; 3], r_mag: f64, v2: f64, rdotv: f64) -> [f64; 3] {
-    [
-        (v2 - GM_EARTH / r_mag) * r[0] / GM_EARTH - rdotv * v[0] / GM_EARTH,
-        (v2 - GM_EARTH / r_mag) * r[1] / GM_EARTH - rdotv * v[1] / GM_EARTH,
-        (v2 - GM_EARTH / r_mag) * r[2] / GM_EARTH - rdotv * v[2] / GM_EARTH,
-    ]
-}
-
-/// Compute right ascension of the ascending node from the node vector.
-fn compute_raan(n: &[f64; 3], n_mag: f64) -> f64 {
-    if n_mag <= 1e-12 {
-        return 0.0;
-    }
-    let val = (n[0] / n_mag).acos();
-    if n[1] >= 0.0 {
-        val
-    } else {
-        std::f64::consts::TAU - val
+/// Convert the synth Cartesian sample into the frame-disciplined
+/// [`thresh_core::orbital::OrbitalState`].
+///
+/// The synth propagator's fixed conventions are assumed:
+/// [`OrbitalFrame::EciGmst`] and Earth's WGS-84 `mu`. Consolidation of the
+/// two types is owned by the `astro-time-and-frames` change.
+impl From<OrbitalState> for thresh_core::orbital::OrbitalState {
+    fn from(state: OrbitalState) -> Self {
+        Self {
+            elements: OrbitalElements::Cartesian {
+                position: Vector3::new(state.position[0], state.position[1], state.position[2]),
+                velocity: Vector3::new(state.velocity[0], state.velocity[1], state.velocity[2]),
+            },
+            mu: GravityModel::EARTH_WGS84.mu,
+            frame: OrbitalFrame::EciGmst,
+            epoch_jd: state.epoch_jd,
+        }
     }
 }
 
-/// Compute argument of periapsis from node vector and eccentricity vector.
-fn compute_argp(n: &[f64; 3], n_mag: f64, e_vec: &[f64; 3], ecc: f64) -> f64 {
-    if n_mag <= 1e-12 || ecc <= 1e-12 {
-        return 0.0;
-    }
-    let ndote = (n[0] * e_vec[0] + n[1] * e_vec[1]) / (n_mag * ecc);
-    let val = ndote.clamp(-1.0, 1.0).acos();
-    if e_vec[2] >= 0.0 {
-        val
-    } else {
-        std::f64::consts::TAU - val
-    }
-}
+/// Convert a [`thresh_core::orbital::OrbitalState`] into the synth Cartesian
+/// sample, dropping the `mu` and frame tags (the synth type is ECI-GMST /
+/// Earth by convention — see `From<OrbitalState>` above).
+///
+/// Fallible (`TryFrom` rather than `From`) because a `Tle`-represented state
+/// cannot be converted without SGP4
+/// ([`ElementError::RequiresSgp4`] — see `tle_to_cartesian` in `thresh-data`).
+impl TryFrom<thresh_core::orbital::OrbitalState> for OrbitalState {
+    type Error = ElementError;
 
-/// Compute true anomaly from eccentricity vector and position.
-fn compute_true_anomaly(e_vec: &[f64; 3], ecc: f64, r: &[f64; 3], r_mag: f64, rdotv: f64) -> f64 {
-    if ecc <= 1e-12 {
-        return 0.0;
-    }
-    let edotr = (e_vec[0] * r[0] + e_vec[1] * r[1] + e_vec[2] * r[2]) / (ecc * r_mag);
-    let val = edotr.clamp(-1.0, 1.0).acos();
-    if rdotv >= 0.0 {
-        val
-    } else {
-        std::f64::consts::TAU - val
+    fn try_from(state: thresh_core::orbital::OrbitalState) -> Result<Self, ElementError> {
+        let (position, velocity) = state.as_cartesian()?;
+        Ok(Self {
+            position: [position.x, position.y, position.z],
+            velocity: [velocity.x, velocity.y, velocity.z],
+            epoch_jd: state.epoch_jd,
+        })
     }
 }
 
@@ -280,29 +175,24 @@ fn compute_true_anomaly(e_vec: &[f64; 3], ecc: f64, r: &[f64; 3], r_mag: f64, rd
 // ---------------------------------------------------------------------------
 
 /// Compute two-body gravitational acceleration with J2 perturbation.
+///
+/// Thin shim delegating to [`thresh_core::orbital::j2_acceleration`] with
+/// [`GravityModel::EARTH_WGS84`].
 pub fn acceleration_j2(pos: &[f64; 3]) -> [f64; 3] {
-    let x = pos[0];
-    let y = pos[1];
-    let z = pos[2];
-    let r2 = x * x + y * y + z * z;
-    let r = r2.sqrt();
-    let r5 = r2 * r2 * r;
-
-    let mu_r3 = GM_EARTH / (r2 * r);
-    let j2_coeff = 1.5 * J2 * GM_EARTH * EARTH_RADIUS * EARTH_RADIUS / r5;
-    let z2_r2 = 5.0 * z * z / r2;
-
-    [
-        -mu_r3 * x + j2_coeff * x * (z2_r2 - 1.0),
-        -mu_r3 * y + j2_coeff * y * (z2_r2 - 1.0),
-        -mu_r3 * z + j2_coeff * z * (z2_r2 - 3.0),
-    ]
+    let acc = j2_acceleration(
+        &Vector3::new(pos[0], pos[1], pos[2]),
+        &GravityModel::EARTH_WGS84,
+    );
+    [acc.x, acc.y, acc.z]
 }
 
 /// Compute atmospheric drag acceleration.
 ///
-/// Uses an exponential atmosphere model and assumes a non-rotating atmosphere
-/// for simplicity (relative velocity ≈ inertial velocity).
+/// Uses an exponential atmosphere model with a co-rotating atmosphere
+/// (relative velocity `v_rel = v − ω_⊕ × r`).
+///
+/// Thin shim delegating to [`thresh_core::orbital::drag_acceleration`] with
+/// the inverse ballistic coefficient `inv_beta = cd · area_m2 / mass_kg`.
 pub fn acceleration_drag(
     pos: &[f64; 3],
     vel: &[f64; 3],
@@ -310,30 +200,13 @@ pub fn acceleration_drag(
     area_m2: f64,
     mass_kg: f64,
 ) -> [f64; 3] {
-    let r = (pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]).sqrt();
-    let alt = r - EARTH_RADIUS;
-    if !(0.0..=1_000_000.0).contains(&alt) {
-        return [0.0, 0.0, 0.0];
-    }
-
-    // Approximate atmospheric co-rotation velocity
-    let omega_e = 7.292_115e-5; // rad/s
-    let v_atm = [-omega_e * pos[1], omega_e * pos[0], 0.0];
-    let v_rel = [vel[0] - v_atm[0], vel[1] - v_atm[1], vel[2] - v_atm[2]];
-    let v_rel_mag = (v_rel[0] * v_rel[0] + v_rel[1] * v_rel[1] + v_rel[2] * v_rel[2]).sqrt();
-
-    if v_rel_mag < 1e-10 {
-        return [0.0, 0.0, 0.0];
-    }
-
-    let rho = atmosphere_density(alt);
-    let drag_factor = -0.5 * cd * area_m2 / mass_kg * rho * v_rel_mag;
-
-    [
-        drag_factor * v_rel[0],
-        drag_factor * v_rel[1],
-        drag_factor * v_rel[2],
-    ]
+    let inv_beta = cd * area_m2 / mass_kg;
+    let acc = thresh_core::orbital::drag_acceleration(
+        &Vector3::new(pos[0], pos[1], pos[2]),
+        &Vector3::new(vel[0], vel[1], vel[2]),
+        inv_beta,
+    );
+    [acc.x, acc.y, acc.z]
 }
 
 // ---------------------------------------------------------------------------
@@ -367,85 +240,35 @@ pub struct PropagatorConfig {
 // ---------------------------------------------------------------------------
 
 /// Compute the total acceleration on the spacecraft.
-fn total_acceleration(pos: &[f64; 3], vel: &[f64; 3], config: &PropagatorConfig) -> [f64; 3] {
+///
+/// Composes the shared `thresh_core::orbital` force math per the propagator
+/// configuration (gravity with or without J2, plus optional drag).
+fn total_acceleration(
+    pos: &Vector3<f64>,
+    vel: &Vector3<f64>,
+    config: &PropagatorConfig,
+) -> Vector3<f64> {
     let mut acc = if config.include_j2 {
-        acceleration_j2(pos)
+        j2_acceleration(pos, &GravityModel::EARTH_WGS84)
     } else {
-        // Two-body only
-        let r2 = pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2];
-        let r = r2.sqrt();
-        let mu_r3 = GM_EARTH / (r2 * r);
-        [-mu_r3 * pos[0], -mu_r3 * pos[1], -mu_r3 * pos[2]]
+        two_body_acceleration(pos, &GravityModel::EARTH_WGS84)
     };
 
     if let Some(ref drag) = config.drag {
-        let a_drag = acceleration_drag(pos, vel, drag.cd, drag.area_m2, drag.mass_kg);
-        acc[0] += a_drag[0];
-        acc[1] += a_drag[1];
-        acc[2] += a_drag[2];
+        let inv_beta = drag.cd * drag.area_m2 / drag.mass_kg;
+        acc += thresh_core::orbital::drag_acceleration(pos, vel, inv_beta);
     }
 
     acc
 }
 
-/// Compute one RK4 stage at time offset `time_offset_s` (in seconds) from the
-/// current state, producing the pair `(k_r, k_v)` where `k_r` is the state
-/// velocity at the offset point and `k_v` is the acceleration evaluated there.
-fn rk4_stage(
-    pos: &[f64; 3],
-    vel: &[f64; 3],
-    prev_kr: &[f64; 3],
-    prev_kv: &[f64; 3],
-    time_offset_s: f64,
-    config: &PropagatorConfig,
-) -> ([f64; 3], [f64; 3]) {
-    let stage_pos = [
-        pos[0] + time_offset_s * prev_kr[0],
-        pos[1] + time_offset_s * prev_kr[1],
-        pos[2] + time_offset_s * prev_kr[2],
-    ];
-    let stage_vel = [
-        vel[0] + time_offset_s * prev_kv[0],
-        vel[1] + time_offset_s * prev_kv[1],
-        vel[2] + time_offset_s * prev_kv[2],
-    ];
-    let acc = total_acceleration(&stage_pos, &stage_vel, config);
-    (stage_vel, acc)
-}
-
-/// Take one RK4 step.
-fn rk4_step(
-    pos: &[f64; 3],
-    vel: &[f64; 3],
-    dt: f64,
-    config: &PropagatorConfig,
-) -> ([f64; 3], [f64; 3]) {
-    let zero = [0.0, 0.0, 0.0];
-    // k1: evaluated at the current state (step = 0).
-    let (k1r, k1v) = rk4_stage(pos, vel, &zero, &zero, 0.0, config);
-    // k2: half step using k1.
-    let (k2r, k2v) = rk4_stage(pos, vel, &k1r, &k1v, 0.5 * dt, config);
-    // k3: half step using k2.
-    let (k3r, k3v) = rk4_stage(pos, vel, &k2r, &k2v, 0.5 * dt, config);
-    // k4: full step using k3.
-    let (k4r, k4v) = rk4_stage(pos, vel, &k3r, &k3v, dt, config);
-
-    let new_pos = [
-        pos[0] + dt / 6.0 * (k1r[0] + 2.0 * k2r[0] + 2.0 * k3r[0] + k4r[0]),
-        pos[1] + dt / 6.0 * (k1r[1] + 2.0 * k2r[1] + 2.0 * k3r[1] + k4r[1]),
-        pos[2] + dt / 6.0 * (k1r[2] + 2.0 * k2r[2] + 2.0 * k3r[2] + k4r[2]),
-    ];
-    let new_vel = [
-        vel[0] + dt / 6.0 * (k1v[0] + 2.0 * k2v[0] + 2.0 * k3v[0] + k4v[0]),
-        vel[1] + dt / 6.0 * (k1v[1] + 2.0 * k2v[1] + 2.0 * k3v[1] + k4v[1]),
-        vel[2] + dt / 6.0 * (k1v[2] + 2.0 * k2v[2] + 2.0 * k3v[2] + k4v[2]),
-    ];
-
-    (new_pos, new_vel)
-}
-
 /// Propagate an orbital state forward in time using a 4th-order Runge-Kutta
 /// integrator.
+///
+/// Integration steps through the shared closure-based
+/// [`thresh_core::orbital::rk4_step`], with the acceleration composed from
+/// the propagator configuration (gravity with or without J2, plus optional
+/// drag) out of the shared `thresh_core::orbital` force math.
 ///
 /// Returns a vector of [`OrbitalState`] sampled at intervals of `output_dt_s`.
 /// The first element is the initial state.
@@ -456,18 +279,28 @@ pub fn propagate(
     output_dt_s: f64,
 ) -> Vec<OrbitalState> {
     let mut results = Vec::new();
-    let mut pos = initial.position;
-    let mut vel = initial.velocity;
+    let mut pos = Vector3::new(
+        initial.position[0],
+        initial.position[1],
+        initial.position[2],
+    );
+    let mut vel = Vector3::new(
+        initial.velocity[0],
+        initial.velocity[1],
+        initial.velocity[2],
+    );
     let dt = config.dt_s;
     let n_steps = (duration_s / dt).ceil() as usize;
     let output_step_interval = (output_dt_s / dt).round().max(1.0) as usize;
 
     // Record initial state
     results.push(OrbitalState {
-        position: pos,
-        velocity: vel,
+        position: initial.position,
+        velocity: initial.velocity,
         epoch_jd: initial.epoch_jd,
     });
+
+    let accel = |p: &Vector3<f64>, v: &Vector3<f64>| total_acceleration(p, v, config);
 
     for step_i in 1..=n_steps {
         let t = (step_i as f64) * dt;
@@ -476,15 +309,15 @@ pub fn propagate(
         } else {
             dt
         };
-        let (new_pos, new_vel) = rk4_step(&pos, &vel, actual_step, config);
+        let (new_pos, new_vel) = rk4_step(&pos, &vel, actual_step, accel);
         pos = new_pos;
         vel = new_vel;
 
         let elapsed = t.min(duration_s);
         if step_i % output_step_interval == 0 || step_i == n_steps {
             results.push(OrbitalState {
-                position: pos,
-                velocity: vel,
+                position: [pos.x, pos.y, pos.z],
+                velocity: [vel.x, vel.y, vel.z],
                 epoch_jd: initial.epoch_jd + elapsed / SECONDS_PER_DAY,
             });
         }
@@ -562,6 +395,12 @@ mod tests {
     /// Helper: circular orbit velocity at given radius.
     fn circular_velocity(r: f64) -> f64 {
         (GM_EARTH / r).sqrt()
+    }
+
+    /// Euclidean magnitude of a 3-element array (test-local helper; the
+    /// production Keplerian math moved to `thresh_core::orbital::state`).
+    fn mag3(v: &[f64; 3]) -> f64 {
+        (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
     }
 
     // ── ISS-like orbit, 1-day J2 propagation ───────────────────────────
@@ -802,5 +641,103 @@ mod tests {
         assert!(rho_200 > rho_400);
         assert!(rho_400 > rho_800);
         assert!(rho_200 > 0.0);
+    }
+
+    // ── Bitwise identity: synth shims vs thresh_core::orbital (task 1.5) ──
+
+    /// Spec "Identical accelerations from both consumers": the same ECI state
+    /// evaluated through the synth `[f64; 3]` shims and through
+    /// `thresh_core::orbital` directly must be **bitwise** identical — same
+    /// code path, not merely approximately equal.
+    #[test]
+    fn shims_match_core_bitwise() {
+        // All components nonzero so every term of the math is exercised;
+        // altitude ~247 km keeps the state inside the sensible atmosphere.
+        let pos = [6_500_000.0, 1_000_000.0, 800_000.0];
+        let vel = [-1_500.0, 7_100.0, 300.0];
+        let pos_v = Vector3::new(pos[0], pos[1], pos[2]);
+        let vel_v = Vector3::new(vel[0], vel[1], vel[2]);
+
+        let shim_grav = acceleration_j2(&pos);
+        let core_grav = j2_acceleration(&pos_v, &GravityModel::EARTH_WGS84);
+
+        let (cd, area_m2, mass_kg) = (2.2, 20.0, 500.0);
+        let shim_drag = acceleration_drag(&pos, &vel, cd, area_m2, mass_kg);
+        let core_drag =
+            thresh_core::orbital::drag_acceleration(&pos_v, &vel_v, cd * area_m2 / mass_kg);
+
+        assert!(
+            mag3(&shim_drag) > 0.0,
+            "drag must be nonzero for the comparison to be meaningful"
+        );
+        for i in 0..3 {
+            assert_eq!(
+                shim_grav[i].to_bits(),
+                core_grav[i].to_bits(),
+                "gravity component {i} differs"
+            );
+            assert_eq!(
+                shim_drag[i].to_bits(),
+                core_drag[i].to_bits(),
+                "drag component {i} differs"
+            );
+        }
+    }
+
+    // ── From/TryFrom conversions with the core representation (task 2.6) ──
+
+    #[test]
+    fn synth_to_core_assumes_eci_gmst_and_earth_mu() {
+        let synth = OrbitalState::from_cartesian(
+            [7_000_000.0, 1_000.0, -2_000.0],
+            [10.0, 7_500.0, -20.0],
+            2_451_545.0,
+        );
+        let core = thresh_core::orbital::OrbitalState::from(synth.clone());
+
+        assert_eq!(core.frame, OrbitalFrame::EciGmst);
+        assert_eq!(core.mu.to_bits(), GravityModel::EARTH_WGS84.mu.to_bits());
+        assert_eq!(core.epoch_jd, synth.epoch_jd);
+        let (pos, vel) = core.as_cartesian().unwrap();
+        for i in 0..3 {
+            assert_eq!(pos[i].to_bits(), synth.position[i].to_bits());
+            assert_eq!(vel[i].to_bits(), synth.velocity[i].to_bits());
+        }
+    }
+
+    #[test]
+    fn core_to_synth_roundtrip_is_bitwise() {
+        let synth = OrbitalState::from_cartesian(
+            [6_800_000.0, -500_000.0, 300_000.0],
+            [-100.0, 7_400.0, 800.0],
+            2_460_310.5,
+        );
+        let core = thresh_core::orbital::OrbitalState::from(synth.clone());
+        let back = OrbitalState::try_from(core).unwrap();
+
+        assert_eq!(back.epoch_jd, synth.epoch_jd);
+        for i in 0..3 {
+            assert_eq!(back.position[i].to_bits(), synth.position[i].to_bits());
+            assert_eq!(back.velocity[i].to_bits(), synth.velocity[i].to_bits());
+        }
+    }
+
+    #[test]
+    fn core_to_synth_rejects_tle_elements() {
+        let tle_state = thresh_core::orbital::OrbitalState {
+            elements: OrbitalElements::Tle {
+                line1: "1 25544U 98067A   24001.00000000  .00016717  00000-0  10270-3 0  9026"
+                    .to_string(),
+                line2: "2 25544  51.6400 208.9163 0006703  30.1579 330.0018 15.49560455    18"
+                    .to_string(),
+            },
+            mu: GravityModel::EARTH_WGS84.mu,
+            frame: OrbitalFrame::Teme,
+            epoch_jd: 2_460_310.5,
+        };
+        assert_eq!(
+            OrbitalState::try_from(tle_state).unwrap_err(),
+            ElementError::RequiresSgp4
+        );
     }
 }

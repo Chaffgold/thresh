@@ -21,6 +21,9 @@ nalgebra = { workspace = true }
 [dev-dependencies]
 criterion = { workspace = true }
 nalgebra = { workspace = true }
+# Truth-identity golden test only (KeplerJ2::predict vs thresh_synth::propagate,
+# design Decision 8 tier 2); thresh-synth depends only on thresh-core, so no cycle.
+thresh-synth = { path = "../thresh-synth" }
 
 [[bench]]
 name = "kalman"

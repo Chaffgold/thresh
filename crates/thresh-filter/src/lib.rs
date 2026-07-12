@@ -8,5 +8,6 @@ pub mod imm;
 pub mod imm_adapter;
 pub mod kf;
 pub mod models;
+pub mod numeric;
 pub mod traits;
 pub mod ukf;
