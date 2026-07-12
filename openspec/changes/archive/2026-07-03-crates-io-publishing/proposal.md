@@ -1,5 +1,7 @@
 # crates.io Publishing Workflow
 
+> **Deferred (2026-07-03, not implemented):** archived with 0/26 tasks done and no spec deltas applied — thresh stays GitHub-org-internal for now. Revisit this change if/when crates.io publishing becomes a goal.
+
 ## What
 
 Polish crate metadata across all workspace members and add a cargo-release + GitHub Actions workflow for publishing all workspace crates to crates.io in correct dependency order. This includes completing Cargo.toml metadata (descriptions, license, repository, documentation URLs), verifying publish ordering, configuring cargo-release for workspace version management, and creating a CI workflow that automates the publish sequence.

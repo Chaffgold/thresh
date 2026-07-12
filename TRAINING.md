@@ -2,7 +2,7 @@
 
 Reproduction recipe for the trained ONNX checkpoints under `test-data/models/` that the inference pipeline consumes. This pipeline is tracked by the OpenSpec change `flight-data-training-pipeline`; see [`openspec/changes/flight-data-training-pipeline/`](openspec/changes/flight-data-training-pipeline/) for the full proposal, design, and tasks.
 
-> **Status:** Phases 1–7 landed — acquisition (OpenSky + ADS-B Exchange), the trajectory-driven synth pairing, and the full training/export scaffolding for **both** learned components (Track B IMM mode classifier, Track A detector). The real GPU training runs (and the trained checkpoints that replace the random-weight stubs) are deferred — training is a non-CI goal (design Decision 7) and is gated on the full external dataset + GPU hardware. The end-to-end evaluation harness (Phase 9) is the remaining piece. The checked-in `test-data/models/*.onnx` are **random-weight stubs** for shape contracts; see `test-data/models/MODEL_CARD.md`.
+> **Status:** Phases 1–7 landed — acquisition (OpenSky + ADS-B Exchange), the trajectory-driven synth pairing, and the full training/export scaffolding for **both** learned components (Track B IMM mode classifier, Track A detector). The real GPU training runs (and the trained checkpoints that replace the random-weight stubs) are deferred — training is a non-CI goal (design Decision 7) and is gated on the full external dataset + GPU hardware. The end-to-end evaluation harness (Phase 9) has landed as well — `python/eval/run_tracker.py` over the Rust-native `eval-tracker` binary, with results in [`docs/eval/flight-data-training-pipeline.md`](docs/eval/flight-data-training-pipeline.md). What remains is trained checkpoints that meet the exit criteria: Track B (tasks 6.8/8.5) is blocked on authenticated OpenSky captures with turning traffic, and Track A (tasks 7.9/8.4) awaits the in-progress scene-normalization retrain. The checked-in `test-data/models/*.onnx` are **random-weight stubs** for shape contracts; see `test-data/models/MODEL_CARD.md`.
 
 ## Python tree layout
 
@@ -161,7 +161,7 @@ uv run --extra training python -m export.export_detector \
 
 ## Evaluation (Phase 9)
 
-The end-to-end MOTA/MOTP/IDF1 A/B harness (`python/eval/run_tracker.py`, with `--learned-imm` / `--learned-detector` flags) is the remaining phase. Once it lands, the full reproduction is `uv sync` → acquire → `gen-*-dataset` → `train_*` → `export_*` → `run_tracker.py`.
+The end-to-end MOTA/MOTP/IDF1 A/B harness (`python/eval/run_tracker.py`, with `--learned-imm` / `--learned-detector` flags) has landed: it is a thin wrapper over the Rust-native `eval-tracker` binary (`thresh::eval_harness`), and baseline/A/B results live in [`docs/eval/flight-data-training-pipeline.md`](docs/eval/flight-data-training-pipeline.md). The full reproduction is `uv sync` → acquire → `gen-*-dataset` → `train_*` → `export_*` → `run_tracker.py`. What remains is checkpoints that meet the exit criteria: Track B (tasks 6.8/8.5) is blocked on authenticated OpenSky captures with turning traffic; Track A (tasks 7.9/8.4) awaits the in-progress scene-normalization retrain.
 
 ## License posture
 
