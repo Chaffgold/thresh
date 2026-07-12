@@ -17,7 +17,7 @@ dependencies = [
 training = [
     # >=2.7: `torch.onnx.export` accepts the `dynamo` kwarg, which export_imm.py
     # and export_detector.py pass (`dynamo=False`) to force the legacy exporter.
-    "torch>=2.7",
+    "torch>=2.12.1",
     "onnx>=1.16",
     "onnxruntime>=1.18",
     # Hungarian matcher for the detector set-prediction loss (train_detector.py).
