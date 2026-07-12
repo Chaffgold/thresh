@@ -17,6 +17,7 @@ goal). Requires the ``training`` optional extra (torch, scipy).
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 import numpy as np
@@ -123,10 +124,16 @@ def set_prediction_loss(
     # Centre/dims errors are expressed in box-prior units (see CENTRE_UNIT /
     # DIMS_UNIT) so the loss keeps gradient pressure down to metre scale.
     diff = (matched_pred - matched_gt).abs()
+    # Yaw is periodic: wrap its residual to [-pi, pi] so a prediction near +pi
+    # against a target near -pi costs ~0, not ~2*pi (torch.remainder returns
+    # values in [0, 2*pi) for a positive divisor, so this holds for all inputs).
+    yaw_res = (
+        torch.remainder(matched_pred[:, 6] - matched_gt[:, 6] + math.pi, 2 * math.pi) - math.pi
+    )
     box_l1 = (
         diff[:, :3].sum(dim=1) / (3.0 * CENTRE_UNIT)
         + diff[:, 3:6].sum(dim=1) / (3.0 * DIMS_UNIT)
-        + diff[:, 6]
+        + yaw_res.abs()
     ).mean() / 3.0
     iou_loss = (1.0 - axis_aligned_iou_3d(matched_pred, matched_gt)).mean()
     class_loss = nn.functional.cross_entropy(class_logits[qi], gt_classes[gi])
