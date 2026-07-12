@@ -236,6 +236,54 @@ If the third bullet fails, ship the model but keep the feature gate off by defau
 
 **Rationale:** A subprocess + JSON boundary keeps the check language-agnostic and avoids a PyO3 round-trip (which doesn't build locally). The IMM classifier is the cleanest target — a single output tensor that `OnnxModel::run_f32` already returns — whereas the detector has three outputs. Observed agreement is exact (max diff 0.00e+00) on CPU. The trained-checkpoint swaps (8.4/8.5) are deferred with the GPU runs.
 
+### 26. Track A detection metric recalibrated: distance-gated, baseline-relative (amends Decision 11)
+
+**Decision:** The mAP@0.5(3D-IoU) ≥ 0.30 bullet of Decision 11 is replaced. Task
+7.9's detection gate becomes:
+
+- **Matching:** centre-distance-gated AP on the deployment-postprocessed output
+  (confidence ≥ 0.5, class-agnostic NMS 0.4 — unchanged), averaged over gates
+  {0.5σ, 1σ, 2σ} of `return_position_noise_m` — {2.5, 5, 10} m at today's
+  σ = 5 m. IoU-based mAP stays as a *reported* diagnostic for continuity.
+- **Aggregation:** micro-averaged (all classes pooled) for the gate. Per-class
+  AP is reported diagnostically; a class only ever joins a macro gate with
+  ≥ 100 GT boxes in the holdout.
+- **Gate (baseline-relative):** the learned detector's micro distance-AP must be
+  **strictly greater than a classical baseline** — DBSCAN-clustered centroids
+  over the same point clouds (task 7.10) — on the same holdout. The **oracle
+  ceiling** (centroid of GT-segmented target returns, the CRLB-achieving
+  estimator) is computed and reported alongside, so every future run is located
+  on the bracket `random stub … classical baseline … learned … oracle`.
+- **Unchanged:** class accuracy ≥ 0.50 on matched boxes (v5: 0.985 ✅) and the
+  downstream bullet (strictly better signal than the random stub on
+  `thresh-eval` MOTA — still requires the `eval-tracker --learned-detector`
+  seam). Dims/yaw remain reported diagnostics only: `Detection3D::to_measurement()`
+  is position-only, so no deployment path consumes extent until the deferred
+  BEV-fusion work does.
+
+**Rationale:** Decision 11's stated intent was *"meaningfully better than
+random … intentionally modest"*, but the v5 evidence shows the absolute IoU
+gate never measured that on this sensor configuration: a CRLB-achieving
+centroid over perfectly segmented returns (1.25 m/axis at 16 returns / 5 m
+noise) clears the ~1.8 m IoU@0.5 offset budget only ~44% of the time, and with
+the holdout's 97.7%-class-4 skew (anonymous OpenSky rarely carries an ADS-B
+category) the class-averaged gate caps a *perfect* common-class detector at
+~0.33 — the old gate was oracle-hard, not modest. The recalibration preserves
+the intent while fixing all three broken layers: distance matching aligns the
+metric with what deployment consumes (position + score + class) and with the
+framework's own idiom (`thresh-eval` HOTA integrates position-error thresholds
+0.5–9.5 m; GT boxes are near-constant 10.5×10.5×5.1 m, so IoU was centre
+distance repackaged through a cliff); micro-averaging removes the
+32-sample-class statistical noise; and a baseline-relative gate — the exact
+symmetry of Track B's "MOTA no worse than analytic" — is self-calibrating, so
+it travels with the data when authenticated captures change geometry, density,
+and class mix. Sanity forecast at today's σ (estimates, to be replaced by
+task 7.10 numbers): oracle micro distance-AP ≈ 0.9, v5 ≈ 0.5–0.6, random
+stub ≈ 0. Sensor realism (are 16 returns / 5 m noise anchored to a reference
+radar?) is deliberately **not** changed here — revisiting the synth radar
+config to fit the metric would invert the relationship; it stays an open
+question for the radar-scene spec.
+
 ## Implementation status & deferrals (Phase 11 wrap-up)
 
 As of this change, **Phases 1–10 are implemented**; the two learned tracks are fully scaffolded end-to-end (acquisition → synth → train → export → Rust load/decode → eval), with CI-verified ONNX contracts, a real analytic-tracker MOTA baseline, and Python↔Rust ONNX parity. The following are **deliberately deferred**, all gated on data/hardware rather than on missing design:
@@ -296,6 +344,95 @@ committed models remain stubs. Findings, most load-bearing first:
 Per Decision 11's escape hatch (iterate or abandon without blocking), the
 checkpoint swaps wait for the follow-on: authenticated data acquisition, a
 dt-aware or single-regime Track B retrain, and scene normalization for
-Track A. All infrastructure from this run (ingestion, capture robustness,
-GPU training support, `eval/detector_map.py`, `eval/imm_accuracy.py`,
-balanced-loss + normalized-export training) is landed and reusable.
+Track A (since implemented — next section). All infrastructure from this run
+(ingestion, capture robustness, GPU training support, `eval/detector_map.py`,
+`eval/imm_accuracy.py`, balanced-loss + normalized-export training) is landed
+and reusable.
+
+## Track A follow-on: scene normalization + box-head iteration (2026-07-03)
+
+Findings §4's fix was implemented and iterated against per-round DGX holdout
+diagnostics; each version's diagnosis drove the next change:
+
+- **v2 — constant scene normalization.** One deliberate divergence from §4's
+  prescription: a *constant* `SCENE_SCALE_M` (100 km, the synth clutter cube
+  half-extent) instead of per-snapshot statistics, so the exported graph has
+  no data-dependent branches. Normalization happens inside
+  `DetectorModel.forward`, training supervises boxes in the same normalized
+  space, and `DetectorExportWrapper` scales centres/dims back to raw metres —
+  the Parquet dataset and the ONNX/Rust decode contract are unchanged.
+  Result: the loss finally learns (plateau ~1000 → 0.95) but holdout mAP
+  stayed 0.0 — the IoU term saturates because an aircraft box is ~5×10⁻⁴ of
+  the normalized scene, and a decoder embedding cannot regress absolute
+  position to the ~25 m accuracy IoU@0.5 demands.
+- **v3 — 3DETR-style attention-weighted centres.** Each query's (averaged)
+  cross-attention distribution weights the input xyz, and the box head
+  refines with a small offset plus dims and yaw; the attention-weights path
+  survives ONNX export (smoke-verified on the DGX). Diagnosis: centres land
+  within ~460 m of targets 5–10 km out — localization works — but predicted
+  dims were negative garbage, and box-loss terms at 10⁻³ normalized were
+  invisible next to the saturated IoU and CE losses (zero gradient pressure
+  below ~500 m).
+- **v4 — box-prior loss units.** Centre-refinement offsets bounded to a
+  500 m scale (the measured gap); dims predicted as 10 m-prior × exp(head),
+  positive and O(prior); L1 expressed in box-prior units (centres per 100 m,
+  dims per 10 m) so errors are O(1) exactly when box-sized; matcher cost =
+  centre distance in prior units (assignment is about *where*, not shape).
+  Diagnosis: holdout centre error 3.6 m median, identical to train — the
+  detector generalizes — but IoU@0.5 on a 10×10×5 m aircraft box needs
+  ~1.5–2 m (a (2, 2, 1) m offset scores IoU 0.34), and at fixed Adam
+  lr = 10⁻³ the loss plateaus on optimizer noise.
+- **v5 — cosine LR decay (200 epochs).** Annealing targeted the precision
+  tail on the theory that fixed-lr optimizer noise was the floor; physics
+  allows ~1.25 m/axis (16 returns at 5 m noise). In the same round,
+  `eval/detector_map.py` gained the deployed Rust decode's postprocessing
+  (confidence ≥ 0.5, class-agnostic NMS at IoU 0.4 —
+  `thresh_inference::DetectorConfig` defaults) before scoring, since raw
+  100-query output floods precision with duplicates deployment never emits.
+  **Result (2026-07-03 DGX run): mAP@0.5 = 0.044 — the ≥ 0.30 gate is
+  missed and the optimizer-noise hypothesis is refuted.** Loss fell
+  1.48 → 1.35 over 4× the epochs, but 3D centre error stayed at 3.59 m p50
+  (~1.6 m/axis, ~1.3× the physics bound); v4 at 50 epochs had scored 0.053.
+  Error structure: only 13% of nearest-neighbour matches clear IoU 0.5
+  (median nearest IoU 0.26); 558/5,752 snapshots emit nothing past the 0.5
+  confidence gate; the dims head sits exactly on the 10×10×5 m prior (GT
+  mean 10.5×10.5×5.1 m — harmless, ~0.89 IoU ceiling); class accuracy on
+  matched boxes is 0.985.
+
+Verdict: 7.9 stays open and this branch lands as incremental evidence per
+Decision 11's escape hatch. The v5 diagnosis shifts the bottleneck from
+optimization to **data and criterion**: (a) localization sits near the
+sensor physics floor — at 16 returns / 5 m noise, IoU@0.5 on a 10×10×5 m
+box demands sub-noise-floor precision, so denser returns (synth radar
+config) or multi-frame accumulation are the levers, not LR schedules;
+(b) the holdout GT is 97.7% class 4 (5,075/5,194 boxes; class 0: 32,
+class 1: 87 — anonymous-quota OpenSky rarely carries an ADS-B category),
+so class-averaged mAP is literally AP₄/3 = 0.044 here, and even a perfect
+common-class detector caps at ~0.33 while the rare classes stay empty.
+Richer captures (findings §1's authenticated-account blocker now binds
+Track A too) or a criterion revisit (distance-gated matching à la nuScenes
+instead of IoU@0.5, or mAP weighted by class support) are the candidate
+follow-ons — the latter is Decision territory, not a training change.
+*The criterion revisit is now resolved by Decision 26 (distance-gated,
+micro-averaged, baseline-relative); tasks 7.10/7.11 carry the implied eval
+work.*
+
+First bracket measurement (2026-07-03, v5 on the London holdout, micro
+distance-AP): **stub 0.000 · learned 0.667 · classical 0.916 · oracle
+0.923 — the Decision 26 gate fails (learned < classical).** The metric now
+discriminates where IoU mAP crushed everything into 0–0.05, and the failure
+is interpretable: position-only DBSCAN sits *at the oracle* because
+single-target sparse-clutter scenes are solvable at the CRLB by clustering —
+this dataset cannot demonstrate learned-detector value, mirroring Track B
+(cruise-only data cannot demonstrate turn classification). The learned path
+justifies itself only on scenes clustering can't solve: multi-target,
+dense/structured clutter, variable density — which the anonymous-quota
+captures don't contain. Learned per-gate {2.5 m: 0.244, 5 m: 0.760,
+10 m: 0.997}: recall is essentially complete at 10 m; the entire deficit is
+the precision tail. Two corrections/cross-checks from the bracket: the 558
+zero-detection snapshots are exactly the 558 clutter-only snapshots
+(5,752 − 5,194 GT) — correct behaviour, not a recall hole as v5's first
+diagnostic implied; and under the old gate the oracle scores IoU mAP 0.60
+(GT classes lift the rare-class APs) while the realistic-classification
+classical scores 0.166 — the two straddle 0.30 for reasons unrelated to
+detection quality, confirming the recalibration was necessary.

@@ -16,7 +16,17 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from training.detector_dataset import BOX_DIM, MAX_BOXES, NUM_CLASSES, POINT_DIM
+from training.detector_dataset import BOX_DIM, MAX_BOXES, NUM_CLASSES, POINT_DIM, SCENE_SCALE_M
+
+CENTRE_OFFSET_SCALE_M = 500.0
+"""Refinement-offset range (metres): attention centres land within ~500 m of
+the target (measured on the first real run), so an O(1) head output must move
+the centre by that order — a raw normalized offset would jump 100 km."""
+
+DIMS_PRIOR_M = 10.0
+"""Box-dimension prior (metres): dims are predicted as ``prior · exp(head)``,
+positive by construction and O(prior)-scaled — aircraft boxes are ~1e-4 of the
+normalized scene, far too small for a linear head to find from zero."""
 
 
 class DetectorModel(nn.Module):
@@ -44,12 +54,29 @@ class DetectorModel(nn.Module):
         self.class_head = nn.Linear(d_model, num_classes)
 
     def forward(self, point_cloud: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # point_cloud: (B, NUM_POINTS, point_dim)
+        # point_cloud: (B, NUM_POINTS, point_dim) in raw metres; xyz is scene-
+        # normalized here so the core learns unit-scale geometry, and the box
+        # head predicts in the same normalized space (see SCENE_SCALE_M).
+        point_cloud = torch.cat(
+            [point_cloud[..., :3] / SCENE_SCALE_M, point_cloud[..., 3:]], dim=-1
+        )
         memory = self.point_encoder(point_cloud)  # (B, NUM_POINTS, d_model)
         batch = point_cloud.shape[0]
         queries = self.query_embed.unsqueeze(0).expand(batch, -1, -1)  # (B, Q, d)
-        decoded, _ = self.cross_attn(queries, memory, memory)  # (B, Q, d)
-        boxes = self.box_head(decoded)  # (B, Q, 7)
+        decoded, attn = self.cross_attn(
+            queries, memory, memory, need_weights=True, average_attn_weights=True
+        )  # decoded (B, Q, d); attn (B, Q, N), rows sum to 1
+        # Box centres come from the cloud itself (3DETR-style): each query's
+        # attention distribution selects the points it looks at, and the centre
+        # is their weighted mean — a decoder embedding alone cannot regress
+        # absolute positions to the ~25 m accuracy IoU@0.5 demands (an aircraft
+        # box is ~5e-4 of the normalized scene). The head refines with a small
+        # offset and predicts dims + yaw.
+        centres = torch.bmm(attn, point_cloud[..., :3])  # (B, Q, 3) normalized
+        refined = self.box_head(decoded)  # (B, Q, 7) = offset(3) + dims(3) + yaw(1)
+        offset = refined[..., :3] * (CENTRE_OFFSET_SCALE_M / SCENE_SCALE_M)
+        dims = (DIMS_PRIOR_M / SCENE_SCALE_M) * torch.exp(refined[..., 3:6].clamp(-4.0, 4.0))
+        boxes = torch.cat([centres + offset, dims, refined[..., 6:]], dim=-1)
         score_logits = self.score_head(decoded)  # (B, Q, 1)
         class_logits = self.class_head(decoded)  # (B, Q, num_classes)
         return boxes, score_logits, class_logits
@@ -66,6 +93,9 @@ class DetectorExportWrapper(nn.Module):
 
     def forward(self, point_cloud: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         boxes, score_logits, class_logits = self.core(point_cloud)
+        # The core predicts scene-normalized boxes; the deployed contract is
+        # raw metres (centre + dims scale, yaw unchanged).
+        boxes = torch.cat([boxes[..., :6] * SCENE_SCALE_M, boxes[..., 6:]], dim=-1)
         scores = torch.sigmoid(score_logits)
         classes = class_logits.argmax(dim=-1, keepdim=True).to(torch.int64)
         return boxes, scores, classes

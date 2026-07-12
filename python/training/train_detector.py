@@ -17,6 +17,7 @@ goal). Requires the ``training`` optional extra (torch, scipy).
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 import numpy as np
@@ -24,8 +25,16 @@ import torch
 from scipy.optimize import linear_sum_assignment
 from torch import nn
 
-from training.detector_dataset import DetectorSamples, load_detector_samples
-from training.detector_model import DetectorModel
+from training.detector_dataset import SCENE_SCALE_M, DetectorSamples, load_detector_samples
+from training.detector_model import DIMS_PRIOR_M, DetectorModel
+
+# Per-component L1 units (normalized space). Dividing box errors by these puts
+# them at O(1) exactly when they are box-sized: a 100 m centre error or a
+# 10 m dims error contributes ~1.0 to the loss. Without this the first real
+# run stalled at 460 m centre error — box terms at 1e-3 normalized were
+# invisible next to the saturated IoU and CE terms.
+CENTRE_UNIT = 100.0 / SCENE_SCALE_M
+DIMS_UNIT = DIMS_PRIOR_M / SCENE_SCALE_M
 
 # Explicit cost/loss weights (DETR balances box vs. class with named
 # coefficients rather than relying on implicit normalisation). The matcher cost
@@ -68,10 +77,10 @@ def _match(
     """Hungarian match queries → GT (cost = L1 box + class-mismatch). Returns
     ``(query_idx, gt_idx)`` long tensors of length ``M``."""
     with torch.no_grad():
-        # Per-dimension mean-abs L1 (divide by box DoF) so the box cost is on a
-        # comparable scale to the class cost (a probability in [0, 1]); the
-        # named weights make the balance explicit and tunable.
-        box_cost = torch.cdist(pred_boxes, gt_boxes, p=1) / pred_boxes.shape[1]  # (Q, M)
+        # Centre-distance cost in centre-prior units (a 100 m error costs ~1,
+        # comparable to the class cost's [0, 1]); dims/yaw are excluded from
+        # matching — assignment should be about *where*, not box shape.
+        box_cost = torch.cdist(pred_boxes[:, :3], gt_boxes[:, :3], p=1) / (3.0 * CENTRE_UNIT)
         class_prob = torch.softmax(class_logits, dim=-1)  # (Q, C)
         class_cost = 1.0 - class_prob[:, gt_classes]  # (Q, M)
         cost = (MATCH_COST_BOX * box_cost + MATCH_COST_CLASS * class_cost).cpu().numpy()
@@ -112,7 +121,20 @@ def set_prediction_loss(
     matched_pred, matched_gt = boxes[qi], gt_boxes[gi]
     # L1 supervises all 7 DoF including yaw (the only yaw supervision); the IoU
     # term is an axis-aligned proxy that ignores yaw by design (Decision 23).
-    box_l1 = (matched_pred - matched_gt).abs().mean()
+    # Centre/dims errors are expressed in box-prior units (see CENTRE_UNIT /
+    # DIMS_UNIT) so the loss keeps gradient pressure down to metre scale.
+    diff = (matched_pred - matched_gt).abs()
+    # Yaw is periodic: wrap its residual to [-pi, pi] so a prediction near +pi
+    # against a target near -pi costs ~0, not ~2*pi (torch.remainder returns
+    # values in [0, 2*pi) for a positive divisor, so this holds for all inputs).
+    yaw_res = (
+        torch.remainder(matched_pred[:, 6] - matched_gt[:, 6] + math.pi, 2 * math.pi) - math.pi
+    )
+    box_l1 = (
+        diff[:, :3].sum(dim=1) / (3.0 * CENTRE_UNIT)
+        + diff[:, 3:6].sum(dim=1) / (3.0 * DIMS_UNIT)
+        + yaw_res.abs()
+    ).mean() / 3.0
     iou_loss = (1.0 - axis_aligned_iou_3d(matched_pred, matched_gt)).mean()
     class_loss = nn.functional.cross_entropy(class_logits[qi], gt_classes[gi])
     obj_target[qi] = 1.0
@@ -146,6 +168,10 @@ def train(
     torch.manual_seed(seed)
     model = DetectorModel(d_model=d_model).to(resolved)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    # Cosine decay to ~0: at a fixed 1e-3 the loss plateaus on optimizer
+    # noise (~3.6 m centre error) while IoU@0.5 on aircraft-sized boxes
+    # needs ~1.5-2 m — the tail of training must anneal.
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     point_clouds = torch.from_numpy(samples.point_clouds)
     n = len(samples)
     rng = np.random.default_rng(seed)
@@ -163,6 +189,9 @@ def train(
             for k, i in enumerate(idx):
                 mask = samples.gt_valid[i]
                 gt_boxes = torch.from_numpy(samples.gt_boxes[i][mask]).float().to(resolved)
+                # The model predicts scene-normalized boxes (see SCENE_SCALE_M);
+                # supervise in the same space so the loss is unit-scale.
+                gt_boxes = torch.cat([gt_boxes[..., :6] / SCENE_SCALE_M, gt_boxes[..., 6:]], dim=-1)
                 gt_classes = torch.from_numpy(samples.gt_classes[i][mask]).long().to(resolved)
                 total = total + set_prediction_loss(
                     all_boxes[k], all_scores[k], all_class_logits[k], gt_boxes, gt_classes
@@ -172,6 +201,7 @@ def train(
             loss.backward()
             optimizer.step()
             epoch_loss += float(loss.item()) * len(idx)
+        scheduler.step()
         final_loss = epoch_loss / max(n, 1)
         print(f"epoch {epoch + 1}/{epochs}: loss {final_loss:.4f}", flush=True)
 

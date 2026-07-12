@@ -75,6 +75,24 @@ def test_set_prediction_loss_computes_and_backprops() -> None:
     assert torch.isfinite(empty)
 
 
+def test_yaw_l1_wraps_at_pi() -> None:
+    """Yaw is periodic: a prediction near +pi vs a target near -pi is a
+    ~0.02 rad error after wrapping, not ~2*pi."""
+    gt_boxes = torch.tensor([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, -np.pi + 0.01]])
+    gt_classes = torch.tensor([1])
+    score_logits = torch.zeros(1, 1)
+    class_logits = torch.zeros(1, NUM_CLASSES)
+    pred_exact = gt_boxes.clone()
+    pred_wrapped = gt_boxes.clone()
+    pred_wrapped[0, 6] = np.pi - 0.01
+    loss_exact = set_prediction_loss(pred_exact, score_logits, class_logits, gt_boxes, gt_classes)
+    loss_wrapped = set_prediction_loss(
+        pred_wrapped, score_logits, class_logits, gt_boxes, gt_classes
+    )
+    # Unwrapped, the yaw term alone would add ~(2*pi - 0.02) / 3 ≈ 2.09.
+    assert (loss_wrapped - loss_exact).abs() < 0.05
+
+
 def test_smoke_train_reduces_loss() -> None:
     samples = _tiny_samples(4)
     _, loss_short = train(samples, epochs=1, d_model=16, seed=0)
