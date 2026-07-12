@@ -53,7 +53,7 @@ pub fn apply_modern_visuals(v: &mut egui::Visuals) {
     v.warn_fg_color = STATUS_WARN;
     v.error_fg_color = STATUS_BAD;
     v.window_fill = SLATE_900;
-    v.window_stroke = Stroke::new(1.0, SLATE_700);
+    v.window_stroke = Stroke::new(1.0_f32, SLATE_700);
     v.window_corner_radius = CornerRadius::same(10);
     v.window_shadow = soft_shadow();
     v.popup_shadow = soft_shadow();
@@ -66,35 +66,35 @@ pub fn apply_modern_visuals(v: &mut egui::Visuals) {
     // Inactive widgets (default state).
     v.widgets.noninteractive.bg_fill = SLATE_900;
     v.widgets.noninteractive.weak_bg_fill = SLATE_850;
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, SLATE_700);
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, SLATE_300);
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, SLATE_700);
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, SLATE_300);
     v.widgets.noninteractive.corner_radius = r6;
 
     v.widgets.inactive.bg_fill = SLATE_800;
     v.widgets.inactive.weak_bg_fill = SLATE_850;
-    v.widgets.inactive.bg_stroke = Stroke::new(1.0, SLATE_700);
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0, SLATE_300);
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, SLATE_700);
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, SLATE_300);
     v.widgets.inactive.corner_radius = r6;
 
     v.widgets.hovered.bg_fill = SLATE_700;
     v.widgets.hovered.weak_bg_fill = SLATE_800;
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0, ACCENT_DIM);
-    v.widgets.hovered.fg_stroke = Stroke::new(1.0, SLATE_100);
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, ACCENT_DIM);
+    v.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, SLATE_100);
     v.widgets.hovered.corner_radius = r6;
 
     v.widgets.active.bg_fill = ACCENT_DIM;
     v.widgets.active.weak_bg_fill = SLATE_700;
-    v.widgets.active.bg_stroke = Stroke::new(1.0, ACCENT);
-    v.widgets.active.fg_stroke = Stroke::new(1.0, SLATE_950);
+    v.widgets.active.bg_stroke = Stroke::new(1.0_f32, ACCENT);
+    v.widgets.active.fg_stroke = Stroke::new(1.0_f32, SLATE_950);
     v.widgets.active.corner_radius = r6;
 
     v.widgets.open.bg_fill = SLATE_800;
-    v.widgets.open.bg_stroke = Stroke::new(1.0, ACCENT_DIM);
-    v.widgets.open.fg_stroke = Stroke::new(1.0, SLATE_100);
+    v.widgets.open.bg_stroke = Stroke::new(1.0_f32, ACCENT_DIM);
+    v.widgets.open.fg_stroke = Stroke::new(1.0_f32, SLATE_100);
     v.widgets.open.corner_radius = r8;
 
     v.selection.bg_fill = ACCENT_DIM.linear_multiply(0.35);
-    v.selection.stroke = Stroke::new(1.0, ACCENT);
+    v.selection.stroke = Stroke::new(1.0_f32, ACCENT);
 
     v.striped = true;
 }
@@ -174,7 +174,7 @@ pub fn status_pill(ui: &mut egui::Ui, color: Color32, label: &str) -> egui::Resp
             ui.painter().circle_stroke(
                 rect.center(),
                 5.0,
-                Stroke::new(1.0, color.linear_multiply(0.6)),
+                Stroke::new(1.0_f32, color.linear_multiply(0.6)),
             );
         }
         ui.label(egui::RichText::new(label).color(SLATE_100));
@@ -198,7 +198,7 @@ pub fn metric_row(ui: &mut egui::Ui, label: &str, value: impl Into<egui::WidgetT
 pub fn key_chip(ui: &mut egui::Ui, text: &str) {
     egui::Frame::new()
         .fill(SLATE_800)
-        .stroke(Stroke::new(1.0, SLATE_700))
+        .stroke(Stroke::new(1.0_f32, SLATE_700))
         .corner_radius(CornerRadius::same(4))
         .inner_margin(Margin::symmetric(7, 3))
         .show(ui, |ui| {
