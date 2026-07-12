@@ -252,6 +252,75 @@ impl StateMapping for CtMapping {
     }
 }
 
+/// Mapping for BallisticReentry (7D <-> 6D).
+///
+/// Reentry state: `[x, vx, y, vy, z, vz, beta]`
+/// Common:        `[x, vx, y, vy, z, vz]`
+///
+/// The reentry layout is the common 6D layout with β appended, so
+/// `to_common` drops the β row/column and `from_common` appends β — the
+/// [`CaMapping`] drop/append pattern, except the appended component gets a
+/// configurable physical value instead of zero (a zero β would sit below
+/// any sensible `beta_floor`) and a wide prior variance.
+///
+/// Shipped so a boost(CA)/reentry two-mode bank is composable through the
+/// public [`ImmConfig`] today (design Decision 6 of the
+/// `orbital-ballistic-filter-models` change); the built-in presets are
+/// deliberately not extended — see [`ImmConfig::cv_ca_ctrv_ct`].
+pub struct Reentry7Mapping {
+    /// β installed when projecting common → model space (kg/m²).
+    pub beta_init: f64,
+    /// Variance installed on the appended β row/col ((kg/m²)²).
+    pub beta_var: f64,
+}
+
+impl Reentry7Mapping {
+    /// Create a mapping with the given β initialization and prior variance.
+    pub fn new(beta_init: f64, beta_var: f64) -> Self {
+        Self {
+            beta_init,
+            beta_var,
+        }
+    }
+}
+
+impl Default for Reentry7Mapping {
+    /// β = 1000 kg/m² with a (1000 kg/m²)² prior variance — wide over the
+    /// ~[50, 10000] kg/m² a-priori band of design Decision 6.
+    fn default() -> Self {
+        Self::new(1000.0, 1.0e6)
+    }
+}
+
+impl StateMapping for Reentry7Mapping {
+    fn to_common(&self, state: &DVector<f64>, cov: &DMatrix<f64>) -> (DVector<f64>, DMatrix<f64>) {
+        // The first six model components ARE the common layout: truncate β.
+        let cs = DVector::from_column_slice(&state.as_slice()[..6]);
+        let cc = cov.view((0, 0), (6, 6)).clone_owned();
+        (cs, cc)
+    }
+
+    fn from_common(
+        &self,
+        state: &DVector<f64>,
+        cov: &DMatrix<f64>,
+    ) -> (DVector<f64>, DMatrix<f64>) {
+        let mut ms = DVector::zeros(7);
+        let mut mc = DMatrix::zeros(7, 7);
+        ms.rows_mut(0, 6).copy_from(state);
+        mc.view_mut((0, 0), (6, 6)).copy_from(cov);
+        // Appended β: configured init with a wide prior so the appended mode
+        // isn't degenerate (CaMapping pattern).
+        ms[6] = self.beta_init;
+        mc[(6, 6)] = self.beta_var;
+        (ms, mc)
+    }
+
+    fn model_dim(&self) -> usize {
+        7
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Leaf filter abstraction
 // ---------------------------------------------------------------------------
@@ -476,6 +545,14 @@ impl ImmConfig {
     /// 4-model CV + CA + CTRV + CT configuration.
     ///
     /// TPM: 0.90 self-transition, ~0.033 cross-transition.
+    ///
+    /// Decision 6 deferral (`orbital-ballistic-filter-models`): this bank is
+    /// deliberately **not** extended with the orbital/reentry models — it is
+    /// index-aligned with `MotionModeLabel` (`thresh-core/src/motion_mode.rs`)
+    /// and the `learned-imm` classifier hard-requires exactly these four
+    /// modes (`NUM_MODES` guard), so appending modes would break a trained,
+    /// checked-in ONNX contract. Compose e.g. a boost(CA)/reentry bank
+    /// manually via [`Reentry7Mapping`] and a custom [`ImmConfig`] instead.
     pub fn cv_ca_ctrv_ct(sigma_a: f64, sigma_j: f64, sigma_v: f64, sigma_omega: f64) -> Self {
         let cross = (1.0 - 0.90) / 3.0; // ~0.0333
         #[rustfmt::skip]
@@ -1040,6 +1117,70 @@ mod tests {
         assert!((xr[1] - 2.0).abs() < 1e-12);
         assert!((xr[2] - 3.0).abs() < 1e-12);
         assert!((xr[3] - 4.0).abs() < 1e-12);
+    }
+
+    // Task 3.9 (orbital-ballistic-filter-models): Reentry7Mapping drops and
+    // appends the β row/col following the CaMapping pattern.
+    #[test]
+    fn reentry7_mapping_round_trip_preserves_shared() {
+        let mapping = Reentry7Mapping::default();
+        // Reentry state: [x, vx, y, vy, z, vz, beta]
+        let x = DVector::from_column_slice(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 2000.0]);
+        let mut p = DMatrix::identity(7, 7) * 10.0;
+        p[(0, 3)] = 2.5; // an off-diagonal entry inside the shared block
+        p[(3, 0)] = 2.5;
+        p[(6, 6)] = 9999.0;
+
+        let (xc, pc) = mapping.to_common(&x, &p);
+        // Common carries the leading six components; β is dropped.
+        assert_eq!(xc.len(), 6);
+        for i in 0..6 {
+            assert!((xc[i] - x[i]).abs() < 1e-12);
+        }
+        assert!((pc[(0, 3)] - 2.5).abs() < 1e-12);
+
+        // Round trip: shared block preserved, β re-initialized from config.
+        let (xr, pr) = mapping.from_common(&xc, &pc);
+        assert_eq!(xr.len(), 7);
+        for i in 0..6 {
+            assert!((xr[i] - x[i]).abs() < 1e-12);
+        }
+        assert!((xr[6] - mapping.beta_init).abs() < 1e-12);
+        assert!((pr[(6, 6)] - mapping.beta_var).abs() < 1e-12);
+        assert!((pr[(0, 3)] - 2.5).abs() < 1e-12);
+        // Appended β row/col carries no cross-covariance.
+        for i in 0..6 {
+            assert_eq!(pr[(6, i)], 0.0);
+            assert_eq!(pr[(i, 6)], 0.0);
+        }
+    }
+
+    // Task 3.9: a boost(CA)/reentry two-mode bank is composable through the
+    // public ImmConfig (Decision 6 — the built-in presets stay untouched).
+    #[test]
+    fn reentry7_mapping_composes_ca_reentry_bank() {
+        use crate::models::ballistic_reentry::BallisticReentry;
+        use thresh_core::orbital::GravityModel;
+
+        let config = ImmConfig {
+            models: vec![
+                Box::new(ConstantAcceleration::new(1.0)),
+                Box::new(BallisticReentry::new(GravityModel::EARTH_WGS84, 1.0)),
+            ],
+            mappings: vec![Box::new(CaMapping), Box::new(Reentry7Mapping::default())],
+            transition_matrix: DMatrix::from_row_slice(2, 2, &[0.95, 0.05, 0.05, 0.95]),
+            initial_mode_probabilities: DVector::from_column_slice(&[0.5, 0.5]),
+        };
+        assert!(config.validate().is_ok());
+
+        // A reentry-interface common state: the bank predicts finite output.
+        let r = GravityModel::EARTH_WGS84.equatorial_radius + 120_000.0;
+        let x0 = DVector::from_column_slice(&[r, -2000.0, 0.0, 6700.0, 0.0, 500.0]);
+        let p0 = DMatrix::identity(6, 6) * 1e4;
+        let mut imm = ImmFilter::new(config, &x0, &p0);
+        let (state, cov) = imm.predict(1.0);
+        assert!(state.iter().all(|v| v.is_finite()));
+        assert!(cov.iter().all(|v| v.is_finite()));
     }
 
     // 6.2: Config validation

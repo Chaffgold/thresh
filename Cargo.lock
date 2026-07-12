@@ -4625,6 +4625,7 @@ dependencies = [
  "nalgebra",
  "thresh-core",
  "thresh-inference",
+ "thresh-synth",
 ]
 
 [[package]]
