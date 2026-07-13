@@ -18,6 +18,54 @@ use thresh_filter::kf::KalmanFilter;
 use thresh_filter::models::cv::ConstantVelocity;
 use thresh_filter::traits::{LinearModel, MotionModel};
 
+/// Per-track updates excluded from NIS accumulation as birth transient.
+///
+/// Tracks birth with a zero-velocity state and the head's configured
+/// prior, so early innovations carry the unconverged velocity estimate —
+/// an initialization artifact, not evidence about R/Q honesty. The window
+/// is the measured velocity-convergence transient on the seeded
+/// `synth-cv-clean` scenario (theoretical 95% interval ≈ [2.61, 3.42]):
+/// warmup 1 → ANIS 3.59 (transient leaks through), 2 → 3.28 (inside),
+/// 3 → 2.87, 4 → 2.58 (below the lower bound — steady state runs mildly
+/// conservative because the tracker carries nonzero Q against
+/// zero-process-noise truth). Two updates is the minimal window whose
+/// statistic sits inside the interval — the least masking a dishonesty
+/// gate can get away with.
+const NIS_WARMUP_UPDATES: usize = 2;
+
+/// Snapshot of the tracker's accumulated single-model KF NIS (normalized
+/// innovation squared) statistics.
+///
+/// Fed by hard-assigned Kalman updates on the single-model path
+/// (Hungarian and MHT association), excluding each track's first
+/// `NIS_WARMUP_UPDATES` (= 2) updates (birth transient) and non-finite
+/// samples; read via [`MultiObjectTracker::nis_stats`]. The average NIS
+/// (ANIS) is
+/// `sum / count`, chi-squared distributed with `count · dof` degrees of
+/// freedom for a consistent filter (Bar-Shalom time-average test) — the
+/// two-sided bound machinery lives in `thresh-eval`, which the tracker
+/// cannot depend on, so this snapshot is a plain local type
+/// (`eval-consistency-metrics` design Decision 5).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct NisStats {
+    /// Sum of the accumulated per-update NIS samples.
+    pub sum: f64,
+    /// Number of accumulated NIS samples.
+    pub count: usize,
+    /// Measurement dimension of the samples (the chi-squared degrees of
+    /// freedom of each individual sample); `0` until the first sample.
+    pub dof: usize,
+}
+
+impl NisStats {
+    /// Average NIS (ANIS) of the accumulated samples; `None` while no
+    /// samples have been recorded (absent, not zero — the benchmark gate's
+    /// fail-loud rule relies on the distinction).
+    pub fn mean(&self) -> Option<f64> {
+        (self.count > 0).then(|| self.sum / self.count as f64)
+    }
+}
+
 /// Association strategy used by the tracker.
 #[derive(Debug, Clone, Default)]
 pub enum AssociationStrategy {
@@ -77,6 +125,10 @@ pub struct MultiObjectTracker {
     next_imm_key: usize,
     /// MHT hypothesis tree (only used when strategy is `Mht`).
     mht_tree: Option<HypothesisTree>,
+    /// Accumulated NIS diagnostics from the single-model KF update path
+    /// (`eval-consistency-metrics` design Decision 5). Private: read via
+    /// [`Self::nis_stats`], cleared via [`Self::reset_nis_stats`].
+    nis_stats: NisStats,
     /// Path to the ONNX IMM mode classifier. `Some` only when built via
     /// [`Self::new_imm_position_learned`]; new tracks then get a
     /// `LearnedImmFilter` instead of a plain `ImmFilter`.
@@ -138,6 +190,7 @@ impl MultiObjectTracker {
             imm_filters: HashMap::new(),
             next_imm_key: 0,
             mht_tree,
+            nis_stats: NisStats::default(),
             #[cfg(feature = "learned-imm")]
             learned_classifier_path: None,
             #[cfg(feature = "learned-imm")]
@@ -182,6 +235,7 @@ impl MultiObjectTracker {
             imm_filters: HashMap::new(),
             next_imm_key: 0,
             mht_tree: None,
+            nis_stats: NisStats::default(),
             #[cfg(feature = "learned-imm")]
             learned_classifier_path: None,
             #[cfg(feature = "learned-imm")]
@@ -472,6 +526,12 @@ impl MultiObjectTracker {
     }
 
     /// JPDA association and update path.
+    ///
+    /// Note: JPDA updates feed **no** NIS samples into [`Self::nis_stats`]
+    /// — the probability-weighted combined innovation is not chi-squared(m)
+    /// (same exclusion as the IMM path; see `apply_measurement_update` and
+    /// the `eval-consistency-metrics` `consistency-benchmark-gates` delta
+    /// spec, "Absent statistics are explicit").
     fn step_jpda(
         &mut self,
         detections: &[DVector<f64>],
@@ -732,6 +792,15 @@ impl MultiObjectTracker {
         let h = self.observation_for_dim(self.tracks[ti].state.len());
         let r = self.measurement_noise.clone();
         if is_imm {
+            // NIS is NOT accumulated on the IMM path: the moment-matched
+            // mixture innovation is not Gaussian with a single S, so its
+            // "NIS" is not chi-squared(m) and gating it would be
+            // pseudo-statistics. Same reasoning excludes JPDA's
+            // probability-weighted updates (`step_jpda`). See the
+            // `eval-consistency-metrics` change: design Decision 5 and the
+            // `consistency-benchmark-gates` delta spec ("Absent statistics
+            // are explicit" — runners without diagnostics leave the
+            // statistic absent rather than fabricating one).
             if let Some(key) = self.tracks[ti].imm_key {
                 #[cfg(feature = "learned-imm")]
                 if let Some(lf) = self.learned_imm_filters.get_mut(&key) {
@@ -753,10 +822,59 @@ impl MultiObjectTracker {
         } else {
             let track = &self.tracks[ti];
             let mut kf = KalmanFilter::new(track.state.clone(), track.covariance.clone());
-            kf.update(detection, &h, &r);
+            let outcome = kf.update(detection, &h, &r);
             self.tracks[ti].state = kf.x;
             self.tracks[ti].covariance = kf.p;
+            self.record_kf_nis(ti, &outcome);
         }
+    }
+
+    /// Accumulate one single-model KF update's NIS sample into
+    /// [`Self::nis_stats`]. Non-finite samples (a numerically degenerate S)
+    /// are skipped rather than poisoning the running sum, matching the
+    /// eval crate's "never NaN" contract.
+    ///
+    /// Each track's first [`NIS_WARMUP_UPDATES`] updates are also skipped:
+    /// tracks birth with a zero-velocity state and a configured prior, so
+    /// the first innovation contains the target's whole per-step motion —
+    /// an initialization transient, not evidence about R/Q honesty
+    /// (resolves the birth-covariance-warmup open question of the
+    /// `eval-consistency-metrics` design). Lifecycle hits are recorded
+    /// after association, so `total_hits` here still counts only prior
+    /// scans: the first post-birth update sees `total_hits == 1`.
+    fn record_kf_nis(&mut self, ti: usize, outcome: &thresh_filter::UpdateOutcome) {
+        if self.tracks[ti].total_hits <= NIS_WARMUP_UPDATES || !outcome.nis.is_finite() {
+            return;
+        }
+        self.nis_stats.sum += outcome.nis;
+        self.nis_stats.count += 1;
+        self.nis_stats.dof = outcome.innovation.len();
+    }
+
+    /// Accumulated NIS statistics of the single-model KF measurement
+    /// updates applied so far (Hungarian and MHT hard assignments), after
+    /// each track's `NIS_WARMUP_UPDATES` (= 2) birth-transient updates;
+    /// non-finite samples (degenerate S) are also excluded. Expected
+    /// sample count is therefore `updates − warmup·tracks`, not raw
+    /// update count.
+    ///
+    /// IMM and JPDA updates contribute **no** samples — their
+    /// mixture/probability-weighted innovations are not chi-squared(m), so
+    /// averaging them into ANIS would be statistically meaningless (see
+    /// the exclusion comment in `apply_measurement_update` and design
+    /// Decision 5 of the `eval-consistency-metrics` change). An
+    /// IMM-configured tracker
+    /// therefore reports zero samples, which the benchmark gate treats as
+    /// "statistic absent" (fail-loud when a bound is asserted), never as a
+    /// silent pass.
+    pub fn nis_stats(&self) -> NisStats {
+        self.nis_stats
+    }
+
+    /// Reset the accumulated NIS statistics to empty (e.g. between
+    /// benchmark runs sharing one tracker instance).
+    pub fn reset_nis_stats(&mut self) {
+        self.nis_stats = NisStats::default();
     }
 
     /// Apply lifecycle updates to all alive tracks based on association results.
@@ -2035,6 +2153,86 @@ mod tests {
 
         // Unknown id is a no-op.
         assert!(!tracker.reclassify(TrackId::new(), TargetClass::Uav));
+    }
+
+    // --- ANIS accumulator (eval-consistency-metrics, task 6.1) ---------------
+
+    /// Task 6.1: a short tracked sequence accumulates exactly one NIS
+    /// sample per applied single-model KF update after the per-track
+    /// warmup — none at birth (birth is not an update), none for the first
+    /// [`NIS_WARMUP_UPDATES`] updates (birth transient), one per associated
+    /// detection thereafter — with the measurement dimension as the
+    /// per-sample dof, and `reset_nis_stats` clears everything.
+    #[test]
+    fn nis_accumulates_one_sample_per_kf_update() {
+        let mut tracker = MultiObjectTracker::new_cv_position(10.0, 100.0);
+        let det = DVector::from_column_slice(&[100.0, 200.0, 50.0]);
+
+        // Frame 1 births the track: no measurement update, no sample.
+        tracker.step(std::slice::from_ref(&det), 1.0);
+        assert_eq!(tracker.nis_stats().count, 0);
+        assert_eq!(tracker.nis_stats().mean(), None);
+
+        // The next NIS_WARMUP_UPDATES frames apply the track's first
+        // updates — inside the warmup window, so still no samples.
+        for _ in 0..NIS_WARMUP_UPDATES {
+            tracker.step(std::slice::from_ref(&det), 1.0);
+            assert_eq!(
+                tracker.nis_stats().count,
+                0,
+                "warmup updates contribute no samples"
+            );
+        }
+
+        // Subsequent frames each associate the detection and apply exactly
+        // one post-warmup KF update, so the count advances by one per step.
+        for expected in 1..=4usize {
+            tracker.step(std::slice::from_ref(&det), 1.0);
+            assert_eq!(
+                tracker.nis_stats().count,
+                expected,
+                "exactly one NIS sample per post-warmup KF update"
+            );
+        }
+
+        let stats = tracker.nis_stats();
+        assert_eq!(stats.dof, 3, "position measurement dimension");
+        assert!(stats.sum.is_finite() && stats.sum >= 0.0);
+        let anis = stats.mean().expect("samples recorded");
+        assert!(anis.is_finite() && anis >= 0.0);
+
+        // Reset clears the accumulator back to the empty state.
+        tracker.reset_nis_stats();
+        assert_eq!(tracker.nis_stats(), NisStats::default());
+        assert_eq!(tracker.nis_stats().mean(), None);
+    }
+
+    /// Task 6.1: an IMM-configured tracker applies updates (the track
+    /// confirms) but accumulates **zero** NIS samples — the moment-matched
+    /// mixture innovation is not chi-squared(m), so the statistic stays
+    /// absent rather than fabricated ("Absent statistics are explicit").
+    #[test]
+    fn imm_tracker_accumulates_no_nis_samples() {
+        let mut tracker = MultiObjectTracker::new_imm_position(
+            || ImmConfig::cv_ca_ctrv_ct(5.0, 1.0, 2.0, 0.1),
+            10.0,
+            100.0,
+        );
+        let det = DVector::from_column_slice(&[100.0, 200.0, 50.0]);
+        for _ in 0..6 {
+            tracker.step(std::slice::from_ref(&det), 1.0);
+        }
+        assert_eq!(
+            tracker.confirmed_count(),
+            1,
+            "IMM updates were applied (track confirmed)"
+        );
+        assert_eq!(
+            tracker.nis_stats().count,
+            0,
+            "IMM path must contribute no NIS samples"
+        );
+        assert_eq!(tracker.nis_stats().mean(), None);
     }
 
     /// Task 5.5: the orbital head's velocity prior is refined at birth to

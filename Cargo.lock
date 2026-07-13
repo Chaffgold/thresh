@@ -4612,10 +4612,13 @@ dependencies = [
 name = "thresh-eval"
 version = "0.3.0-dev"
 dependencies = [
+ "nalgebra",
+ "rand 0.9.4",
  "serde",
  "serde_json",
  "thresh-association",
  "thresh-core",
+ "thresh-filter",
 ]
 
 [[package]]

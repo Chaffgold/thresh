@@ -8,6 +8,7 @@
 
 use nalgebra::{DMatrix, DVector};
 
+use crate::UpdateOutcome;
 use crate::ckf::CubatureKalmanFilter;
 use crate::ekf::ExtendedKalmanFilter;
 use crate::models::ca::ConstantAcceleration;
@@ -337,7 +338,17 @@ pub trait LeafFilter: Send + Sync {
     /// Model-conditioned predict step.
     fn predict(&mut self, model: &dyn MotionModel, dt: f64);
     /// Linear measurement update.
-    fn update_linear(&mut self, z: &DVector<f64>, h: &DMatrix<f64>, r: &DMatrix<f64>);
+    ///
+    /// Returns the same [`UpdateOutcome`] diagnostics as the inherent
+    /// `update_linear` methods, keeping the leaf trait signature-parallel
+    /// with them (per-mode NIS stays reachable through the trait). The IMM's
+    /// own likelihood math does not consume it.
+    fn update_linear(
+        &mut self,
+        z: &DVector<f64>,
+        h: &DMatrix<f64>,
+        r: &DMatrix<f64>,
+    ) -> UpdateOutcome;
     /// Current state estimate.
     fn x(&self) -> &DVector<f64>;
     /// Current covariance estimate.
@@ -352,7 +363,12 @@ impl LeafFilter for ExtendedKalmanFilter {
     fn predict(&mut self, model: &dyn MotionModel, dt: f64) {
         ExtendedKalmanFilter::predict(self, model, dt)
     }
-    fn update_linear(&mut self, z: &DVector<f64>, h: &DMatrix<f64>, r: &DMatrix<f64>) {
+    fn update_linear(
+        &mut self,
+        z: &DVector<f64>,
+        h: &DMatrix<f64>,
+        r: &DMatrix<f64>,
+    ) -> UpdateOutcome {
         ExtendedKalmanFilter::update_linear(self, z, h, r)
     }
     fn x(&self) -> &DVector<f64> {
@@ -373,7 +389,12 @@ impl LeafFilter for UnscentedKalmanFilter {
     fn predict(&mut self, model: &dyn MotionModel, dt: f64) {
         UnscentedKalmanFilter::predict(self, model, dt)
     }
-    fn update_linear(&mut self, z: &DVector<f64>, h: &DMatrix<f64>, r: &DMatrix<f64>) {
+    fn update_linear(
+        &mut self,
+        z: &DVector<f64>,
+        h: &DMatrix<f64>,
+        r: &DMatrix<f64>,
+    ) -> UpdateOutcome {
         UnscentedKalmanFilter::update_linear(self, z, h, r)
     }
     fn x(&self) -> &DVector<f64> {
@@ -394,7 +415,12 @@ impl LeafFilter for CubatureKalmanFilter {
     fn predict(&mut self, model: &dyn MotionModel, dt: f64) {
         CubatureKalmanFilter::predict(self, model, dt)
     }
-    fn update_linear(&mut self, z: &DVector<f64>, h: &DMatrix<f64>, r: &DMatrix<f64>) {
+    fn update_linear(
+        &mut self,
+        z: &DVector<f64>,
+        h: &DMatrix<f64>,
+        r: &DMatrix<f64>,
+    ) -> UpdateOutcome {
         CubatureKalmanFilter::update_linear(self, z, h, r)
     }
     fn x(&self) -> &DVector<f64> {

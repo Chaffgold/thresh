@@ -5,15 +5,22 @@ use std::path::Path;
 use std::time::Instant;
 
 use nalgebra::{DVector, Vector3};
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 
 use thresh_core::eci::enu_to_eci;
 use thresh_core::track::TargetClass;
+use thresh_eval::consistency::{
+    ConsistencyAccumulator, EstimateFrame, INTERLEAVED_POSITION_INDICES, TrackEstimate, chi2,
+    sequence_anees,
+};
+use thresh_eval::gospa::{GospaParams, gospa_sequence};
 use thresh_eval::hota::compute_hota_at_threshold;
 use thresh_eval::matching::FrameData;
 use thresh_eval::metrics::{compute_idf1, compute_mot_metrics};
 use thresh_synth::measurement_gen::RadarConfig;
-use thresh_synth::scenario::{GroundTruth, run_scenario};
+use thresh_synth::scenario::{GroundTruth, run_scenario_with_rng};
 use thresh_synth::trajectory::{Segment, SegmentType, Trajectory};
 use thresh_tracker::tracker::MultiObjectTracker;
 use thresh_tracker::tracker_variant::TrackerVariant;
@@ -221,14 +228,76 @@ pub struct ScenarioParameters {
     /// head on the ISS scenario must fail the calibrated MOTA baseline.
     #[serde(default)]
     pub scenario_type: Option<String>,
+    /// Measurement model for the synthetic runner (defaults to
+    /// [`MeasurementModel::RadarRae`] when the TOML omits the key).
+    #[serde(default)]
+    pub measurement_model: MeasurementModel,
+    /// Measurement-noise sigma the *tracker* is configured with, when it
+    /// should differ from the generator's `measurement_noise_sigma`.
+    ///
+    /// `None` (the default, and every committed scenario) keeps the honest
+    /// configuration: the tracker's R matches the noise actually generated.
+    /// A mismatched value is a deliberate covariance lie — it leaves the
+    /// detections (and therefore MOT metrics) essentially untouched while
+    /// driving ANEES/ANIS out of the chi-squared interval. It exists for
+    /// the `eval-consistency-metrics` deliberate-regression tests
+    /// (task 6.6: the gate must catch a covariance lie that MOTA cannot
+    /// see, in both directions).
+    #[serde(default)]
+    pub tracker_noise_sigma: Option<f64>,
+}
+
+/// Measurement model driving the synthetic runner's noise generation.
+///
+/// A typed enum rather than a free string so that a misspelled TOML value
+/// (`"cartesain"`, `"Cartesian"`) fails at parse time with serde's
+/// variant list instead of silently selecting the default radar model —
+/// the choice is load-bearing for the consistency gates: under
+/// [`MeasurementModel::RadarRae`] the range-dependent cross-range error
+/// judged against the tracker's isotropic R measured ANEES ≈ 13 on
+/// `synth-cv-clean`, far outside its committed [2.46, 3.56] bounds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MeasurementModel {
+    /// RAE radar noise via `generate_radar`: range/azimuth/elevation
+    /// sigmas whose Cartesian-converted per-axis error grows with range
+    /// (cross-range sigma = r · sigma_az).
+    #[default]
+    RadarRae,
+    /// Isotropic Gaussian of `measurement_noise_sigma` per axis drawn
+    /// directly on truth positions, exactly matching the tracker's
+    /// isotropic R — the textbook consistency configuration the
+    /// `synth-cv-clean` ANEES/ANIS gate requires
+    /// (`eval-consistency-metrics` design Decision 5).
+    Cartesian,
 }
 
 /// Expected metric baselines for regression gating.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// The MOT fields (`mota` / `hota` / `idf1`) are one-sided floors; the
+/// consistency fields are the two-sided ANEES / average-NIS acceptance
+/// intervals of the `eval-consistency-metrics` change (design Decision 5).
+/// All consistency bounds are optional with serde defaults, so every
+/// pre-existing scenario TOML parses unchanged. Asserting a bound against a
+/// run that produced no samples for that statistic is a gate **failure**
+/// (fail-loud rule), never a silent pass.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Baselines {
     pub mota: Option<f64>,
     pub hota: Option<f64>,
     pub idf1: Option<f64>,
+    /// Lower ANEES bound (two-sided interval, underconfidence tail).
+    #[serde(default)]
+    pub anees_min: Option<f64>,
+    /// Upper ANEES bound (two-sided interval, overconfidence tail).
+    #[serde(default)]
+    pub anees_max: Option<f64>,
+    /// Lower average-NIS bound (two-sided interval, underconfidence tail).
+    #[serde(default)]
+    pub anis_min: Option<f64>,
+    /// Upper average-NIS bound (two-sided interval, overconfidence tail).
+    #[serde(default)]
+    pub anis_max: Option<f64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +316,12 @@ pub fn load_scenario(path: &Path) -> Result<ScenarioManifest, String> {
 // ---------------------------------------------------------------------------
 
 /// Results produced by running a benchmark scenario.
+///
+/// The consistency statistics (`anees` / `anis` / `gospa`) are `Option`s:
+/// absent (`None`) is distinct from zero and from NaN (spec: "Absent
+/// statistics are explicit"). A statistic is absent when the run produced
+/// no samples for it — e.g. no matched truth/track pairs for ANEES, or an
+/// update path that legitimately collects no NIS diagnostics.
 #[derive(Debug, Clone)]
 pub struct BenchmarkResult {
     pub scenario: String,
@@ -255,6 +330,22 @@ pub struct BenchmarkResult {
     pub idf1: f64,
     pub hota: f64,
     pub id_switches: usize,
+    /// Scenario-level ANEES: position-marginal NEES (dof 3) averaged over
+    /// the matched truth/track pairs at the run's MOTA `dist_threshold`
+    /// (the NEES population is exactly the MOTA true-positive population).
+    pub anees: Option<f64>,
+    /// Number of NEES samples behind [`Self::anees`].
+    pub anees_samples: usize,
+    /// Average NIS of the tracker's post-warmup single-model KF updates
+    /// ([`MultiObjectTracker::nis_stats`] — each track's first two updates
+    /// are excluded as birth transient); IMM/JPDA paths collect none.
+    pub anis: Option<f64>,
+    /// Number of NIS samples behind [`Self::anis`].
+    pub anis_samples: usize,
+    /// Sequence GOSPA (α = 2, order p = 2): the order-p mean of the
+    /// per-frame totals with cutoff `c` = the run's MOTA `dist_threshold`.
+    /// Reported for diagnostics, not gated. `None` for an empty sequence.
+    pub gospa: Option<f64>,
     pub duration_ms: u64,
 }
 
@@ -278,26 +369,85 @@ pub(crate) fn collect_confirmed_track_positions(
         .collect()
 }
 
+/// Collect the current confirmed tracks' **full** state estimates and
+/// covariances in the [`TrackEstimate`] shape `sequence_anees` consumes.
+///
+/// Sibling of [`collect_confirmed_track_positions`]: same confirmed-only
+/// filter and ID space, but copying the already-`pub` `track.state` /
+/// `track.covariance` so position-marginal NEES can extract the 3×3
+/// covariance block (`eval-consistency-metrics` design Decision 5 —
+/// no thresh-core change needed).
+pub(crate) fn collect_confirmed_track_estimates(
+    tracker: &MultiObjectTracker,
+) -> Vec<TrackEstimate> {
+    tracker
+        .tracks
+        .iter()
+        .filter(|t| t.lifecycle == thresh_core::track::TrackState::Confirmed)
+        .map(|t| TrackEstimate {
+            id: t.id.0,
+            state: t.state.clone(),
+            covariance: t.covariance.clone(),
+        })
+        .collect()
+}
+
+/// Append one benchmark step's [`FrameData`] (position-only, for the MOT
+/// metrics and GOSPA) and [`EstimateFrame`] (full state + covariance, for
+/// ANEES) built from the same ground truth and the tracker's current
+/// confirmed set — the shared per-step collection all runners use.
+fn push_step_frames(
+    tracker: &MultiObjectTracker,
+    gt: Vec<(u64, [f64; 3])>,
+    frames: &mut Vec<FrameData>,
+    estimates: &mut Vec<EstimateFrame>,
+) {
+    frames.push(FrameData {
+        gt: gt.clone(),
+        tracks: collect_confirmed_track_positions(tracker),
+    });
+    estimates.push(EstimateFrame {
+        gt,
+        tracks: collect_confirmed_track_estimates(tracker),
+    });
+}
+
 /// Compute the final MOT metric set from a collected `FrameData`
 /// sequence and package everything into a [`BenchmarkResult`]. All
-/// benchmark runners (synthetic / ADS-B / orbital / nuScenes) converge
-/// on this path once their step loops finish — it centralises the
-/// MOTA / MOTP / IDF1 / HOTA calls, the `duration_ms` stopwatch
-/// reading, and the `BenchmarkResult` assembly.
+/// benchmark runners (synthetic / ADS-B / orbital / ballistic / nuScenes)
+/// converge on this path once their step loops finish — it centralises the
+/// MOTA / MOTP / IDF1 / HOTA calls, the consistency statistics (ANEES via
+/// [`sequence_anees`] over `estimate_frames`, ANIS from the tracker's
+/// [`MultiObjectTracker::nis_stats`] accessor, sequence GOSPA with
+/// `c = dist_threshold`), the calibration print, the `duration_ms`
+/// stopwatch reading, and the `BenchmarkResult` assembly.
 ///
 /// `dist_threshold` is the matcher distance threshold in metres.
 /// Callers pick a value appropriate for their scenario regime
 /// (nuScenes uses metres at ~1 m noise, orbital uses kilometres at
-/// ~1 km noise, and so on).
+/// ~1 km noise, and so on). ANEES uses the **same** threshold, so the NEES
+/// sample population is exactly the MOTA true-positive population, and
+/// GOSPA's cutoff derives from the same expression so all three metrics
+/// agree on what "close enough" means.
 pub(crate) fn build_benchmark_result(
     scenario_name: &str,
     frame_data_vec: &[FrameData],
+    estimate_frames: &[EstimateFrame],
+    tracker: &MultiObjectTracker,
     dist_threshold: f64,
     start: Instant,
 ) -> BenchmarkResult {
     let (mota, motp, id_switches) = compute_mot_metrics(frame_data_vec, dist_threshold);
     let idf1 = compute_idf1(frame_data_vec, dist_threshold);
     let (hota, _, _) = compute_hota_at_threshold(frame_data_vec, dist_threshold);
+    let anees_acc = sequence_anees(
+        estimate_frames,
+        INTERLEAVED_POSITION_INDICES,
+        dist_threshold,
+    );
+    let anis_acc = nis_accumulator(tracker);
+    let gospa = compute_sequence_gospa(frame_data_vec, dist_threshold);
+    eprint_consistency_calibration(scenario_name, &anees_acc, &anis_acc);
     BenchmarkResult {
         scenario: scenario_name.to_string(),
         mota,
@@ -305,7 +455,61 @@ pub(crate) fn build_benchmark_result(
         idf1,
         hota,
         id_switches,
+        anees: anees_acc.mean(),
+        anees_samples: anees_acc.n,
+        anis: anis_acc.mean(),
+        anis_samples: anis_acc.n,
+        gospa,
         duration_ms: start.elapsed().as_millis() as u64,
+    }
+}
+
+/// View the tracker's accumulated NIS statistics as a
+/// [`ConsistencyAccumulator`] so the eval crate's mean / two-sided-bounds
+/// machinery applies. The tracker cannot depend on `thresh-eval` (workspace
+/// layering), so its accumulator is a plain local type and the two meet
+/// here (`eval-consistency-metrics` design Decision 5).
+fn nis_accumulator(tracker: &MultiObjectTracker) -> ConsistencyAccumulator {
+    let stats = tracker.nis_stats();
+    ConsistencyAccumulator {
+        sum: stats.sum,
+        n: stats.count,
+        dof: stats.dof,
+    }
+}
+
+/// Sequence GOSPA (reported, not gated): α = 2 with the default order
+/// p = 2 and cutoff `c` = the runner's MOTA `dist_threshold`. `None` for an
+/// empty frame sequence — absent, not zero (spec: "Absent statistics are
+/// explicit").
+fn compute_sequence_gospa(frames: &[FrameData], dist_threshold: f64) -> Option<f64> {
+    (!frames.is_empty())
+        .then(|| gospa_sequence(frames, &GospaParams::new(dist_threshold)).mean_gospa)
+}
+
+/// Calibration print (task 6.5): the observed ANEES/ANIS next to the
+/// theoretical two-sided 95% chi-squared interval for this run's `N·d`,
+/// making bound-setting "run, read, copy, add margin" — the anchor the
+/// orbital change's section-6 calibration adopts.
+fn eprint_consistency_calibration(
+    scenario_name: &str,
+    anees: &ConsistencyAccumulator,
+    anis: &ConsistencyAccumulator,
+) {
+    eprint_calibration_line(scenario_name, "ANEES", anees);
+    eprint_calibration_line(scenario_name, "ANIS", anis);
+}
+
+/// One statistic's calibration line: observed mean, sample count, per-sample
+/// dof, and the theoretical `chi2(N·d)/N` two-sided 95% interval.
+fn eprint_calibration_line(scenario_name: &str, stat: &str, acc: &ConsistencyAccumulator) {
+    match (acc.mean(), acc.bounds(chi2::DEFAULT_ALPHA)) {
+        (Some(mean), Some((lo, hi))) => eprintln!(
+            "{scenario_name} consistency: {stat} {mean:.4} over {} samples (dof {}) \
+             vs theoretical 95% interval [{lo:.4}, {hi:.4}]",
+            acc.n, acc.dof,
+        ),
+        _ => eprintln!("{scenario_name} consistency: {stat} absent (0 samples)"),
     }
 }
 
@@ -415,7 +619,12 @@ pub fn run_synthetic_benchmark(manifest: &ScenarioManifest) -> BenchmarkResult {
     // --- Radar config from scenario type ---
     let radar_config = radar_config_for_scenario(params);
 
-    let (gt_entries, measurements) = run_scenario(&scenario, &radar_config);
+    // Deterministic seeded RNG so the CI regression gate is reproducible
+    // (spec "Deterministic gate outcome" — matches the seeded ballistic /
+    // orbital / ADS-B runners in this file; previously thread-local).
+    let mut scenario_rng = StdRng::seed_from_u64(0x5EED_C0DE_5EED_C0DE);
+    let (gt_entries, measurements) =
+        run_scenario_with_rng(&scenario, &radar_config, &mut scenario_rng);
 
     // --- Run tracker ---
     // The benchmark runner currently only drives the Cartesian ENU tracker
@@ -423,15 +632,23 @@ pub fn run_synthetic_benchmark(manifest: &ScenarioManifest) -> BenchmarkResult {
     // the request only when it is `Enu`; otherwise fall back to ENU and
     // leave full wiring for the other variants to a future change.
     let _requested_variant = params.tracker_variant.unwrap_or(TrackerVariant::Enu);
-    let mut tracker =
-        MultiObjectTracker::new_cv_position(params.measurement_noise_sigma, params.gate_threshold);
+    // Honest configuration unless a deliberate-regression test decouples
+    // the tracker's R from the generator's noise (see `tracker_noise_sigma`).
+    let tracker_sigma = params
+        .tracker_noise_sigma
+        .unwrap_or(params.measurement_noise_sigma);
+    let mut tracker = MultiObjectTracker::new_cv_position(tracker_sigma, params.gate_threshold);
 
     // Group measurements and ground truth by time step
     let mut meas_by_time: HashMap<i64, Vec<DVector<f64>>> = HashMap::new();
-    for tm in &measurements {
-        let key = (tm.time / params.dt).round() as i64;
-        let pos = measurement_to_cartesian(&tm.measurement);
-        meas_by_time.entry(key).or_default().push(pos);
+    if params.measurement_model == MeasurementModel::Cartesian {
+        collect_cartesian_measurements(&gt_entries, params, &mut scenario_rng, &mut meas_by_time);
+    } else {
+        for tm in &measurements {
+            let key = (tm.time / params.dt).round() as i64;
+            let pos = measurement_to_cartesian(&tm.measurement);
+            meas_by_time.entry(key).or_default().push(pos);
+        }
     }
 
     let mut gt_by_time: HashMap<i64, Vec<GroundTruth>> = HashMap::new();
@@ -448,13 +665,14 @@ pub fn run_synthetic_benchmark(manifest: &ScenarioManifest) -> BenchmarkResult {
         .unwrap_or(0);
 
     let mut frame_data_vec: Vec<FrameData> = Vec::new();
+    let mut estimate_frames: Vec<EstimateFrame> = Vec::new();
 
     for step in 0..=max_step {
         let dets: Vec<DVector<f64>> = meas_by_time.remove(&step).unwrap_or_default();
 
         tracker.step(&dets, params.dt);
 
-        // Build FrameData for this step
+        // Build FrameData + EstimateFrame for this step
         let gt_positions: Vec<(u64, [f64; 3])> = gt_by_time
             .get(&step)
             .map(|gs| {
@@ -464,15 +682,19 @@ pub fn run_synthetic_benchmark(manifest: &ScenarioManifest) -> BenchmarkResult {
             })
             .unwrap_or_default();
 
-        frame_data_vec.push(FrameData {
-            gt: gt_positions,
-            tracks: collect_confirmed_track_positions(&tracker),
-        });
+        push_step_frames(
+            &tracker,
+            gt_positions,
+            &mut frame_data_vec,
+            &mut estimate_frames,
+        );
     }
 
     build_benchmark_result(
         &manifest.name,
         &frame_data_vec,
+        &estimate_frames,
+        &tracker,
         params.measurement_noise_sigma * 5.0,
         start,
     )
@@ -484,33 +706,81 @@ pub fn run_synthetic_benchmark(manifest: &ScenarioManifest) -> BenchmarkResult {
 
 /// Check a benchmark result against baselines.
 /// Returns a list of failure messages (empty = pass).
+///
+/// MOT baselines are one-sided floors (exactly as before the
+/// `eval-consistency-metrics` change); ANEES / average-NIS bounds are
+/// enforced two-sidedly via the `check_bound` phase helper, including the
+/// fail-loud rule:
+/// a bound asserted against an absent statistic (zero samples) is a gate
+/// failure, never a silent pass. Scenarios declaring no consistency bounds
+/// are checked exactly as before.
 pub fn check_regression(result: &BenchmarkResult, baselines: &Baselines) -> Vec<String> {
     let mut failures = Vec::new();
-    if let Some(baseline_mota) = baselines.mota
-        && result.mota < baseline_mota
-    {
-        failures.push(format!(
-            "MOTA {:.2} below baseline {:.2}",
-            result.mota, baseline_mota
-        ));
-    }
-    if let Some(baseline_hota) = baselines.hota
-        && result.hota < baseline_hota
-    {
-        failures.push(format!(
-            "HOTA {:.2} below baseline {:.2}",
-            result.hota, baseline_hota
-        ));
-    }
-    if let Some(baseline_idf1) = baselines.idf1
-        && result.idf1 < baseline_idf1
-    {
-        failures.push(format!(
-            "IDF1 {:.2} below baseline {:.2}",
-            result.idf1, baseline_idf1
-        ));
-    }
+    check_floor("MOTA", result.mota, baselines.mota, &mut failures);
+    check_floor("HOTA", result.hota, baselines.hota, &mut failures);
+    check_floor("IDF1", result.idf1, baselines.idf1, &mut failures);
+    check_bound(
+        "ANEES",
+        result.anees,
+        baselines.anees_min,
+        baselines.anees_max,
+        &mut failures,
+    );
+    check_bound(
+        "ANIS",
+        result.anis,
+        baselines.anis_min,
+        baselines.anis_max,
+        &mut failures,
+    );
     failures
+}
+
+/// One-sided floor check for the MOT metrics (pre-existing semantics and
+/// message format, byte-identical to the pre-refactor `check_regression`).
+fn check_floor(name: &str, value: f64, baseline: Option<f64>, failures: &mut Vec<String>) {
+    if let Some(floor) = baseline
+        && value < floor
+    {
+        failures.push(format!("{name} {value:.2} below baseline {floor:.2}"));
+    }
+}
+
+/// Two-sided bound check for an optional consistency statistic (phase
+/// helper of [`check_regression`], design Decision 5).
+///
+/// Each present bound is enforced in its direction with a message naming
+/// the statistic, its value, and the violated bound. **Fail-loud rule:** a
+/// bound asserted while the statistic is absent (`None` — zero samples) or
+/// non-finite is itself a failure, so a plumbing regression can never read
+/// as consistency.
+fn check_bound(
+    name: &str,
+    value: Option<f64>,
+    min: Option<f64>,
+    max: Option<f64>,
+    failures: &mut Vec<String>,
+) {
+    if min.is_none() && max.is_none() {
+        return;
+    }
+    let Some(value) = value.filter(|v| v.is_finite()) else {
+        failures.push(format!(
+            "{name} bound declared but the statistic is absent (zero samples \
+             or non-finite) — failing loud instead of passing silently"
+        ));
+        return;
+    };
+    if let Some(lo) = min
+        && value < lo
+    {
+        failures.push(format!("{name} {value:.4} below lower bound {lo:.4}"));
+    }
+    if let Some(hi) = max
+        && value > hi
+    {
+        failures.push(format!("{name} {value:.4} above upper bound {hi:.4}"));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -715,6 +985,35 @@ fn build_low_pd_trajectories(params: &ScenarioParameters) -> Vec<Trajectory> {
     build_cv_clean_trajectories(params)
 }
 
+/// Cartesian measurement mode ([`MeasurementModel::Cartesian`]): one
+/// detection per truth entry with isotropic per-axis Gaussian noise of
+/// `measurement_noise_sigma`, exactly matching the tracker's isotropic R.
+///
+/// This is the textbook consistency configuration: every NEES/NIS sample is
+/// chi-squared distributed by construction, so the `synth-cv-clean`
+/// ANEES/ANIS gate can be judged against the theoretical interval
+/// (`eval-consistency-metrics` design Decision 5). Detection is perfect and
+/// clutter-free; scenarios needing missed detections or clutter use the
+/// default RAE radar model.
+fn collect_cartesian_measurements<R: rand::Rng>(
+    gt_entries: &[GroundTruth],
+    params: &ScenarioParameters,
+    rng: &mut R,
+    meas_by_time: &mut HashMap<i64, Vec<DVector<f64>>>,
+) {
+    let normal = rand_distr::Normal::new(0.0, params.measurement_noise_sigma)
+        .expect("measurement_noise_sigma must be finite and non-negative");
+    for g in gt_entries {
+        let key = (g.time / params.dt).round() as i64;
+        let pos = DVector::from_column_slice(&[
+            g.position[0] + rand_distr::Distribution::sample(&normal, rng),
+            g.position[1] + rand_distr::Distribution::sample(&normal, rng),
+            g.position[2] + rand_distr::Distribution::sample(&normal, rng),
+        ]);
+        meas_by_time.entry(key).or_default().push(pos);
+    }
+}
+
 /// Return the appropriate `RadarConfig` for a scenario type.
 ///
 /// Default (cv-clean / maneuvering / heterogeneous) uses perfect detection
@@ -869,6 +1168,7 @@ pub fn run_orbital_benchmark(
 
     let mut tracker = MultiObjectTracker::new_cv_position(sigma_eff, params.gate_threshold);
     let mut frame_data_vec: Vec<FrameData> = Vec::with_capacity(n_steps);
+    let mut estimate_frames: Vec<EstimateFrame> = Vec::with_capacity(n_steps);
 
     for step in 0..n_steps {
         let t_min = step as f64 * step_s / 60.0;
@@ -886,10 +1186,12 @@ pub fn run_orbital_benchmark(
             detections.into_iter().map(|d| (d, birth_class)).collect();
         tracker.step_classed(&classed, step_s);
 
-        frame_data_vec.push(FrameData {
-            gt: gt_positions,
-            tracks: collect_confirmed_track_positions(&tracker),
-        });
+        push_step_frames(
+            &tracker,
+            gt_positions,
+            &mut frame_data_vec,
+            &mut estimate_frames,
+        );
     }
 
     // ---- 5. Metrics ----
@@ -908,6 +1210,8 @@ pub fn run_orbital_benchmark(
     Ok(build_benchmark_result(
         &manifest.name,
         &frame_data_vec,
+        &estimate_frames,
+        &tracker,
         dist_threshold,
         start,
     ))
@@ -1230,6 +1534,7 @@ pub fn run_ballistic_benchmark(
         .min((params.duration_s / params.dt).ceil() as usize + 1);
     let mut tracker = MultiObjectTracker::new_cv_position(sigma_eff, params.gate_threshold);
     let mut frame_data_vec: Vec<FrameData> = Vec::with_capacity(n_steps);
+    let mut estimate_frames: Vec<EstimateFrame> = Vec::with_capacity(n_steps);
 
     for k in 0..n_steps {
         let (detections, gt_positions) =
@@ -1237,10 +1542,12 @@ pub fn run_ballistic_benchmark(
         let classed: Vec<(DVector<f64>, TargetClass)> =
             detections.into_iter().map(|d| (d, birth_class)).collect();
         tracker.step_classed(&classed, params.dt);
-        frame_data_vec.push(FrameData {
-            gt: gt_positions,
-            tracks: collect_confirmed_track_positions(&tracker),
-        });
+        push_step_frames(
+            &tracker,
+            gt_positions,
+            &mut frame_data_vec,
+            &mut estimate_frames,
+        );
     }
 
     // ---- 5. Metrics ----
@@ -1259,6 +1566,8 @@ pub fn run_ballistic_benchmark(
     Ok(build_benchmark_result(
         &manifest.name,
         &frame_data_vec,
+        &estimate_frames,
+        &tracker,
         dist_threshold,
         start,
     ))
@@ -1488,6 +1797,7 @@ pub fn run_adsb_benchmark(
     let mut tracker =
         MultiObjectTracker::new_cv_position(params.measurement_noise_sigma, params.gate_threshold);
     let mut frame_data_vec: Vec<FrameData> = Vec::new();
+    let mut estimate_frames: Vec<EstimateFrame> = Vec::new();
 
     let step_lo = dets_by_step
         .keys()
@@ -1507,10 +1817,12 @@ pub fn run_adsb_benchmark(
         tracker.step(&dets, params.dt);
 
         let gt_positions: Vec<(u64, [f64; 3])> = gt_by_step.remove(&step).unwrap_or_default();
-        frame_data_vec.push(FrameData {
-            gt: gt_positions,
-            tracks: collect_confirmed_track_positions(&tracker),
-        });
+        push_step_frames(
+            &tracker,
+            gt_positions,
+            &mut frame_data_vec,
+            &mut estimate_frames,
+        );
     }
 
     let total_gt: usize = frame_data_vec.iter().map(|f| f.gt.len()).sum();
@@ -1526,6 +1838,8 @@ pub fn run_adsb_benchmark(
     Ok(build_benchmark_result(
         &manifest.name,
         &frame_data_vec,
+        &estimate_frames,
+        &tracker,
         (params.measurement_noise_sigma * 10.0).max(500.0),
         start,
     ))
@@ -1686,6 +2000,7 @@ pub fn run_nuscenes_benchmark(
     let normal = Normal::new(0.0, 1.0).unwrap();
 
     let mut frame_data_vec: Vec<FrameData> = Vec::new();
+    let mut estimate_frames: Vec<EstimateFrame> = Vec::new();
     let frames: Vec<_> = dataset.frames().collect();
     if frames.is_empty() {
         return Err(format!(
@@ -1731,10 +2046,7 @@ pub fn run_nuscenes_benchmark(
 
         tracker.step(&detections, dt);
 
-        frame_data_vec.push(FrameData {
-            gt,
-            tracks: collect_confirmed_track_positions(&tracker),
-        });
+        push_step_frames(&tracker, gt, &mut frame_data_vec, &mut estimate_frames);
     }
 
     // ---- 3. Metrics ----
@@ -1750,6 +2062,8 @@ pub fn run_nuscenes_benchmark(
     Ok(build_benchmark_result(
         &manifest.name,
         &frame_data_vec,
+        &estimate_frames,
+        &tracker,
         (params.measurement_noise_sigma * 10.0).max(5.0),
         start,
     ))
@@ -1771,12 +2085,184 @@ mod tests {
                 gate_threshold: 500.0,
                 tracker_variant: None,
                 scenario_type: Some("cv-clean".into()),
+                measurement_model: MeasurementModel::Cartesian,
+                tracker_noise_sigma: None,
             },
             baselines: Some(Baselines {
                 mota: Some(0.5),
-                hota: None,
-                idf1: None,
+                ..Baselines::default()
             }),
+        }
+    }
+
+    /// `measurement_model` is a typed enum: a misspelled value must fail
+    /// TOML parsing loudly (naming the field) instead of silently
+    /// selecting the default RAE model — the model choice is load-bearing
+    /// for the consistency gates.
+    #[test]
+    fn misspelled_measurement_model_fails_to_parse() {
+        let toml = r#"
+            name = "typo"
+            description = "misspelled measurement model"
+            source = "Synthetic"
+            [parameters]
+            duration_s = 30.0
+            dt = 1.0
+            measurement_noise_sigma = 50.0
+            gate_threshold = 500.0
+            measurement_model = "cartesain"
+        "#;
+        let err = toml::from_str::<ScenarioManifest>(toml)
+            .expect_err("unknown measurement_model must be a parse error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("cartesian") || msg.contains("measurement_model"),
+            "error should point at the field or list variants: {msg}"
+        );
+    }
+
+    /// The committed `synth-cv-clean.toml`, loaded from disk so the task
+    /// 6.6 gate tests exercise exactly the scenario CI runs.
+    fn committed_cv_clean_manifest() -> ScenarioManifest {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("scenarios/synth-cv-clean.toml");
+        load_scenario(&path).expect("committed synth-cv-clean.toml loads")
+    }
+
+    /// Task 6.6 (specs "Honest covariance passes the gate", "Runner
+    /// populates consistency statistics"): the committed scenario — honest
+    /// R, calibrated bounds — passes every gate with ANEES/ANIS populated.
+    #[test]
+    fn honest_covariance_passes_the_gate() {
+        let manifest = committed_cv_clean_manifest();
+        let result = run_synthetic_benchmark(&manifest);
+        assert!(result.anees.is_some(), "runner populates ANEES");
+        assert!(result.anis.is_some(), "runner populates ANIS");
+        assert!(result.anees_samples > 0 && result.anis_samples > 0);
+        let failures = check_regression(&result, manifest.baselines.as_ref().unwrap());
+        assert!(failures.is_empty(), "honest tuning must pass: {failures:?}");
+    }
+
+    /// Task 6.6 (spec "Dishonest covariance fails the gate"): a tracker R
+    /// far below the generated noise (a covariance lie MOT metrics cannot
+    /// see — MOTA/HOTA/IDF1 all still clear their floors) is flagged by
+    /// ANEES **and** ANIS above their upper bounds.
+    ///
+    /// The knob is R rather than the task sketch's Q because cv-clean
+    /// truth is exact CV with zero process noise: scaling the filter's
+    /// (already negligible) Q cannot manufacture overconfidence here,
+    /// while an understated R is exactly the same covariance lie
+    /// (recorded as an implementation-time divergence in design.md).
+    #[test]
+    fn overconfident_covariance_fails_high_while_mot_passes() {
+        let mut manifest = committed_cv_clean_manifest();
+        manifest.parameters.tracker_noise_sigma = Some(5.0);
+        let result = run_synthetic_benchmark(&manifest);
+        let baselines = manifest.baselines.as_ref().unwrap();
+
+        let failures = check_regression(&result, baselines);
+        assert!(
+            failures
+                .iter()
+                .any(|f| f.contains("ANEES") && f.contains("above")),
+            "ANEES must fail above its upper bound: {failures:?}"
+        );
+        assert!(
+            failures
+                .iter()
+                .any(|f| f.contains("ANIS") && f.contains("above")),
+            "ANIS must fail above its upper bound: {failures:?}"
+        );
+        // The lie is invisible to the MOT gates: every failure is a
+        // consistency bound, none an MOT floor.
+        assert!(result.mota >= baselines.mota.unwrap(), "MOTA still passes");
+        assert!(
+            failures
+                .iter()
+                .all(|f| f.contains("ANEES") || f.contains("ANIS")),
+            "only consistency gates may fail: {failures:?}"
+        );
+    }
+
+    /// Task 6.6 (spec "Underconfident covariance also fails"): an inflated
+    /// tracker R drives ANEES and ANIS below the lower bounds while the
+    /// MOT floors still pass — both tails of the interval are enforced.
+    #[test]
+    fn underconfident_covariance_fails_low_while_mot_passes() {
+        let mut manifest = committed_cv_clean_manifest();
+        manifest.parameters.tracker_noise_sigma = Some(150.0);
+        let result = run_synthetic_benchmark(&manifest);
+        let baselines = manifest.baselines.as_ref().unwrap();
+
+        let failures = check_regression(&result, baselines);
+        assert!(
+            failures
+                .iter()
+                .any(|f| f.contains("ANEES") && f.contains("below")),
+            "ANEES must fail below its lower bound: {failures:?}"
+        );
+        assert!(
+            failures
+                .iter()
+                .any(|f| f.contains("ANIS") && f.contains("below")),
+            "ANIS must fail below its lower bound: {failures:?}"
+        );
+        assert!(result.mota >= baselines.mota.unwrap(), "MOTA still passes");
+        assert!(
+            failures
+                .iter()
+                .all(|f| f.contains("ANEES") || f.contains("ANIS")),
+            "only consistency gates may fail: {failures:?}"
+        );
+    }
+
+    /// Task 6.6 (specs "Deterministic gate outcome", "Repeated runs
+    /// agree"): the seeded scenario produces bitwise-identical statistics
+    /// and the same pass/fail outcome across runs in one process.
+    #[test]
+    fn same_seed_runs_bitwise_identical_and_same_outcome() {
+        let manifest = committed_cv_clean_manifest();
+        let a = run_synthetic_benchmark(&manifest);
+        let b = run_synthetic_benchmark(&manifest);
+        assert_eq!(a.mota.to_bits(), b.mota.to_bits());
+        assert_eq!(a.hota.to_bits(), b.hota.to_bits());
+        assert_eq!(a.idf1.to_bits(), b.idf1.to_bits());
+        assert_eq!(
+            a.anees.map(f64::to_bits),
+            b.anees.map(f64::to_bits),
+            "ANEES bitwise identical"
+        );
+        assert_eq!(
+            a.anis.map(f64::to_bits),
+            b.anis.map(f64::to_bits),
+            "ANIS bitwise identical"
+        );
+        assert_eq!(a.anees_samples, b.anees_samples);
+        assert_eq!(a.anis_samples, b.anis_samples);
+        assert_eq!(a.gospa.map(f64::to_bits), b.gospa.map(f64::to_bits));
+        let baselines = manifest.baselines.as_ref().unwrap();
+        assert_eq!(
+            check_regression(&a, baselines),
+            check_regression(&b, baselines),
+            "identical pass/fail outcome"
+        );
+    }
+
+    /// A `BenchmarkResult` with the given MOT values and absent
+    /// consistency statistics (the pre-`eval-consistency-metrics` shape).
+    fn mot_result(mota: f64, motp: f64, idf1: f64, hota: f64) -> BenchmarkResult {
+        BenchmarkResult {
+            scenario: "test".into(),
+            mota,
+            motp,
+            idf1,
+            hota,
+            id_switches: 0,
+            anees: None,
+            anees_samples: 0,
+            anis: None,
+            anis_samples: 0,
+            gospa: None,
+            duration_ms: 0,
         }
     }
 
@@ -1817,6 +2303,8 @@ mod tests {
             gate_threshold: 500.0,
             tracker_variant: None,
             scenario_type: Some("maneuvering".into()),
+            measurement_model: MeasurementModel::RadarRae,
+            tracker_noise_sigma: None,
         };
         let trajs = build_maneuvering_trajectories(&params);
         assert_eq!(trajs.len(), 4, "expected 4 maneuvering trajectories");
@@ -1843,6 +2331,8 @@ mod tests {
             gate_threshold: 500.0,
             tracker_variant: None,
             scenario_type: Some("heterogeneous".into()),
+            measurement_model: MeasurementModel::RadarRae,
+            tracker_noise_sigma: None,
         };
         let trajs = build_heterogeneous_trajectories(&params);
         assert_eq!(trajs.len(), 5, "expected 5 heterogeneous trajectories");
@@ -1874,6 +2364,8 @@ mod tests {
             gate_threshold: 500.0,
             tracker_variant: None,
             scenario_type: Some("low-pd".into()),
+            measurement_model: MeasurementModel::RadarRae,
+            tracker_noise_sigma: None,
         };
         let low_pd = build_low_pd_trajectories(&params);
         let cv_clean = build_cv_clean_trajectories(&params);
@@ -1897,6 +2389,8 @@ mod tests {
             gate_threshold: 500.0,
             tracker_variant: None,
             scenario_type: None,
+            measurement_model: MeasurementModel::RadarRae,
+            tracker_noise_sigma: None,
         };
         let default_cfg = radar_config_for_scenario(&default_params);
         assert!(
@@ -1954,19 +2448,12 @@ mod tests {
 
     #[test]
     fn regression_check_catches_failure() {
-        let result = BenchmarkResult {
-            scenario: "test".into(),
-            mota: 0.72,
-            motp: 5.0,
-            idf1: 0.60,
-            hota: 0.50,
-            id_switches: 3,
-            duration_ms: 100,
-        };
+        let result = mot_result(0.72, 5.0, 0.60, 0.50);
         let baselines = Baselines {
             mota: Some(0.80),
             hota: Some(0.70),
             idf1: Some(0.75),
+            ..Baselines::default()
         };
         let failures = check_regression(&result, &baselines);
         assert_eq!(failures.len(), 3);
@@ -1977,25 +2464,134 @@ mod tests {
 
     #[test]
     fn regression_check_passes_above_baseline() {
-        let result = BenchmarkResult {
-            scenario: "test".into(),
-            mota: 0.95,
-            motp: 3.0,
-            idf1: 0.90,
-            hota: 0.85,
-            id_switches: 0,
-            duration_ms: 50,
-        };
+        let result = mot_result(0.95, 3.0, 0.90, 0.85);
         let baselines = Baselines {
             mota: Some(0.80),
             hota: Some(0.70),
             idf1: Some(0.75),
+            ..Baselines::default()
         };
         let failures = check_regression(&result, &baselines);
         assert!(
             failures.is_empty(),
             "Expected no failures, got: {failures:?}"
         );
+    }
+
+    // ---------------------------------------------------------------------
+    // Consistency bounds in check_regression (eval-consistency-metrics,
+    // task 6.4; spec "Regression check enforces consistency bounds" /
+    // "Absent statistics are explicit")
+    // ---------------------------------------------------------------------
+
+    /// A result whose consistency statistics are populated with the given
+    /// ANEES/ANIS values (samples > 0) and passing MOT values.
+    fn consistency_result(anees: Option<f64>, anis: Option<f64>) -> BenchmarkResult {
+        BenchmarkResult {
+            anees,
+            anees_samples: usize::from(anees.is_some()) * 100,
+            anis,
+            anis_samples: usize::from(anis.is_some()) * 100,
+            ..mot_result(0.95, 3.0, 0.90, 0.85)
+        }
+    }
+
+    /// Baselines carrying only the two-sided consistency intervals.
+    fn consistency_baselines() -> Baselines {
+        Baselines {
+            anees_min: Some(2.5),
+            anees_max: Some(3.5),
+            anis_min: Some(2.6),
+            anis_max: Some(3.4),
+            ..Baselines::default()
+        }
+    }
+
+    /// Above-max fails: the failure names the statistic, its value, and
+    /// the violated bound.
+    #[test]
+    fn consistency_bound_above_max_fails() {
+        let result = consistency_result(Some(5.0), Some(3.0));
+        let failures = check_regression(&result, &consistency_baselines());
+        assert_eq!(failures.len(), 1, "got: {failures:?}");
+        assert!(failures[0].contains("ANEES"), "got: {}", failures[0]);
+        assert!(failures[0].contains("5.0000"), "got: {}", failures[0]);
+        assert!(
+            failures[0].contains("above upper bound 3.5000"),
+            "got: {}",
+            failures[0]
+        );
+    }
+
+    /// Below-min fails (bounds are two-sided, not a one-sided ceiling).
+    #[test]
+    fn consistency_bound_below_min_fails() {
+        let result = consistency_result(Some(3.0), Some(1.0));
+        let failures = check_regression(&result, &consistency_baselines());
+        assert_eq!(failures.len(), 1, "got: {failures:?}");
+        assert!(failures[0].contains("ANIS"), "got: {}", failures[0]);
+        assert!(failures[0].contains("1.0000"), "got: {}", failures[0]);
+        assert!(
+            failures[0].contains("below lower bound 2.6000"),
+            "got: {}",
+            failures[0]
+        );
+    }
+
+    /// Inside the interval passes.
+    #[test]
+    fn consistency_bound_inside_passes() {
+        let result = consistency_result(Some(3.0), Some(3.0));
+        let failures = check_regression(&result, &consistency_baselines());
+        assert!(failures.is_empty(), "got: {failures:?}");
+    }
+
+    /// No declared bounds behaves exactly as today: a result with absent
+    /// statistics produces no consistency failures, only the MOT floors
+    /// apply (spec "Existing TOMLs parse unchanged").
+    #[test]
+    fn consistency_no_bounds_behaves_as_today() {
+        let baselines = Baselines {
+            mota: Some(0.80),
+            hota: Some(0.70),
+            idf1: Some(0.75),
+            ..Baselines::default()
+        };
+        // Passing MOT, absent consistency: no failures at all.
+        let good = mot_result(0.95, 3.0, 0.90, 0.85);
+        assert!(check_regression(&good, &baselines).is_empty());
+        // Failing MOT, absent consistency: exactly the three floor
+        // messages, none mentioning ANEES/ANIS.
+        let bad = mot_result(0.10, 5.0, 0.10, 0.10);
+        let failures = check_regression(&bad, &baselines);
+        assert_eq!(failures.len(), 3);
+        assert!(
+            failures
+                .iter()
+                .all(|f| !f.contains("ANEES") && !f.contains("ANIS")),
+            "got: {failures:?}"
+        );
+    }
+
+    /// FAIL-LOUD rule: a bound asserted against an absent statistic (zero
+    /// samples) is a gate failure, never a silent pass.
+    #[test]
+    fn consistency_absent_statistic_with_bound_fails() {
+        let result = consistency_result(None, None);
+        let failures = check_regression(&result, &consistency_baselines());
+        assert_eq!(failures.len(), 2, "got: {failures:?}");
+        assert!(failures[0].contains("ANEES") && failures[0].contains("absent"));
+        assert!(failures[1].contains("ANIS") && failures[1].contains("absent"));
+    }
+
+    /// A non-finite statistic under an asserted bound also fails loud
+    /// (NaN comparisons would otherwise pass both sides silently).
+    #[test]
+    fn consistency_non_finite_statistic_with_bound_fails() {
+        let result = consistency_result(Some(f64::NAN), Some(3.0));
+        let failures = check_regression(&result, &consistency_baselines());
+        assert_eq!(failures.len(), 1, "got: {failures:?}");
+        assert!(failures[0].contains("ANEES") && failures[0].contains("absent"));
     }
 
     // ---------------------------------------------------------------------
@@ -2039,6 +2635,31 @@ mod tests {
         assert_eq!(
             a.id_switches, b.id_switches,
             "ID switch counts differ between runs"
+        );
+        // Consistency statistics are part of the deterministic contract
+        // too (spec "Deterministic gate outcome").
+        assert_eq!(
+            a.anees.map(f64::to_bits),
+            b.anees.map(f64::to_bits),
+            "ANEES differs between runs: {:?} vs {:?}",
+            a.anees,
+            b.anees
+        );
+        assert_eq!(a.anees_samples, b.anees_samples);
+        assert_eq!(
+            a.anis.map(f64::to_bits),
+            b.anis.map(f64::to_bits),
+            "ANIS differs between runs: {:?} vs {:?}",
+            a.anis,
+            b.anis
+        );
+        assert_eq!(a.anis_samples, b.anis_samples);
+        assert_eq!(
+            a.gospa.map(f64::to_bits),
+            b.gospa.map(f64::to_bits),
+            "GOSPA differs between runs: {:?} vs {:?}",
+            a.gospa,
+            b.gospa
         );
     }
 
@@ -2100,8 +2721,7 @@ mod tests {
             },
             baselines: Some(Baselines {
                 mota: Some(-1.0),
-                hota: None,
-                idf1: None,
+                ..Baselines::default()
             }),
         }
     }
@@ -2320,12 +2940,21 @@ mod tests {
     fn build_benchmark_result_wraps_metrics() {
         // Empty frame vec: all MOT metrics default to 0 / 0 / etc.
         // The helper must still produce a well-formed BenchmarkResult
-        // with the supplied scenario name and a non-negative duration.
+        // with the supplied scenario name and a non-negative duration —
+        // and every consistency statistic explicitly absent (`None`, not
+        // zero, not NaN: spec "Absent statistics are explicit").
         let start = Instant::now();
         let frames: Vec<FrameData> = Vec::new();
-        let result = build_benchmark_result("unit-test", &frames, 1.0, start);
+        let estimates: Vec<EstimateFrame> = Vec::new();
+        let tracker = MultiObjectTracker::new_cv_position(10.0, 100.0);
+        let result = build_benchmark_result("unit-test", &frames, &estimates, &tracker, 1.0, start);
         assert_eq!(result.scenario, "unit-test");
         assert_eq!(result.id_switches, 0);
+        assert_eq!(result.anees, None);
+        assert_eq!(result.anees_samples, 0);
+        assert_eq!(result.anis, None);
+        assert_eq!(result.anis_samples, 0);
+        assert_eq!(result.gospa, None);
     }
 
     #[test]
@@ -2345,12 +2974,173 @@ mod tests {
             },
         ];
         let start = Instant::now();
-        let result = build_benchmark_result("perfect-match", &frames, 2.0, start);
+        let tracker = MultiObjectTracker::new_cv_position(10.0, 100.0);
+        let result = build_benchmark_result("perfect-match", &frames, &[], &tracker, 2.0, start);
         assert_eq!(result.scenario, "perfect-match");
         assert!(
             result.mota > 0.99,
             "expected near-perfect MOTA, got {}",
             result.mota
+        );
+        // GOSPA is computed from the same FrameData sequence (reported,
+        // not gated); ANEES stays absent because no estimate frames were
+        // collected, and ANIS stays absent because this tracker applied
+        // no KF updates.
+        let gospa = result.gospa.expect("non-empty sequence has GOSPA");
+        assert!(gospa.is_finite() && gospa >= 0.0);
+        assert_eq!(result.anees, None);
+        assert_eq!(result.anis, None);
+    }
+
+    #[test]
+    fn collect_confirmed_track_estimates_mirrors_positions() {
+        // Confirm one track, then check the estimate collector returns the
+        // same confirmed set as the position collector, carrying the full
+        // 6D state and 6×6 covariance with the interleaved [0, 2, 4]
+        // position projection agreeing bitwise.
+        let mut tracker = MultiObjectTracker::new_cv_position(10.0, 500.0);
+        for _ in 0..6 {
+            let det = DVector::from_column_slice(&[100.0, 200.0, 50.0]);
+            tracker.step(&[det], 1.0);
+        }
+        let positions = collect_confirmed_track_positions(&tracker);
+        let estimates = collect_confirmed_track_estimates(&tracker);
+        assert!(!estimates.is_empty(), "a track should have confirmed");
+        assert_eq!(positions.len(), estimates.len());
+        for ((pid, pos), est) in positions.iter().zip(&estimates) {
+            assert_eq!(*pid, est.id);
+            assert_eq!(est.state.len(), 6);
+            assert_eq!(est.covariance.shape(), (6, 6));
+            assert_eq!(est.state[0].to_bits(), pos[0].to_bits());
+            assert_eq!(est.state[2].to_bits(), pos[1].to_bits());
+            assert_eq!(est.state[4].to_bits(), pos[2].to_bits());
+        }
+    }
+
+    /// Spec "Runner populates consistency statistics": the synthetic
+    /// runner collects diagnostics and ground truth, so its result carries
+    /// ANEES, ANIS (each with a positive sample count), and GOSPA.
+    #[test]
+    fn synthetic_runner_populates_consistency_statistics() {
+        let manifest = cv_clean_manifest();
+        let result = run_synthetic_benchmark(&manifest);
+        let anees = result.anees.expect("ANEES populated");
+        assert!(anees.is_finite() && anees > 0.0);
+        assert!(result.anees_samples > 0);
+        let anis = result.anis.expect("ANIS populated");
+        assert!(anis.is_finite() && anis > 0.0);
+        assert!(result.anis_samples > 0);
+        let gospa = result.gospa.expect("GOSPA populated");
+        assert!(gospa.is_finite() && gospa >= 0.0);
+    }
+
+    // ---------------------------------------------------------------------
+    // Schema extension (eval-consistency-metrics, task 6.3)
+    // ---------------------------------------------------------------------
+
+    /// Spec "Existing TOMLs parse unchanged": every scenario TOML already
+    /// committed under `scenarios/` deserializes, and every one except
+    /// `synth-cv-clean` (whose bounds task 6.6 calibrated and committed)
+    /// carries no consistency bounds — because absent bounds short-circuit
+    /// `check_bound`, their regression-check outcome on any result is
+    /// exactly the pre-change MOT-floor outcome.
+    #[test]
+    fn existing_scenario_tomls_parse_with_bounds_absent() {
+        let scenarios_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scenarios");
+        let mut checked = 0usize;
+        for entry in std::fs::read_dir(&scenarios_dir).expect("scenarios dir") {
+            let path = entry.expect("dir entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let manifest = load_scenario(&path)
+                .unwrap_or_else(|e| panic!("{} must still parse: {e}", path.display()));
+            let Some(b) = &manifest.baselines else {
+                continue;
+            };
+            if manifest.name == "synth-cv-clean" {
+                // The one calibrated gate (task 6.6): all four bounds set.
+                assert!(
+                    b.anees_min.is_some()
+                        && b.anees_max.is_some()
+                        && b.anis_min.is_some()
+                        && b.anis_max.is_some(),
+                    "synth-cv-clean must carry its calibrated consistency bounds"
+                );
+                continue;
+            }
+            checked += 1;
+            assert!(
+                b.anees_min.is_none()
+                    && b.anees_max.is_none()
+                    && b.anis_min.is_none()
+                    && b.anis_max.is_none(),
+                "{} must not declare consistency bounds (task 6.6 owns synth-cv-clean \
+                 calibration; orbital section 6 owns the rest)",
+                path.display()
+            );
+            // Outcome unchanged: with no consistency bounds, only the MOT
+            // floors fire. A result violating every floor produces exactly
+            // one failure per declared floor and none mention ANEES/ANIS…
+            let worst = mot_result(f64::MIN, f64::MAX, f64::MIN, f64::MIN);
+            let failures = check_regression(&worst, b);
+            let declared_floors = usize::from(b.mota.is_some())
+                + usize::from(b.hota.is_some())
+                + usize::from(b.idf1.is_some());
+            assert_eq!(failures.len(), declared_floors, "{}", path.display());
+            assert!(
+                failures
+                    .iter()
+                    .all(|f| !f.contains("ANEES") && !f.contains("ANIS")),
+                "{}: {failures:?}",
+                path.display()
+            );
+            // …and a result meeting every floor passes outright.
+            let best = mot_result(f64::MAX, 0.0, f64::MAX, f64::MAX);
+            assert!(check_regression(&best, b).is_empty(), "{}", path.display());
+        }
+        assert!(
+            checked >= 4,
+            "expected several committed scenarios with baselines, found {checked}"
+        );
+    }
+
+    /// Spec "TOML with consistency bounds parses": a baselines section
+    /// declaring the four bound fields deserializes with them populated
+    /// and available to the regression check.
+    #[test]
+    fn toml_with_consistency_bounds_parses() {
+        let toml = r#"
+            name = "bounds-test"
+            description = "consistency bounds parse test"
+            source = "Synthetic"
+
+            [parameters]
+            duration_s = 10.0
+            dt = 1.0
+            measurement_noise_sigma = 50.0
+            gate_threshold = 500.0
+
+            [baselines]
+            mota = 0.5
+            anees_min = 1.8
+            anees_max = 4.6
+            anis_min = 2.1
+            anis_max = 3.9
+        "#;
+        let manifest: ScenarioManifest = toml::from_str(toml).expect("bounds TOML parses");
+        let b = manifest.baselines.expect("baselines present");
+        assert_eq!(b.mota, Some(0.5));
+        assert_eq!(b.anees_min, Some(1.8));
+        assert_eq!(b.anees_max, Some(4.6));
+        assert_eq!(b.anis_min, Some(2.1));
+        assert_eq!(b.anis_max, Some(3.9));
+        // The parsed bounds are live in the regression check.
+        let result = consistency_result(Some(5.0), Some(3.0));
+        let failures = check_regression(&result, &b);
+        assert!(
+            failures.iter().any(|f| f.contains("ANEES")),
+            "got: {failures:?}"
         );
     }
 
@@ -2406,8 +3196,7 @@ mod tests {
             },
             baselines: Some(Baselines {
                 mota: Some(-2.0),
-                hota: None,
-                idf1: None,
+                ..Baselines::default()
             }),
         }
     }
