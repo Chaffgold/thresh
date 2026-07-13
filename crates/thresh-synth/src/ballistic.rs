@@ -274,8 +274,9 @@ fn integrate_profile(profile: &BallisticProfile, dt: f64) -> Vec<OrbitalState> {
     let (mut pos, mut vel) = launch_state_eci(profile);
     let mut samples = vec![sample_state(profile, 0.0, &pos, &vel)];
     let mut kicked = false;
-    let mut t = 0.0;
-    while t < MAX_FLIGHT_S {
+    let max_steps = (MAX_FLIGHT_S / dt).ceil() as usize;
+    for step in 0..max_steps {
+        let t = step as f64 * dt;
         if !kicked && t >= profile.pitch_over_s {
             vel = apply_pitch_kick(profile, &pos, &vel);
             kicked = true;
@@ -286,8 +287,7 @@ fn integrate_profile(profile: &BallisticProfile, dt: f64) -> Vec<OrbitalState> {
         });
         pos = p;
         vel = v;
-        t += dt;
-        samples.push(sample_state(profile, t, &pos, &vel));
+        samples.push(sample_state(profile, (step + 1) as f64 * dt, &pos, &vel));
         if pos.dot(&vel) < 0.0 && pos.norm() <= EARTH.equatorial_radius {
             break;
         }

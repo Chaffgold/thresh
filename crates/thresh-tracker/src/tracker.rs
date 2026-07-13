@@ -851,7 +851,7 @@ impl MultiObjectTracker {
 
     /// Reclassify a live track (spec scenario "Class reclassification"):
     /// switch its [`TargetClass`] — and therefore the head whose motion
-    /// model [`Self::predict_single_model`] dispatches — adapting the state
+    /// model `predict_single_model` dispatches — adapting the state
     /// vector across head dimensions. The interleaved kinematic prefix
     /// `[x, vx, y, vy, z, vz]` is shared by every head, so growing 6D → 7D
     /// preserves it and births the appended β from the new head's prior,
