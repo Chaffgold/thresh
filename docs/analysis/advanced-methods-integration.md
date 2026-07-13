@@ -1,8 +1,10 @@
 # Advanced-Methods Doc — Integration Analysis
 
-**Source doc:** `thresh-advanced-methods.md` (this worktree root)
+**Source doc:** [`thresh-advanced-methods.md`](thresh-advanced-methods.md) (same directory)
 **Codebase snapshot:** `develop` @ `d33f243` (worktree `advanced-methods`)
 **Cross-referenced against:** live code in `crates/` and `python/`, live specs in `openspec/specs/`, archived changes in `openspec/changes/archive/`, the **in-flight** change `orbital-ballistic-filter-models` (implementing now), and the three **planned** changes `astro-time-and-frames`, `orbit-propagation-fidelity`, `atmospheric-measurement-propagation`.
+
+> **Status note (2026-07-12):** the analysis below is a point-in-time snapshot at `d33f243`. Since then, `orbital-ballistic-filter-models` has fully landed (#131, #133; archived) and `eval-consistency-metrics` (NEES/NIS + GOSPA — §2/§9/§11.1 items) has an approved change spec (#132). "In-flight" verdicts in the tables refer to the former and are now **done**.
 **Method:** five parallel analysts, one per doc-section group (1.x / 2–3 / 4–5 / 6–7–11 / 8–9–10), each verifying every named technique with repo-wide greps and source reads.
 
 ---
