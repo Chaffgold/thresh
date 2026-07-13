@@ -481,12 +481,19 @@ impl MultiObjectTracker {
         associated_tracks: &mut [bool],
         associated_dets: &mut [bool],
     ) {
-        let h = &self.observation_matrix;
         let r = &self.measurement_noise;
 
+        // Per-track padded H (see [`Self::observation_for_dim`]) so 7D
+        // reentry tracks associate and update alongside 6D ones, matching
+        // the Hungarian and MHT paths.
+        let observation_matrices: Vec<DMatrix<f64>> = alive
+            .iter()
+            .map(|&ti| self.observation_for_dim(self.tracks[ti].state.len()))
+            .collect();
         let jpda_tracks: Vec<JpdaTrack> = alive
             .iter()
-            .map(|&ti| {
+            .zip(&observation_matrices)
+            .map(|(&ti, h)| {
                 let pred_z = h * &self.tracks[ti].state;
                 let s = h * &self.tracks[ti].covariance * h.transpose() + r;
                 JpdaTrack {
@@ -510,7 +517,7 @@ impl MultiObjectTracker {
             &states,
             &covariances,
             detections,
-            h,
+            &observation_matrices,
             self.gate_threshold,
             p_d,
             clutter,
@@ -1911,6 +1918,66 @@ mod tests {
         assert!(
             (air.state[0] - ac[0]).abs() < 500.0,
             "aircraft track follows its leg"
+        );
+    }
+
+    /// The JPDA path pads H per track dimension like Hungarian/MHT: a 7D
+    /// ballistic track alongside a 6D aircraft previously panicked on the
+    /// shared 3×6 observation matrix (PR #133 review finding).
+    #[test]
+    fn jpda_pads_observation_matrix_for_mixed_dimension_tracks() {
+        let earth = GravityModel::EARTH_WGS84;
+        let dt = 1.0;
+        let mut tracker = MultiObjectTracker::new_cv_position_with_strategy(
+            50.0,
+            500.0,
+            AssociationStrategy::Jpda {
+                detection_prob: 0.9,
+                // Low enough that the miss weight (1 − p_d)·λ never beats
+                // the Gaussian likelihood through the ballistic head's wide
+                // birth prior (S ~ km-scale ⇒ N(z; ẑ, S) is tiny).
+                clutter_density: 1e-30,
+            },
+        );
+
+        let ballistic_model = TrackHead::ballistic().build_model();
+        let mut bal_truth = DVector::from_column_slice(&[
+            earth.equatorial_radius + 400_000.0,
+            0.0,
+            1.0e6,
+            700.0,
+            0.0,
+            -300.0,
+            1_500.0,
+        ]);
+        let mut ac = [0.0, 0.0, 10_000.0];
+        let ac_v = [250.0, 0.0, 0.0];
+
+        for _ in 0..8 {
+            let dets = vec![
+                (DVector::from_column_slice(&ac), TargetClass::Aircraft),
+                (
+                    DVector::from_column_slice(&[bal_truth[0], bal_truth[2], bal_truth[4]]),
+                    TargetClass::Ballistic,
+                ),
+            ];
+            tracker.step_classed(&dets, dt);
+            for (p, v) in ac.iter_mut().zip(ac_v) {
+                *p += v * dt;
+            }
+            bal_truth = ballistic_model.predict(&bal_truth, dt);
+        }
+
+        assert_eq!(tracker.alive_count(), 2, "both classes tracked under JPDA");
+        let bal = tracker
+            .tracks
+            .iter()
+            .find(|t| t.class == TargetClass::Ballistic)
+            .expect("ballistic track");
+        assert_eq!(bal.state.len(), 7, "ballistic head runs the 7D state");
+        assert!(
+            (bal.state[0] - bal_truth[0]).abs() < 5_000.0,
+            "7D track follows its arc through JPDA updates"
         );
     }
 
