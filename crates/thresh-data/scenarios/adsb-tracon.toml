@@ -15,8 +15,11 @@ measurement_noise_sigma = 50.0
 gate_threshold = 500.0
 
 [baselines]
-# Permissive floor, same rationale as adsb-single-flight. The association
-# path across 4 simultaneous tracks is the distinguishing feature of this
-# scenario relative to the single-flight one; catastrophic association
-# breakage still surfaces through the pipeline error path.
-mota = -2.0
+# No MOTA floor — same rationale as adsb-single-flight.toml (task 6.6 of
+# `orbital-ballistic-filter-models`: no negative smoke values anywhere).
+# Measured MOTA on this fixture is -0.9556 (three consecutive runs,
+# deterministic and bitwise-identical; platform: macos-local, 2026-07-12):
+# the 90 s window is dominated by confirmation-lag false negatives across
+# the 4 simultaneous descents, so no honest floor above 0 exists yet.
+# The association path this scenario exists to exercise still fails CI
+# through the runner's error path on catastrophic breakage.

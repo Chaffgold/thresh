@@ -179,6 +179,39 @@ pub fn eci_to_enu(
 }
 
 // ---------------------------------------------------------------------------
+// ENU → ECI inverse (orbital-ballistic-filter-models, task 6.1)
+// ---------------------------------------------------------------------------
+
+/// Convert a local ENU (East-North-Up) position back to ECI, inverting
+/// [`eci_to_enu`] with the same station geodetics and GMST epoch.
+///
+/// This composes [`crate::geodetic::enu_to_ecef`] with [`ecef_to_eci`]
+/// (position only, like `eci_to_enu`), so `eci_to_enu ∘ enu_to_eci = id`
+/// exactly — both directions use the identical GMST rotation and ENU
+/// rotation matrices. The benchmark runners use this to lift station-frame
+/// radar detections into the ECI frame the orbital / ballistic motion
+/// models integrate in (design Decision 7 of `orbital-ballistic-filter-models`).
+///
+/// # Arguments
+/// * `enu`         — position in the station's ENU frame (metres)
+/// * `jd`          — Julian Date of the measurement epoch
+/// * `ref_lat_rad` — geodetic latitude of the station (radians)
+/// * `ref_lon_rad` — geodetic longitude of the station (radians)
+/// * `ref_alt_m`   — station altitude above the WGS-84 ellipsoid (metres)
+pub fn enu_to_eci(
+    enu: &Vector3<f64>,
+    jd: f64,
+    ref_lat_rad: f64,
+    ref_lon_rad: f64,
+    ref_alt_m: f64,
+) -> Vector3<f64> {
+    let pos_ecef = crate::geodetic::enu_to_ecef(enu, ref_lat_rad, ref_lon_rad, ref_alt_m);
+    let zero_vel = Vector3::zeros();
+    let (pos_eci, _) = ecef_to_eci(&pos_ecef, &zero_vel, jd);
+    pos_eci
+}
+
+// ---------------------------------------------------------------------------
 // Tests (Tasks 2.11, 2.12)
 // ---------------------------------------------------------------------------
 
@@ -291,6 +324,63 @@ mod tests {
             enu.z > 0.0,
             "Up component should be positive for overhead satellite, got {}",
             enu.z
+        );
+    }
+
+    /// Task 6.1 of `orbital-ballistic-filter-models` — round trip
+    /// `eci_to_enu ∘ enu_to_eci = id` at the benchmark epochs: the cached
+    /// ISS / Starlink-train TLE epoch (2024-01-01 00:00 UTC, JD 2460310.5,
+    /// `orbital-iss.toml` / `orbital-starlink-train.toml`) and the
+    /// ballistic-mrbm launch epoch (J2000, JD 2451545.0), each sampled
+    /// across a 3 h scenario window. Both directions share the same GMST
+    /// and ENU rotations, so the round trip is exact to float noise.
+    #[test]
+    fn enu_eci_roundtrip_at_benchmark_epochs() {
+        let station_lat = 38.8339_f64.to_radians(); // benchmark ground station
+        let station_lon = (-104.8214_f64).to_radians();
+        let station_alt = 1885.0;
+
+        let benchmark_epochs = [2_460_310.5, 2_451_545.0];
+        // LEO-pass-scale ENU offsets (hundreds of km, above and below horizon).
+        let enu_samples = [
+            Vector3::new(100_000.0, 200_000.0, 400_000.0),
+            Vector3::new(-800_000.0, 350_000.0, 90_000.0),
+            Vector3::new(50_000.0, -1_200_000.0, -30_000.0),
+        ];
+
+        for &epoch_jd in &benchmark_epochs {
+            // Offsets spanning the 3 h scenario window at the 5 s cadence scale.
+            for &offset_s in &[0.0, 5.0, 3_600.0, 10_800.0] {
+                let jd = epoch_jd + offset_s / SECONDS_PER_DAY;
+                for enu in &enu_samples {
+                    let eci = enu_to_eci(enu, jd, station_lat, station_lon, station_alt);
+                    let back = eci_to_enu(&eci, jd, station_lat, station_lon, station_alt);
+                    assert!(
+                        (back - enu).norm() < TOL_MM,
+                        "ENU round-trip error {} m at JD {jd}",
+                        (back - enu).norm()
+                    );
+                }
+            }
+        }
+    }
+
+    /// The inverse must agree with the forward transform on a physically
+    /// meaningful satellite state: converting a LEO ECI position to ENU and
+    /// back recovers the original ECI vector.
+    #[test]
+    fn eci_enu_eci_roundtrip_leo_position() {
+        let station_lat = 38.8339_f64.to_radians();
+        let station_lon = (-104.8214_f64).to_radians();
+        let pos_eci = Vector3::new(4_000_000.0, -3_500_000.0, 4_200_000.0);
+        let jd = 2_460_310.5 + 1234.0 / SECONDS_PER_DAY;
+
+        let enu = eci_to_enu(&pos_eci, jd, station_lat, station_lon, 1885.0);
+        let back = enu_to_eci(&enu, jd, station_lat, station_lon, 1885.0);
+        assert!(
+            (back - pos_eci).norm() < TOL_MM,
+            "ECI round-trip error {} m",
+            (back - pos_eci).norm()
         );
     }
 

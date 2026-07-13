@@ -19,10 +19,15 @@ measurement_noise_sigma = 50.0
 gate_threshold = 500.0
 
 [baselines]
-# Permissive floor — the point of the CI gate is to catch breakage in
-# the ADS-B ingestion pipeline (state-vector fixture parse, WGS84→ENU
-# transform, ground-truth extraction, tracker wiring) rather than
-# flaking on marginal tracker accuracy. Orbital scenarios use the same
-# convention. Catastrophic pipeline breakage fails earlier because the
-# runner itself errors out before reaching the regression check.
-mota = -1.0
+# No MOTA floor (task 6.6 of `orbital-ballistic-filter-models` removed
+# the negative smoke-value convention from every scenario). Measured
+# MOTA on this fixture is -0.2333 (three consecutive runs, deterministic
+# and bitwise-identical; platform: macos-local, 2026-07-12): the ~60 s
+# approach is shorter than the CV tracker's confirmation lag can amortise,
+# so false negatives dominate and no honest floor above 0 exists. A
+# calibrated floor of observed - margin would just be a new negative
+# smoke value, so the accuracy gate is intentionally absent until the
+# ADS-B tracking path is good enough to clear 0.0. Pipeline breakage
+# (fixture parse, WGS84→ENU transform, ground-truth extraction, tracker
+# wiring) still fails CI through the runner's error path, which exits
+# non-zero before the regression check is reached.

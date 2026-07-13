@@ -8,6 +8,7 @@ pub mod category;
 pub mod credentials;
 pub mod dataset;
 pub mod frame;
+pub mod golden;
 pub mod mixing;
 #[cfg(feature = "nuscenes")]
 pub mod nuscenes;

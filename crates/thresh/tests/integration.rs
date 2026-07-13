@@ -169,15 +169,19 @@ fn class_specific_mixed_targets() {
         },
     ];
 
-    // Ballistic trajectories: high speed, high altitude, no drag
+    // Ballistic-like free-fall targets: high speed, high altitude, gravity
+    // only. Migrated from the removed flat-Earth `Ballistic
+    // { drag_coefficient: 0.0 }` segment (task 4.5 of
+    // `orbital-ballistic-filter-models`) to the equivalent CA segment; real
+    // phased ballistic truth lives in `thresh_synth::ballistic::BallisticProfile`.
     let ballistic: Vec<Trajectory> = vec![
         Trajectory {
             target_id: 2,
             initial_position: [50000.0, 50000.0, 80000.0],
             initial_velocity: [1500.0, 0.0, 200.0],
             segments: vec![Segment {
-                segment_type: SegmentType::Ballistic {
-                    drag_coefficient: 0.0,
+                segment_type: SegmentType::Ca {
+                    acceleration: [0.0, 0.0, -9.81],
                 },
                 duration: 15.0,
             }],
@@ -188,8 +192,8 @@ fn class_specific_mixed_targets() {
             initial_position: [-40000.0, 60000.0, 100000.0],
             initial_velocity: [1000.0, -500.0, 100.0],
             segments: vec![Segment {
-                segment_type: SegmentType::Ballistic {
-                    drag_coefficient: 0.0,
+                segment_type: SegmentType::Ca {
+                    acceleration: [0.0, 0.0, -9.81],
                 },
                 duration: 15.0,
             }],

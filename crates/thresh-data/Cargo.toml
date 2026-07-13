@@ -36,5 +36,20 @@ pyo3 = { version = "0.29", optional = true, features = ["auto-initialize"] }
 name = "thresh-data"
 path = "src/bin/thresh_data.rs"
 
+# SGP4 golden-fixture generator (tier 3, orbital-ballistic-filter-models
+# Decision 8). Run manually to (re)generate test-data/golden/orbital/;
+# the committed output is what CI reads — this binary never runs in CI.
+[[bin]]
+name = "gen-sgp4-fixtures"
+path = "src/bin/gen_sgp4_fixtures.rs"
+required-features = ["orbital"]
+
 [dev-dependencies]
 tempfile = "3"
+# Hosts the tier-3 golden envelope test (tests/golden_orbital.rs), which
+# runs KeplerJ2 against the committed SGP4 fixtures under default features.
+# thresh-filter is already in this crate's dependency graph (thresh-data ->
+# thresh-tracker -> thresh-filter), so this dev edge follows the existing
+# dependency direction and adds no new compilation unit; see the test file
+# header for why the test lives here.
+thresh-filter = { path = "../thresh-filter" }

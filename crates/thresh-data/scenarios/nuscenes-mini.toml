@@ -19,11 +19,15 @@ measurement_noise_sigma = 1.0
 gate_threshold = 50.0
 
 [baselines]
-# Permissive floor — the point of this scenario is to catch regressions
-# in the nuScenes PyO3 bridge, the annotation → ground-truth extraction,
-# and the multi-target association path. The CV Kalman with 1 m noise
-# handles nuScenes scenes reasonably but the M-of-N confirmation window
-# and the short scene lengths mean MOTA is unpredictable scene-to-scene;
-# a tight floor would flake on which scene happens to be first in the
-# split.
-mota = -2.0
+# No MOTA floor (task 6.6 of `orbital-ballistic-filter-models` removed
+# the negative smoke-value convention from every scenario). This scenario
+# cannot run in CI at all — it needs `--features nuscenes` (PyO3), a
+# Python env with `nuscenes-devkit`, and a local ~4 GB v1.0-mini download
+# — so a floor here would gate nothing while a negative placeholder
+# would contradict the calibrated-floor convention the orbital/ballistic
+# scenarios now follow. When a machine with the dataset runs this
+# scenario (a past local run of the automotive-tracking work measured
+# MOTA 0.93 on the mini split), a calibrated floor can be added with the
+# Decision-7 procedure: observed_min - 0.15, values and platform recorded
+# here. Bridge/extraction breakage still surfaces through the runner's
+# error path for anyone running the scenario locally.

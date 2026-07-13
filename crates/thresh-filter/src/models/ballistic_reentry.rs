@@ -352,21 +352,14 @@ mod tests {
         }
     }
 
-    // Spec "Beta convergence during high-drag flight": an EKF tracking a
-    // truth-generated reentry with position measurements, starting from a β
-    // estimate biased 50% high, converges toward true β through the
-    // high-drag portion and ends with substantially smaller error (task 4.8
-    // re-runs this against the phased `BallisticProfile` generator).
-    #[test]
-    fn beta_converges_during_high_drag_flight() {
+    /// Shared β-convergence EKF harness for the truth-vs-filter tests: wide
+    /// β prior, 1 Hz noise-free position measurements over `truth` (10 m
+    /// measurement-noise model), returning the final `|β̂ − BETA|` error.
+    fn run_beta_convergence_ekf(
+        truth: &[thresh_synth::orbital::OrbitalState],
+        x0: DVector<f64>,
+    ) -> f64 {
         let m = model();
-        let x0_truth = reentry_state(70_000.0);
-        let truth = synth_reentry_truth(&x0_truth, 60.0, 1.0);
-
-        // Filter starts at the true kinematic state but β biased +50%.
-        let beta_bias = 0.5 * BETA;
-        let mut x0 = x0_truth.clone();
-        x0[6] = BETA + beta_bias;
         let mut p0 = DMatrix::zeros(7, 7);
         for i in 0..3 {
             p0[(2 * i, 2 * i)] = 100.0 * 100.0;
@@ -375,8 +368,6 @@ mod tests {
         p0[(6, 6)] = 1_000.0 * 1_000.0; // wide β prior
         let mut ekf = ExtendedKalmanFilter::new(x0, p0);
 
-        // Noise-free position measurements (deterministic test) with a
-        // 10 m measurement-noise model, 1 Hz.
         let mut h = DMatrix::zeros(3, 7);
         for i in 0..3 {
             h[(i, 2 * i)] = 1.0;
@@ -387,10 +378,134 @@ mod tests {
             let z = DVector::from_column_slice(&sample.position);
             ekf.update_linear(&z, &h, &r);
         }
+        (ekf.x[6] - BETA).abs()
+    }
+
+    // Spec "Beta convergence during high-drag flight": an EKF tracking a
+    // truth-generated reentry with position measurements, starting from a β
+    // estimate biased 50% high, converges toward true β through the
+    // high-drag portion and ends with substantially smaller error (task 4.8
+    // re-runs this against the phased `BallisticProfile` generator — see
+    // `beta_converges_against_phased_ballistic_truth` below).
+    #[test]
+    fn beta_converges_during_high_drag_flight() {
+        let x0_truth = reentry_state(70_000.0);
+        let truth = synth_reentry_truth(&x0_truth, 60.0, 1.0);
+
+        // Filter starts at the true kinematic state but β biased +50%.
+        let beta_bias = 0.5 * BETA;
+        let mut x0 = x0_truth.clone();
+        x0[6] = BETA + beta_bias;
+        let final_error = run_beta_convergence_ekf(&truth, x0);
 
         // Observed final error ~0.01 kg/m² (noise-free measurements); the
         // 5% bound leaves orders-of-magnitude headroom for platform drift.
-        let final_error = (ekf.x[6] - BETA).abs();
+        assert!(
+            final_error < 0.05 * beta_bias,
+            "β did not converge: started {beta_bias} kg/m² off, ended {final_error} kg/m² off"
+        );
+    }
+
+    // ── Tasks 4.7 / 4.8: validation against the phased truth generator ──
+
+    /// MRBM-class phased ballistic truth (`thresh_synth::ballistic`, design
+    /// Decision 5) at a 1 s grid, with true β = `BETA`. Returns the samples
+    /// and the index of the first reentry-phase sample (post-burnout,
+    /// descending below 100 km) — the same event the generator's own phase
+    /// classifier uses.
+    fn phased_ballistic_truth() -> (Vec<thresh_synth::orbital::OrbitalState>, usize) {
+        let profile = thresh_synth::ballistic::BallisticProfile {
+            launch_lat_rad: 0.0,
+            launch_lon_rad: 0.0,
+            launch_alt_m: 0.0,
+            launch_azimuth_rad: 90.0_f64.to_radians(),
+            thrust_accel: 50.0,
+            burn_time_s: 65.0,
+            pitch_over_s: 10.0,
+            pitch_kick_rad: 0.30,
+            beta: BETA,
+            epoch_jd: 2_451_545.0,
+        };
+        let truth = thresh_synth::ballistic::generate(&profile, 1.0);
+        let reentry_idx = truth
+            .iter()
+            .position(|s| {
+                let pos = Vector3::from(s.position);
+                let vel = Vector3::from(s.velocity);
+                let elapsed = (s.epoch_jd - profile.epoch_jd) * 86_400.0;
+                elapsed > profile.burn_time_s
+                    && pos.dot(&vel) < 0.0
+                    && pos.norm() - EARTH.equatorial_radius < 100_000.0
+            })
+            .expect("phased trajectory must reenter");
+        (truth, reentry_idx)
+    }
+
+    /// 7D interleaved filter state from a synth Cartesian sample plus β.
+    fn state7_from_sample(s: &thresh_synth::orbital::OrbitalState, beta: f64) -> DVector<f64> {
+        let [x, y, z] = s.position;
+        let [vx, vy, vz] = s.velocity;
+        DVector::from_column_slice(&[x, vx, y, vy, z, vz, beta])
+    }
+
+    // Spec "Prediction matches truth with true beta", task 4.7: extends
+    // `prediction_matches_truth_with_true_beta` (above) from `propagate`
+    // truth to the phased `BallisticProfile` generator. The generator's
+    // reentry closure is the same `gravity + drag(r, v, 1/β)` this model
+    // integrates, with matched 1 s steps, so the documented tolerance stays
+    // at float-noise level: 1e-6 m over a 40 s arc.
+    #[test]
+    fn prediction_matches_phased_ballistic_truth_with_true_beta() {
+        let m = model(); // max_step_s = 1.0, matching the truth grid
+        let (truth, reentry_idx) = phased_ballistic_truth();
+        let span_s = 40usize;
+        let window = &truth[reentry_idx..=reentry_idx + span_s];
+
+        // Guard the phase assumption: the whole window is descending
+        // reentry between the surface and the 100 km interface.
+        for s in window {
+            let pos = Vector3::from(s.position);
+            let alt = pos.norm() - EARTH.equatorial_radius;
+            assert!(alt > 0.0 && alt < 100_000.0, "window left reentry regime");
+            assert!(pos.dot(&Vector3::from(s.velocity)) < 0.0);
+        }
+
+        let x0 = state7_from_sample(&window[0], BETA);
+        let predicted = m.predict(&x0, span_s as f64);
+        let (pred_pos, pred_vel) = unpack_interleaved(&predicted);
+        let end = window.last().expect("non-empty window");
+        for i in 0..3 {
+            assert!(
+                (pred_pos[i] - end.position[i]).abs() < 1e-6,
+                "position component {i} differs by {} m",
+                (pred_pos[i] - end.position[i]).abs()
+            );
+            assert!((pred_vel[i] - end.velocity[i]).abs() < 1e-9);
+        }
+        assert_eq!(predicted[6], BETA, "β must be unchanged by predict");
+    }
+
+    // Spec "Beta convergence during high-drag flight", task 4.8: the same
+    // EKF harness as `beta_converges_during_high_drag_flight`, run against
+    // the phased generator's reentry arc — position measurements only,
+    // starting β biased +50% from truth.
+    #[test]
+    fn beta_converges_against_phased_ballistic_truth() {
+        let (truth, reentry_idx) = phased_ballistic_truth();
+        // Track the reentry arc down to the last above-surface sample.
+        let end = truth
+            .iter()
+            .rposition(|s| Vector3::from(s.position).norm() > EARTH.equatorial_radius)
+            .expect("samples above the surface");
+        let arc = &truth[reentry_idx..=end];
+        assert!(arc.len() > 30, "reentry arc too short: {} s", arc.len());
+
+        let beta_bias = 0.5 * BETA;
+        let x0 = state7_from_sample(&arc[0], BETA + beta_bias);
+        let final_error = run_beta_convergence_ekf(arc, x0);
+
+        // Observed final error ~0.2 kg/m² on this steeper, faster arc; the
+        // 5% bound matches the propagate-truth twin test's headroom.
         assert!(
             final_error < 0.05 * beta_bias,
             "β did not converge: started {beta_bias} kg/m² off, ended {final_error} kg/m² off"

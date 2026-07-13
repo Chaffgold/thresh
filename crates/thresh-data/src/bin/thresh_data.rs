@@ -13,9 +13,10 @@
 //! each `*.toml` file it finds.
 //!
 //! `run` loads a manifest by path, dispatches to the benchmark runner for its
-//! source type, and prints the resulting MOT metrics. Only `Synthetic`
-//! sources run end-to-end today; `AdsB` and `Orbital` sources print a
-//! "feature required" stub and exit with a non-zero status so CI can
+//! source type, and prints the resulting MOT metrics. `Synthetic` and
+//! `Ballistic` sources run end-to-end in the default build; `AdsB`,
+//! `Orbital`, and `NuScenes` sources need their feature flag and otherwise
+//! print a "feature required" stub and exit with a non-zero status so CI can
 //! distinguish "broken pipeline" from "feature not enabled".
 
 use std::path::PathBuf;
@@ -137,6 +138,9 @@ fn describe_source(src: &ScenarioSource) -> String {
             format!("Orbital({} satellites)", norad_ids.len())
         }
         ScenarioSource::NuScenes { version, .. } => format!("NuScenes({version})"),
+        ScenarioSource::Ballistic { beta_kg_m2, .. } => {
+            format!("Ballistic(beta={beta_kg_m2} kg/m^2)")
+        }
     }
 }
 
@@ -172,6 +176,13 @@ fn run_manifest(manifest: &ScenarioManifest, manifest_dir: &std::path::Path) -> 
             run_orbital_dispatch(manifest, manifest_dir, norad_ids)
         }
         ScenarioSource::NuScenes { .. } => run_nuscenes_dispatch(manifest, manifest_dir),
+        // Ballistic truth generation is pure Rust (no SGP4 / network), so
+        // this path needs no feature gate — see `run_ballistic_benchmark`.
+        ScenarioSource::Ballistic { .. } => {
+            let result = thresh_data::benchmark::run_ballistic_benchmark(manifest)?;
+            print_result(&result);
+            check_and_report_regression(manifest, &result)
+        }
     }
 }
 

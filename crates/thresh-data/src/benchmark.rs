@@ -4,9 +4,11 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
-use nalgebra::DVector;
+use nalgebra::{DVector, Vector3};
 use serde::{Deserialize, Serialize};
 
+use thresh_core::eci::enu_to_eci;
+use thresh_core::track::TargetClass;
 use thresh_eval::hota::compute_hota_at_threshold;
 use thresh_eval::matching::FrameData;
 use thresh_eval::metrics::{compute_idf1, compute_mot_metrics};
@@ -107,6 +109,48 @@ pub enum ScenarioSource {
         #[serde(default)]
         scene_token: Option<String>,
     },
+    /// Ballistic scenario generated from a phased boost / midcourse /
+    /// reentry [`thresh_synth::ballistic::BallisticProfile`] truth observed
+    /// by a single ground radar (design Decision 7 of the
+    /// `orbital-ballistic-filter-models` change).
+    ///
+    /// The launch/profile fields map 1:1 onto `BallisticProfile` with
+    /// angles in **degrees** (and β/thrust units spelled out) so the TOML
+    /// stays human-editable; the runner converts to radians. The station
+    /// fields locate the observing radar exactly like
+    /// [`ScenarioSource::Orbital`]'s station fields. Truth generation is
+    /// pure Rust (no SGP4), so ballistic scenarios run under **default
+    /// features** — no `orbital` feature required.
+    Ballistic {
+        /// Launch geodetic latitude (degrees).
+        launch_lat_deg: f64,
+        /// Launch geodetic longitude (degrees).
+        launch_lon_deg: f64,
+        /// Launch altitude above the WGS-84 ellipsoid (metres).
+        #[serde(default)]
+        launch_alt_m: f64,
+        /// Launch azimuth (degrees clockwise from north).
+        launch_azimuth_deg: f64,
+        /// Constant boost thrust acceleration (m/s²).
+        thrust_accel_m_s2: f64,
+        /// Boost duration (s).
+        burn_time_s: f64,
+        /// Vertical-rise duration before the pitch kick (s).
+        pitch_over_s: f64,
+        /// Instantaneous downrange pitch kick (degrees).
+        pitch_kick_deg: f64,
+        /// Ballistic coefficient β = m/(C_d·A) (kg/m²).
+        beta_kg_m2: f64,
+        /// Launch epoch as Julian Date.
+        epoch_jd: f64,
+        /// Radar station geodetic latitude (degrees).
+        station_lat_deg: f64,
+        /// Radar station geodetic longitude (degrees).
+        station_lon_deg: f64,
+        /// Radar station altitude above the WGS-84 ellipsoid (metres).
+        #[serde(default)]
+        station_alt_m: f64,
+    },
 }
 
 fn default_nuscenes_version() -> String {
@@ -167,6 +211,14 @@ pub struct ScenarioParameters {
     ///
     /// Recognised values: `"cv-clean"`, `"maneuvering"`, `"heterogeneous"`,
     /// `"low-pd"`. When `None` the runner defaults to `"cv-clean"`.
+    ///
+    /// The orbital runner recognises one additional value:
+    /// `"force-cv-head"` births tracks as [`TargetClass::Unknown`] (the CV
+    /// head) instead of [`TargetClass::Orbital`] (the Kepler+J2 head),
+    /// keeping every other pipeline stage identical. It exists solely for
+    /// the deliberate-regression check of the orbital benchmark gate
+    /// (task 6.6 of `orbital-ballistic-filter-models`): forcing the CV
+    /// head on the ISS scenario must fail the calibrated MOTA baseline.
     #[serde(default)]
     pub scenario_type: Option<String>,
 }
@@ -255,6 +307,87 @@ pub(crate) fn build_benchmark_result(
         id_switches,
         duration_ms: start.elapsed().as_millis() as u64,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Shared ECI-tracking helpers (orbital-ballistic-filter-models, §6)
+// ---------------------------------------------------------------------------
+
+/// Angular noise divisor shared by the orbital and ballistic runners: the
+/// radar azimuth/elevation sigma is `measurement_noise_sigma / DIVISOR`
+/// radians, so one scenario knob scales the whole RAE noise model.
+const RADAR_ANGLE_SIGMA_DIVISOR: f64 = 50_000.0;
+
+/// Ground-station geodetics shared by the orbital / ballistic step helpers.
+#[derive(Debug, Clone, Copy)]
+struct StationGeodetics {
+    lat_rad: f64,
+    lon_rad: f64,
+    alt_m: f64,
+}
+
+/// Convert a radar `(range, azimuth, elevation)` triple to Cartesian ENU.
+///
+/// Azimuth is measured clockwise from north (`atan2(east, north)`, the
+/// convention of `orbital_to_radar_measurements`), so **east** carries
+/// `sin(az)` and **north** carries `cos(az)`. The previous orbital runner
+/// reconstructed with `cos(az)` on the first component, silently swapping
+/// East/North between detections and ground truth; this helper is the
+/// single tested inverse both runners now share.
+fn rae_to_enu(range: f64, azimuth: f64, elevation: f64) -> Vector3<f64> {
+    Vector3::new(
+        range * elevation.cos() * azimuth.sin(),
+        range * elevation.cos() * azimuth.cos(),
+        range * elevation.sin(),
+    )
+}
+
+/// Convert a Cartesian ENU position to the radar `(range, azimuth,
+/// elevation)` triple, the exact inverse of [`rae_to_enu`].
+fn enu_to_rae(enu: &[f64; 3]) -> (f64, f64, f64) {
+    let [east, north, up] = *enu;
+    let range = (east * east + north * north + up * up).sqrt();
+    let azimuth = east.atan2(north);
+    let elevation = (up / range).asin();
+    (range, azimuth, elevation)
+}
+
+/// Birth class for the ECI benchmark runners: the class-specific physics
+/// head by default, or the CV head (`Unknown`) under the `"force-cv-head"`
+/// scenario-type override used by the deliberate-regression checks of the
+/// benchmark gate (task 6.6 of `orbital-ballistic-filter-models`).
+fn birth_class_or_forced_cv(params: &ScenarioParameters, class: TargetClass) -> TargetClass {
+    if params.scenario_type.as_deref() == Some("force-cv-head") {
+        TargetClass::Unknown
+    } else {
+        class
+    }
+}
+
+/// Effective isotropic Cartesian measurement sigma for the tracker's `R`.
+///
+/// The RAE noise model is range-dependent: angular noise of `angle_sigma`
+/// radians displaces a detection cross-range by `range · angle_sigma`
+/// metres, which at LEO/ballistic slant ranges dwarfs the range sigma. The
+/// tracker consumes a single fixed `R`, so the honest middle ground is the
+/// combined sigma linearised at the **median visible slant range**;
+/// `gate_threshold` carries the headroom for the range spread around the
+/// median (see the scenario TOML comments). Falls back to the range sigma
+/// (floored at 1 m so `R` stays invertible) when nothing is visible.
+fn effective_cartesian_sigma(
+    visible_ranges_m: &[f64],
+    range_sigma_m: f64,
+    angle_sigma_rad: f64,
+) -> f64 {
+    if visible_ranges_m.is_empty() {
+        return range_sigma_m.max(1.0);
+    }
+    let mut sorted = visible_ranges_m.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).expect("slant ranges must be finite"));
+    let median = sorted[sorted.len() / 2];
+    (range_sigma_m.powi(2) + (median * angle_sigma_rad).powi(2))
+        .sqrt()
+        .max(1.0)
 }
 
 // ---------------------------------------------------------------------------
@@ -615,7 +748,7 @@ fn radar_config_for_scenario(params: &ScenarioParameters) -> RadarConfig {
 /// `--features orbital`; the CLI surfaces a clean "feature required" error
 /// when the feature is not compiled in.
 ///
-/// Pipeline:
+/// Pipeline (design Decision 7 of `orbital-ballistic-filter-models`):
 /// 1. Load TLEs — from a local file (`tle_file` relative to the manifest
 ///    directory) when set; otherwise from Space-Track / CelesTrak via the
 ///    orbital HTTP clients. The local-file path is what allows the CI
@@ -623,12 +756,22 @@ fn radar_config_for_scenario(params: &ScenarioParameters) -> RadarConfig {
 /// 2. Propagate each TLE via SGP4 → TEME → ECEF → ENU relative to the
 ///    station configured in `ScenarioSource::Orbital`. Samples are spaced
 ///    at `time_step_s` (falling back to `parameters.dt`) over `duration_s`
-///    minutes starting at the TLE epoch.
+///    seconds starting at the TLE epoch.
 /// 3. Convert the visible (above-horizon) ENU positions to synthetic radar
-///    measurements, add Gaussian noise with the configured sigmas, and
-///    feed them into the Cartesian ENU tracker.
-/// 4. Build `FrameData` per time step and compute MOTA / MOTP / IDF1 /
-///    HOTA against the noise-free ground truth.
+///    measurements, add Gaussian noise with the configured sigmas, lift the
+///    noisy detections **ENU → ECI** ([`enu_to_eci`] at the station
+///    geodetics + per-step GMST epoch), and feed them class-tagged as
+///    [`TargetClass::Orbital`] so the tracker births 6D Kepler+J2 EKF
+///    tracks (Decision 6 head dispatch). The tracker's `R` uses the
+///    [`effective_cartesian_sigma`] of the visible pass so the manifest's
+///    `gate_threshold` can be a Mahalanobis-consistent chi-squared value
+///    instead of the historical `1e5` escape hatch.
+/// 4. Build `FrameData` per time step (ground truth converted to the same
+///    ECI frame) and compute MOTA / MOTP / IDF1 / HOTA.
+///
+/// `parameters.scenario_type = "force-cv-head"` births tracks as
+/// [`TargetClass::Unknown`] (CV head) instead — the deliberate-regression
+/// probe for the benchmark gate (task 6.6).
 ///
 /// `manifest_dir` is the parent directory of the scenario file — used to
 /// resolve relative `tle_file` paths without hardcoding the workspace root.
@@ -637,10 +780,7 @@ pub fn run_orbital_benchmark(
     manifest: &ScenarioManifest,
     manifest_dir: &Path,
 ) -> core::result::Result<BenchmarkResult, String> {
-    use crate::orbital::{
-        GroundStation, RadarNoiseConfig, Tle, orbital_to_radar_measurements, parse_3le, parse_tle,
-        propagate_to_enu,
-    };
+    use crate::orbital::{RadarNoiseConfig, orbital_to_radar_measurements, propagate_to_enu};
     use rand::SeedableRng;
     use rand::rngs::StdRng;
     use rand_distr::Normal;
@@ -663,8 +803,136 @@ pub fn run_orbital_benchmark(
         ));
     };
 
-    // ---- 1. Load TLEs ----
-    let tles: Vec<Tle> = if let Some(file) = tle_file {
+    // ---- 1. Load + select TLEs ----
+    let tles = load_scenario_tles(tle_file.as_deref(), norad_ids, manifest_dir)?;
+    let selected_tles = select_scenario_tles(&tles, norad_ids)?;
+
+    // ---- 2. Propagate each TLE to station ENU ----
+    let step_s = time_step_s.unwrap_or(params.dt);
+    let n_steps = (params.duration_s / step_s).ceil() as usize + 1;
+    let times_min: Vec<f64> = (0..n_steps).map(|i| i as f64 * step_s / 60.0).collect();
+    let station = StationGeodetics {
+        lat_rad: station_lat_deg.to_radians(),
+        lon_rad: station_lon_deg.to_radians(),
+        alt_m: *station_alt_m,
+    };
+
+    let mut trajectories: Vec<OrbitalTruth> = Vec::new();
+    for tle in &selected_tles {
+        let enu = propagate_to_enu(
+            tle,
+            &times_min,
+            station.lat_rad,
+            station.lon_rad,
+            station.alt_m,
+        )
+        .map_err(|e| format!("SGP4 propagation failed for {}: {e}", tle.norad_id))?;
+        trajectories.push(OrbitalTruth {
+            norad_id: tle.norad_id,
+            epoch_jd: tle.epoch_jd(),
+            enu,
+        });
+    }
+
+    // ---- 3. Noise-free radar measurements + effective tracker noise ----
+    let noise = RadarNoiseConfig {
+        range_sigma_m: params.measurement_noise_sigma,
+        azimuth_sigma_rad: params.measurement_noise_sigma / RADAR_ANGLE_SIGMA_DIVISOR,
+        elevation_sigma_rad: params.measurement_noise_sigma / RADAR_ANGLE_SIGMA_DIVISOR,
+        include_range_rate: false,
+        sensor_id: 0,
+    };
+    let measurements_by_sat: Vec<(u32, Vec<thresh_core::measurement::Measurement>)> = trajectories
+        .iter()
+        .map(|t| (t.norad_id, orbital_to_radar_measurements(&t.enu, &noise)))
+        .collect();
+
+    let visible_ranges: Vec<f64> = measurements_by_sat
+        .iter()
+        .flat_map(|(_, ms)| ms.iter())
+        .filter_map(|m| match m {
+            thresh_core::measurement::Measurement::Radar { range, .. } => Some(*range),
+            _ => None,
+        })
+        .collect();
+    let sigma_eff = effective_cartesian_sigma(
+        &visible_ranges,
+        noise.range_sigma_m,
+        noise.azimuth_sigma_rad,
+    );
+
+    // ---- 4. Track in ECI ----
+    // Deterministic seeded RNG so the CI regression gate is reproducible.
+    let mut rng = StdRng::seed_from_u64(0xA5_A5_A5_A5_A5_A5_A5_A5);
+    let normal = Normal::new(0.0, 1.0).unwrap();
+    let birth_class = birth_class_or_forced_cv(params, TargetClass::Orbital);
+
+    let mut tracker = MultiObjectTracker::new_cv_position(sigma_eff, params.gate_threshold);
+    let mut frame_data_vec: Vec<FrameData> = Vec::with_capacity(n_steps);
+
+    for step in 0..n_steps {
+        let t_min = step as f64 * step_s / 60.0;
+        let (detections, gt_positions) = collect_orbital_step_data(
+            &trajectories,
+            &measurements_by_sat,
+            &noise,
+            &normal,
+            &mut rng,
+            t_min,
+            &station,
+        );
+
+        let classed: Vec<(DVector<f64>, TargetClass)> =
+            detections.into_iter().map(|d| (d, birth_class)).collect();
+        tracker.step_classed(&classed, step_s);
+
+        frame_data_vec.push(FrameData {
+            gt: gt_positions,
+            tracks: collect_confirmed_track_positions(&tracker),
+        });
+    }
+
+    // ---- 5. Metrics ----
+    // Orbital scenarios use a much larger match threshold because slant
+    // ranges span hundreds of km and measurement noise is multi-kilometre.
+    let dist_threshold = (params.measurement_noise_sigma * 10.0).max(5_000.0);
+    let total_gt: usize = frame_data_vec.iter().map(|f| f.gt.len()).sum();
+    let total_tracks: usize = frame_data_vec.iter().map(|f| f.tracks.len()).sum();
+    eprintln!(
+        "orbital pipeline: {} frames, {} ground-truth points, {} confirmed-track points, \
+         effective measurement sigma {sigma_eff:.0} m",
+        frame_data_vec.len(),
+        total_gt,
+        total_tracks,
+    );
+    Ok(build_benchmark_result(
+        &manifest.name,
+        &frame_data_vec,
+        dist_threshold,
+        start,
+    ))
+}
+
+/// One satellite's propagated truth: NORAD ID, TLE epoch (Julian Date, the
+/// zero of the scenario time base), and the station-ENU sample path.
+#[cfg(feature = "orbital")]
+struct OrbitalTruth {
+    norad_id: u32,
+    epoch_jd: f64,
+    enu: Vec<crate::orbital::EnuPosition>,
+}
+
+/// Load the scenario's TLEs from the cached `tle_file` (relative to the
+/// manifest directory) when set, otherwise via HTTP (CelesTrak first).
+#[cfg(feature = "orbital")]
+fn load_scenario_tles(
+    tle_file: Option<&str>,
+    norad_ids: &[u32],
+    manifest_dir: &Path,
+) -> core::result::Result<Vec<crate::orbital::Tle>, String> {
+    use crate::orbital::{parse_3le, parse_tle};
+
+    let tles = if let Some(file) = tle_file {
         let path = manifest_dir.join(file);
         let contents = std::fs::read_to_string(&path)
             .map_err(|e| format!("failed to read TLE file {}: {e}", path.display()))?;
@@ -679,24 +947,28 @@ pub fn run_orbital_benchmark(
         if norad_ids.is_empty() {
             return Err("orbital scenario has no norad_ids and no tle_file".into());
         }
-        match fetch_tles_via_http(norad_ids) {
-            Ok(tles) => tles,
-            Err(e) => {
-                return Err(format!(
-                    "no tle_file set and HTTP fetch failed: {e}. Provide a \
-                     cached TLE file alongside the manifest to run offline."
-                ));
-            }
-        }
+        fetch_tles_via_http(norad_ids).map_err(|e| {
+            format!(
+                "no tle_file set and HTTP fetch failed: {e}. Provide a \
+                 cached TLE file alongside the manifest to run offline."
+            )
+        })?
     };
 
     if tles.is_empty() {
         return Err("no TLEs available after loading".into());
     }
+    Ok(tles)
+}
 
-    // Filter TLEs to the requested NORAD IDs when both are specified, so
-    // a shared CelesTrak GROUP response can feed multiple scenarios.
-    let selected_tles: Vec<&Tle> = if norad_ids.is_empty() {
+/// Filter loaded TLEs to the requested NORAD IDs when both are specified,
+/// so a shared CelesTrak GROUP response can feed multiple scenarios.
+#[cfg(feature = "orbital")]
+fn select_scenario_tles<'a>(
+    tles: &'a [crate::orbital::Tle],
+    norad_ids: &[u32],
+) -> core::result::Result<Vec<&'a crate::orbital::Tle>, String> {
+    let selected: Vec<&crate::orbital::Tle> = if norad_ids.is_empty() {
         tles.iter().collect()
     } else {
         let wanted: std::collections::HashSet<u32> = norad_ids.iter().copied().collect();
@@ -705,154 +977,100 @@ pub fn run_orbital_benchmark(
             .collect()
     };
 
-    if selected_tles.is_empty() {
+    if selected.is_empty() {
         return Err(format!(
             "TLE file contained {} TLEs but none matched the requested norad_ids {:?}",
             tles.len(),
             norad_ids
         ));
     }
-
-    // ---- 2. Propagate each TLE to ENU ----
-    let step_s = time_step_s.unwrap_or(params.dt);
-    let n_steps = (params.duration_s / step_s).ceil() as usize + 1;
-    let times_min: Vec<f64> = (0..n_steps).map(|i| i as f64 * step_s / 60.0).collect();
-
-    let lat_rad = station_lat_deg.to_radians();
-    let lon_rad = station_lon_deg.to_radians();
-    let _station = GroundStation {
-        name: "scenario-station".into(),
-        lat_rad,
-        lon_rad,
-        alt_m: *station_alt_m,
-    };
-
-    // Propagate each selected satellite and collect (target_id, ENU path).
-    let mut trajectories: Vec<(u32, Vec<crate::orbital::EnuPosition>)> = Vec::new();
-    for tle in &selected_tles {
-        let enu = propagate_to_enu(tle, &times_min, lat_rad, lon_rad, *station_alt_m)
-            .map_err(|e| format!("SGP4 propagation failed for {}: {e}", tle.norad_id))?;
-        trajectories.push((tle.norad_id, enu));
-    }
-
-    // ---- 3. Build ground truth + noisy radar measurements, run tracker ----
-    let noise = RadarNoiseConfig {
-        range_sigma_m: params.measurement_noise_sigma,
-        azimuth_sigma_rad: params.measurement_noise_sigma / 50_000.0,
-        elevation_sigma_rad: params.measurement_noise_sigma / 50_000.0,
-        include_range_rate: false,
-        sensor_id: 0,
-    };
-    let measurements_by_sat: Vec<(u32, Vec<thresh_core::measurement::Measurement>)> = trajectories
-        .iter()
-        .map(|(id, enu)| (*id, orbital_to_radar_measurements(enu, &noise)))
-        .collect();
-
-    // Deterministic seeded RNG so the CI regression gate is reproducible.
-    let mut rng = StdRng::seed_from_u64(0xA5_A5_A5_A5_A5_A5_A5_A5);
-    let normal = Normal::new(0.0, 1.0).unwrap();
-
-    let mut tracker =
-        MultiObjectTracker::new_cv_position(params.measurement_noise_sigma, params.gate_threshold);
-    let mut frame_data_vec: Vec<FrameData> = Vec::new();
-
-    for step in 0..n_steps {
-        let t_min = step as f64 * step_s / 60.0;
-        let (detections, gt_positions) = collect_orbital_step_data(
-            &trajectories,
-            &measurements_by_sat,
-            &noise,
-            &normal,
-            &mut rng,
-            t_min,
-        );
-
-        tracker.step(&detections, step_s);
-
-        frame_data_vec.push(FrameData {
-            gt: gt_positions,
-            tracks: collect_confirmed_track_positions(&tracker),
-        });
-    }
-
-    // ---- 4. Metrics ----
-    // Orbital scenarios use a much larger match threshold because slant
-    // ranges span hundreds of km and measurement noise is multi-kilometre.
-    let dist_threshold = (params.measurement_noise_sigma * 10.0).max(5_000.0);
-    let total_gt: usize = frame_data_vec.iter().map(|f| f.gt.len()).sum();
-    let total_tracks: usize = frame_data_vec.iter().map(|f| f.tracks.len()).sum();
-    eprintln!(
-        "orbital pipeline: {} frames, {} ground-truth points, {} confirmed-track points",
-        frame_data_vec.len(),
-        total_gt,
-        total_tracks,
-    );
-    Ok(build_benchmark_result(
-        &manifest.name,
-        &frame_data_vec,
-        dist_threshold,
-        start,
-    ))
+    Ok(selected)
 }
 
 /// Detections + ground truth for a single benchmark step.
-#[cfg(feature = "orbital")]
 type StepData = (Vec<DVector<f64>>, Vec<(u64, [f64; 3])>);
 
-/// Collect ground-truth positions and noisy radar detections for a single
-/// orbital benchmark step.
+/// Collect ECI ground-truth positions and noisy ECI radar detections for a
+/// single orbital benchmark step.
 #[cfg(feature = "orbital")]
 fn collect_orbital_step_data(
-    trajectories: &[(u32, Vec<crate::orbital::EnuPosition>)],
+    trajectories: &[OrbitalTruth],
     measurements_by_sat: &[(u32, Vec<thresh_core::measurement::Measurement>)],
     noise: &crate::orbital::RadarNoiseConfig,
     normal: &rand_distr::Normal<f64>,
     rng: &mut impl rand::Rng,
     t_min: f64,
+    station: &StationGeodetics,
 ) -> StepData {
     let mut detections: Vec<DVector<f64>> = Vec::new();
     let mut gt_positions: Vec<(u64, [f64; 3])> = Vec::new();
 
-    for ((id, enu), (_, measurements)) in trajectories.iter().zip(measurements_by_sat.iter()) {
-        collect_gt_for_step(enu, *id, t_min, &mut gt_positions);
-        collect_noisy_detection(measurements, noise, normal, rng, t_min, &mut detections);
+    for (truth, (_, measurements)) in trajectories.iter().zip(measurements_by_sat.iter()) {
+        let frame = StepFrame {
+            t_min,
+            jd: truth.epoch_jd + t_min / 1440.0,
+            station: *station,
+        };
+        collect_gt_for_step(&truth.enu, truth.norad_id, &frame, &mut gt_positions);
+        collect_noisy_detection(measurements, noise, normal, rng, &frame, &mut detections);
     }
 
     (detections, gt_positions)
 }
 
-/// Append the ground-truth position for this satellite at `t_min` if visible.
+/// Time base + station context for one orbital benchmark step: scenario
+/// time (minutes since the satellite's TLE epoch), the corresponding
+/// Julian Date for the GMST rotation, and the station geodetics for the
+/// ENU → ECI lift.
+#[cfg(feature = "orbital")]
+struct StepFrame {
+    t_min: f64,
+    jd: f64,
+    station: StationGeodetics,
+}
+
+/// Append the ECI ground-truth position for this satellite at the step's
+/// time if it is visible (above the station horizon).
 #[cfg(feature = "orbital")]
 fn collect_gt_for_step(
     enu: &[crate::orbital::EnuPosition],
     id: u32,
-    t_min: f64,
+    frame: &StepFrame,
     gt_positions: &mut Vec<(u64, [f64; 3])>,
 ) {
     if let Some(pos) = enu
         .iter()
-        .find(|p| (p.time_since_epoch_min - t_min).abs() < 1e-6)
+        .find(|p| (p.time_since_epoch_min - frame.t_min).abs() < 1e-6)
         && pos.up > 0.0
     {
-        gt_positions.push((u64::from(id), [pos.east, pos.north, pos.up]));
+        let eci = enu_to_eci(
+            &Vector3::new(pos.east, pos.north, pos.up),
+            frame.jd,
+            frame.station.lat_rad,
+            frame.station.lon_rad,
+            frame.station.alt_m,
+        );
+        gt_positions.push((u64::from(id), [eci.x, eci.y, eci.z]));
     }
 }
 
-/// Convert a radar measurement at `t_min` to a noisy Cartesian detection.
+/// Convert a radar measurement at the step's time to a noisy ECI detection:
+/// perturb RAE with the configured sigmas, reconstruct Cartesian ENU via
+/// [`rae_to_enu`], and lift into ECI with the step's GMST epoch.
 #[cfg(feature = "orbital")]
 fn collect_noisy_detection(
     measurements: &[thresh_core::measurement::Measurement],
     noise: &crate::orbital::RadarNoiseConfig,
     normal: &rand_distr::Normal<f64>,
     rng: &mut impl rand::Rng,
-    t_min: f64,
+    frame: &StepFrame,
     detections: &mut Vec<DVector<f64>>,
 ) {
     use rand_distr::Distribution;
 
     let m = measurements.iter().find(|m| match m {
         thresh_core::measurement::Measurement::Radar { time, .. } => {
-            (time - t_min * 60.0).abs() < 1e-6
+            (time - frame.t_min * 60.0).abs() < 1e-6
         }
         _ => false,
     });
@@ -866,10 +1084,15 @@ fn collect_noisy_detection(
         let noisy_range = range + noise.range_sigma_m * normal.sample(rng);
         let noisy_az = azimuth + noise.azimuth_sigma_rad * normal.sample(rng);
         let noisy_el = elevation + noise.elevation_sigma_rad * normal.sample(rng);
-        let x = noisy_range * noisy_el.cos() * noisy_az.cos();
-        let y = noisy_range * noisy_el.cos() * noisy_az.sin();
-        let z = noisy_range * noisy_el.sin();
-        detections.push(DVector::from_column_slice(&[x, y, z]));
+        let enu = rae_to_enu(noisy_range, noisy_az, noisy_el);
+        let eci = enu_to_eci(
+            &enu,
+            frame.jd,
+            frame.station.lat_rad,
+            frame.station.lon_rad,
+            frame.station.alt_m,
+        );
+        detections.push(DVector::from_column_slice(&[eci.x, eci.y, eci.z]));
     }
 }
 
@@ -889,6 +1112,239 @@ fn fetch_tles_via_http(norad_ids: &[u32]) -> Result<Vec<crate::orbital::Tle>, St
         out.extend(tles);
     }
     Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// Ballistic benchmark runner (orbital-ballistic-filter-models, task 6.3)
+// ---------------------------------------------------------------------------
+
+/// Run a ballistic benchmark scenario end-to-end (spec "Ballistic benchmark
+/// end-to-end run", design Decision 7 of `orbital-ballistic-filter-models`).
+///
+/// Pipeline:
+/// 1. Generate phased boost / midcourse / reentry truth in ECI from the
+///    manifest's [`ScenarioSource::Ballistic`] profile via
+///    [`thresh_synth::ballistic::generate`] on the `parameters.dt` grid.
+/// 2. Project each truth sample into the downrange radar station's ENU
+///    frame ([`thresh_synth::ballistic::ballistic_to_enu`], the same
+///    station projection the SGP4 orbital source uses).
+/// 3. For each above-horizon sample, form a radar RAE measurement, add
+///    seeded Gaussian noise (range sigma = `measurement_noise_sigma`,
+///    angle sigma = `measurement_noise_sigma / 50 000` rad — the orbital
+///    runner's convention), reconstruct Cartesian ENU, and lift the
+///    detection **ENU → ECI** at the sample's epoch.
+/// 4. Feed detections class-tagged [`TargetClass::Ballistic`] so the
+///    tracker births 7D `BallisticReentry` EKF tracks (Decision 6 head
+///    dispatch; one 7D model covers midcourse + reentry — the drag term
+///    vanishes exo-atmospherically), then compute MOT metrics against the
+///    ECI truth.
+///
+/// `parameters.scenario_type = "force-cv-head"` births tracks as
+/// [`TargetClass::Unknown`] (CV head) instead — the deliberate-regression
+/// probe for the benchmark gate (task 6.6).
+///
+/// Truth generation and tracking are pure Rust with no SGP4/network
+/// dependency, so this runner is available under **default features**.
+pub fn run_ballistic_benchmark(
+    manifest: &ScenarioManifest,
+) -> core::result::Result<BenchmarkResult, String> {
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+    use rand_distr::Normal;
+    use thresh_synth::ballistic::{BallisticProfile, ballistic_to_enu, generate};
+
+    let start = Instant::now();
+    let params = &manifest.parameters;
+
+    let ScenarioSource::Ballistic {
+        launch_lat_deg,
+        launch_lon_deg,
+        launch_alt_m,
+        launch_azimuth_deg,
+        thrust_accel_m_s2,
+        burn_time_s,
+        pitch_over_s,
+        pitch_kick_deg,
+        beta_kg_m2,
+        epoch_jd,
+        station_lat_deg,
+        station_lon_deg,
+        station_alt_m,
+    } = &manifest.source
+    else {
+        return Err(format!(
+            "run_ballistic_benchmark called on non-Ballistic source: {:?}",
+            manifest.source
+        ));
+    };
+
+    // ---- 1. Phased truth generation (boost / midcourse / reentry) ----
+    let profile = BallisticProfile {
+        launch_lat_rad: launch_lat_deg.to_radians(),
+        launch_lon_rad: launch_lon_deg.to_radians(),
+        launch_alt_m: *launch_alt_m,
+        launch_azimuth_rad: launch_azimuth_deg.to_radians(),
+        thrust_accel: *thrust_accel_m_s2,
+        burn_time_s: *burn_time_s,
+        pitch_over_s: *pitch_over_s,
+        pitch_kick_rad: pitch_kick_deg.to_radians(),
+        beta: *beta_kg_m2,
+        epoch_jd: *epoch_jd,
+    };
+    if params.dt <= 0.0 || !params.dt.is_finite() {
+        return Err(format!(
+            "ballistic scenario requires a positive finite dt, got {}",
+            params.dt
+        ));
+    }
+    let truth = generate(&profile, params.dt);
+
+    // ---- 2. Station ENU projection ----
+    let station = StationGeodetics {
+        lat_rad: station_lat_deg.to_radians(),
+        lon_rad: station_lon_deg.to_radians(),
+        alt_m: *station_alt_m,
+    };
+    let enu = ballistic_to_enu(&truth, station.lat_rad, station.lon_rad, station.alt_m);
+
+    // ---- 3. Effective tracker noise from the visible slant ranges ----
+    let sigmas = RaeSigmas {
+        range_m: params.measurement_noise_sigma,
+        angle_rad: params.measurement_noise_sigma / RADAR_ANGLE_SIGMA_DIVISOR,
+    };
+    let visible_ranges: Vec<f64> = enu
+        .iter()
+        .filter(|p| p[2] > 0.0)
+        .map(|p| enu_to_rae(p).0)
+        .collect();
+    let sigma_eff = effective_cartesian_sigma(&visible_ranges, sigmas.range_m, sigmas.angle_rad);
+
+    // ---- 4. Track with the 7D ballistic reentry head in ECI ----
+    // Deterministic seeded RNG so the CI regression gate is reproducible.
+    let mut rng = StdRng::seed_from_u64(0xBA11_157C_0DE5_EED5);
+    let normal = Normal::new(0.0, 1.0).unwrap();
+    let birth_class = birth_class_or_forced_cv(params, TargetClass::Ballistic);
+
+    let n_steps = truth
+        .len()
+        .min((params.duration_s / params.dt).ceil() as usize + 1);
+    let mut tracker = MultiObjectTracker::new_cv_position(sigma_eff, params.gate_threshold);
+    let mut frame_data_vec: Vec<FrameData> = Vec::with_capacity(n_steps);
+
+    for k in 0..n_steps {
+        let (detections, gt_positions) =
+            ballistic_step_data(&truth[k], &enu[k], &sigmas, &normal, &mut rng, &station);
+        let classed: Vec<(DVector<f64>, TargetClass)> =
+            detections.into_iter().map(|d| (d, birth_class)).collect();
+        tracker.step_classed(&classed, params.dt);
+        frame_data_vec.push(FrameData {
+            gt: gt_positions,
+            tracks: collect_confirmed_track_positions(&tracker),
+        });
+    }
+
+    // ---- 5. Metrics ----
+    let dist_threshold = (params.measurement_noise_sigma * 10.0).max(5_000.0);
+    let total_gt: usize = frame_data_vec.iter().map(|f| f.gt.len()).sum();
+    let total_tracks: usize = frame_data_vec.iter().map(|f| f.tracks.len()).sum();
+    eprintln!(
+        "ballistic pipeline: {} frames ({} truth samples), {} ground-truth points, \
+         {} confirmed-track points, effective measurement sigma {sigma_eff:.0} m",
+        frame_data_vec.len(),
+        truth.len(),
+        total_gt,
+        total_tracks,
+    );
+    eprint_ballistic_flight_diagnostics(&truth, &enu, params.dt);
+    Ok(build_benchmark_result(
+        &manifest.name,
+        &frame_data_vec,
+        dist_threshold,
+        start,
+    ))
+}
+
+/// Print flight-shape and visibility-window diagnostics for a ballistic
+/// truth run: apogee, flight time, impact distance from the station, and
+/// the above-horizon window. These are the numbers that settled the
+/// scenario's visibility-window open question (see `ballistic-mrbm.toml`
+/// and the design's Open Questions) and they make calibration runs
+/// self-documenting.
+fn eprint_ballistic_flight_diagnostics(
+    truth: &[thresh_synth::orbital::OrbitalState],
+    enu: &[[f64; 3]],
+    dt: f64,
+) {
+    let earth_radius = thresh_core::orbital::GravityModel::EARTH_WGS84.equatorial_radius;
+    let apogee_km = truth
+        .iter()
+        .map(|s| (Vector3::from(s.position).norm() - earth_radius) / 1_000.0)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let flight_s = (truth.len().saturating_sub(1)) as f64 * dt;
+    let impact_from_station_km = enu
+        .last()
+        .map(|p| (p[0] * p[0] + p[1] * p[1]).sqrt() / 1_000.0)
+        .unwrap_or(f64::NAN);
+    let first_visible = enu.iter().position(|p| p[2] > 0.0);
+    let last_visible = enu.iter().rposition(|p| p[2] > 0.0);
+    match (first_visible, last_visible) {
+        (Some(a), Some(b)) => eprintln!(
+            "ballistic flight: apogee {apogee_km:.0} km, flight {flight_s:.0} s, impact \
+             {impact_from_station_km:.0} km from station, visible window [{:.0}, {:.0}] s",
+            a as f64 * dt,
+            b as f64 * dt,
+        ),
+        _ => eprintln!(
+            "ballistic flight: apogee {apogee_km:.0} km, flight {flight_s:.0} s, impact \
+             {impact_from_station_km:.0} km from station, never visible from station"
+        ),
+    }
+}
+
+/// Radar RAE noise sigmas for the ballistic runner.
+struct RaeSigmas {
+    range_m: f64,
+    angle_rad: f64,
+}
+
+/// Detections + ground truth for a single ballistic benchmark step: when
+/// the truth sample is above the station horizon, its ECI position is the
+/// ground truth (single target, ID 1) and one noisy RAE detection is
+/// formed and lifted ENU → ECI at the sample's epoch; below the horizon
+/// the step is empty (same visibility convention as the orbital runner).
+fn ballistic_step_data(
+    truth: &thresh_synth::orbital::OrbitalState,
+    enu: &[f64; 3],
+    sigmas: &RaeSigmas,
+    normal: &rand_distr::Normal<f64>,
+    rng: &mut impl rand::Rng,
+    station: &StationGeodetics,
+) -> StepData {
+    use rand_distr::Distribution;
+
+    let mut detections: Vec<DVector<f64>> = Vec::new();
+    let mut gt_positions: Vec<(u64, [f64; 3])> = Vec::new();
+    if enu[2] <= 0.0 {
+        return (detections, gt_positions);
+    }
+
+    gt_positions.push((1, truth.position));
+
+    let (range, azimuth, elevation) = enu_to_rae(enu);
+    let noisy_range = range + sigmas.range_m * normal.sample(rng);
+    let noisy_az = azimuth + sigmas.angle_rad * normal.sample(rng);
+    let noisy_el = elevation + sigmas.angle_rad * normal.sample(rng);
+    let noisy_enu = rae_to_enu(noisy_range, noisy_az, noisy_el);
+    let eci = enu_to_eci(
+        &noisy_enu,
+        truth.epoch_jd,
+        station.lat_rad,
+        station.lon_rad,
+        station.alt_m,
+    );
+    detections.push(DVector::from_column_slice(&[eci.x, eci.y, eci.z]));
+
+    (detections, gt_positions)
 }
 
 // ---------------------------------------------------------------------------
@@ -1540,6 +1996,79 @@ mod tests {
             failures.is_empty(),
             "Expected no failures, got: {failures:?}"
         );
+    }
+
+    // ---------------------------------------------------------------------
+    // Benchmark determinism (orbital-ballistic-filter-models, task 6.4;
+    // spec "Repeated runs agree") — the CI baseline comparison is only
+    // meaningful if the same scenario at the same revision reproduces the
+    // same metrics, so these run the committed scenario manifests twice
+    // through the library-level runners and require bitwise equality.
+    // ---------------------------------------------------------------------
+
+    /// Assert two benchmark results carry bitwise-identical metric values.
+    fn assert_identical_metrics(a: &BenchmarkResult, b: &BenchmarkResult) {
+        assert_eq!(
+            a.mota.to_bits(),
+            b.mota.to_bits(),
+            "MOTA differs between runs: {} vs {}",
+            a.mota,
+            b.mota
+        );
+        assert_eq!(
+            a.motp.to_bits(),
+            b.motp.to_bits(),
+            "MOTP differs between runs: {} vs {}",
+            a.motp,
+            b.motp
+        );
+        assert_eq!(
+            a.idf1.to_bits(),
+            b.idf1.to_bits(),
+            "IDF1 differs between runs: {} vs {}",
+            a.idf1,
+            b.idf1
+        );
+        assert_eq!(
+            a.hota.to_bits(),
+            b.hota.to_bits(),
+            "HOTA differs between runs: {} vs {}",
+            a.hota,
+            b.hota
+        );
+        assert_eq!(
+            a.id_switches, b.id_switches,
+            "ID switch counts differ between runs"
+        );
+    }
+
+    /// Task 6.4 — executing the committed ballistic scenario twice at the
+    /// same revision yields identical metric values: the phased truth
+    /// generator, the seeded measurement RNG, the tracker, and the metric
+    /// computation are all deterministic. Runs under default features
+    /// because the ballistic pipeline is pure Rust (no SGP4 / network).
+    #[test]
+    fn ballistic_benchmark_repeated_runs_identical() {
+        let manifest_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("scenarios")
+            .join("ballistic-mrbm.toml");
+        let manifest = load_scenario(&manifest_path).expect("load ballistic-mrbm.toml");
+        let first = run_ballistic_benchmark(&manifest).expect("first ballistic run");
+        let second = run_ballistic_benchmark(&manifest).expect("second ballistic run");
+        assert_identical_metrics(&first, &second);
+    }
+
+    /// Task 6.4 — the same determinism property for the orbital runner on
+    /// the cached-TLE ISS scenario (feature-gated like the runner itself).
+    #[cfg(feature = "orbital")]
+    #[test]
+    fn orbital_benchmark_repeated_runs_identical() {
+        let scenarios = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scenarios");
+        let manifest =
+            load_scenario(&scenarios.join("orbital-iss.toml")).expect("load orbital-iss.toml");
+        let first = run_orbital_benchmark(&manifest, &scenarios).expect("first orbital run");
+        let second = run_orbital_benchmark(&manifest, &scenarios).expect("second orbital run");
+        assert_identical_metrics(&first, &second);
     }
 
     // ---------------------------------------------------------------------
