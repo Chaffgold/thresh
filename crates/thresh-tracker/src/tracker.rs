@@ -9,7 +9,8 @@ use thresh_association::jpda::{JpdaTrack, jpda_associate_and_update};
 use thresh_association::mht::HypothesisTree;
 use thresh_core::detection::Detection3D;
 use thresh_core::ego::EgoMotion;
-use thresh_core::track::{TargetClass, TrackState};
+use thresh_core::orbital::GravityModel;
+use thresh_core::track::{TargetClass, TrackId, TrackState};
 use thresh_filter::imm::{ImmConfig, ImmFilter};
 #[cfg(feature = "learned-imm")]
 use thresh_filter::imm_adapter::{ImmModeAdapter, LearnedImmFilter, NUM_MODES};
@@ -43,13 +44,13 @@ pub enum AssociationStrategy {
     },
 }
 
-use crate::cost_matrix::alive_indices;
+use crate::cost_matrix::{alive_indices, build_cost_matrix, predict_linear};
 #[cfg(not(feature = "parallel"))]
 use crate::cost_matrix::{build_track_cost_matrix, predict_all};
 #[cfg(feature = "parallel")]
 use crate::cost_matrix::{build_track_cost_matrix_parallel, predict_all_parallel};
 
-use crate::heads::HeadRegistry;
+use crate::heads::{HeadModel, HeadRegistry, TrackHead};
 use crate::lifecycle::update_lifecycle;
 use crate::track::Track;
 
@@ -353,15 +354,68 @@ impl MultiObjectTracker {
         }
     }
 
-    /// Single-model (CV) predict for all alive tracks.
+    /// Single-model predict for all alive tracks: per-track dispatch through
+    /// the class head's motion model (design Decision 6 of the
+    /// `orbital-ballistic-filter-models` change). When every alive track
+    /// resolves to the same CV model, the bulk linear (optionally
+    /// rayon-parallel) fast path applies; otherwise tracks propagate
+    /// per head — linearly for `Cv` heads, EKF-style through the model's
+    /// Jacobian for the nonlinear orbital/reentry heads.
     fn predict_single_model(&mut self, dt: f64) {
-        let model = ConstantVelocity::new(5.0);
-        let f = model.transition_matrix(dt);
-        let q = model.process_noise(dt);
-        #[cfg(feature = "parallel")]
-        predict_all_parallel(&mut self.tracks, &f, &q);
-        #[cfg(not(feature = "parallel"))]
-        predict_all(&mut self.tracks, &f, &q);
+        if let Some((f, q)) = self.uniform_cv_transition(dt) {
+            #[cfg(feature = "parallel")]
+            predict_all_parallel(&mut self.tracks, &f, &q);
+            #[cfg(not(feature = "parallel"))]
+            predict_all(&mut self.tracks, &f, &q);
+            return;
+        }
+        self.predict_per_head(dt);
+    }
+
+    /// If every alive track's head is `HeadModel::Cv` with one shared
+    /// `process_noise_sigma`, return that model's `(F, Q)` pair so
+    /// [`Self::predict_single_model`] can take the bulk linear path.
+    /// Returns `None` on mixed heads (or no alive tracks).
+    fn uniform_cv_transition(&self, dt: f64) -> Option<(DMatrix<f64>, DMatrix<f64>)> {
+        let mut sigma: Option<f64> = None;
+        for track in self.tracks.iter().filter(|t| t.is_alive()) {
+            let head = self.heads.get(track.class);
+            if head.model != HeadModel::Cv {
+                return None;
+            }
+            match sigma {
+                None => sigma = Some(head.process_noise_sigma),
+                Some(s) if s == head.process_noise_sigma => {}
+                Some(_) => return None,
+            }
+        }
+        let model = ConstantVelocity::new(sigma?);
+        Some((model.transition_matrix(dt), model.process_noise(dt)))
+    }
+
+    /// Per-head predict for mixed-head track sets: `Cv` heads reuse a
+    /// per-class cached `(F, Q)` linear step; nonlinear heads run an
+    /// EKF-style propagation through the head's motion model.
+    fn predict_per_head(&mut self, dt: f64) {
+        let heads = self.heads.clone();
+        let mut cv_cache: HashMap<TargetClass, (DMatrix<f64>, DMatrix<f64>)> = HashMap::new();
+        for track in &mut self.tracks {
+            if !track.is_alive() {
+                continue;
+            }
+            let head = heads.get(track.class);
+            if head.model == HeadModel::Cv {
+                let (f, q) = cv_cache.entry(track.class).or_insert_with(|| {
+                    let model = ConstantVelocity::new(head.process_noise_sigma);
+                    (model.transition_matrix(dt), model.process_noise(dt))
+                });
+                let (state, cov) = predict_linear(&track.state, &track.covariance, f, q);
+                track.state = state;
+                track.covariance = cov;
+            } else {
+                ekf_predict_track(track, head.build_model().as_ref(), dt);
+            }
+        }
     }
 
     /// Associate detections with tracks and apply measurement updates.
@@ -427,12 +481,19 @@ impl MultiObjectTracker {
         associated_tracks: &mut [bool],
         associated_dets: &mut [bool],
     ) {
-        let h = &self.observation_matrix;
         let r = &self.measurement_noise;
 
+        // Per-track padded H (see [`Self::observation_for_dim`]) so 7D
+        // reentry tracks associate and update alongside 6D ones, matching
+        // the Hungarian and MHT paths.
+        let observation_matrices: Vec<DMatrix<f64>> = alive
+            .iter()
+            .map(|&ti| self.observation_for_dim(self.tracks[ti].state.len()))
+            .collect();
         let jpda_tracks: Vec<JpdaTrack> = alive
             .iter()
-            .map(|&ti| {
+            .zip(&observation_matrices)
+            .map(|(&ti, h)| {
                 let pred_z = h * &self.tracks[ti].state;
                 let s = h * &self.tracks[ti].covariance * h.transpose() + r;
                 JpdaTrack {
@@ -456,7 +517,7 @@ impl MultiObjectTracker {
             &states,
             &covariances,
             detections,
-            h,
+            &observation_matrices,
             self.gate_threshold,
             p_d,
             clutter,
@@ -528,8 +589,6 @@ impl MultiObjectTracker {
         tree.prune_k_best();
 
         let assignments = tree.consistent_track_assignments();
-        let h = self.observation_matrix.clone();
-        let r = self.measurement_noise.clone();
 
         for (track_idx, det_idx) in &assignments {
             if let Some(dj) = det_idx
@@ -539,7 +598,7 @@ impl MultiObjectTracker {
                 associated_tracks[*track_idx] = true;
                 associated_dets[*dj] = true;
                 let ti = alive[*track_idx];
-                self.apply_measurement_update(ti, &detections[*dj], &h, &r, is_imm);
+                self.apply_measurement_update(ti, &detections[*dj], is_imm);
             }
         }
     }
@@ -551,15 +610,15 @@ impl MultiObjectTracker {
         detections: &[DVector<f64>],
         p_d: f64,
     ) -> Vec<Vec<f64>> {
-        let h = &self.observation_matrix;
         let r = &self.measurement_noise;
         let n_dets = detections.len();
         let n_tracks = alive.len();
 
         let mut likelihoods = vec![vec![f64::NEG_INFINITY; n_dets]; n_tracks];
         for (ai, &ti) in alive.iter().enumerate() {
-            let pred_z = h * &self.tracks[ti].state;
-            let s = h * &self.tracks[ti].covariance * h.transpose() + r;
+            let h = self.observation_for_dim(self.tracks[ti].state.len());
+            let pred_z = &h * &self.tracks[ti].state;
+            let s = &h * &self.tracks[ti].covariance * h.transpose() + r;
             for (dj, det) in detections.iter().enumerate() {
                 let d2 = mahalanobis_squared(det, &pred_z, &s);
                 if d2 <= self.gate_threshold {
@@ -585,9 +644,26 @@ impl MultiObjectTracker {
         associated_dets: &mut [bool],
     ) {
         let is_imm = self.imm_config_factory.is_some();
+        let cost_matrix = self.hungarian_cost_matrix(detections, alive);
+        let result = hungarian_assignment(&cost_matrix, self.gate_threshold);
 
+        for &(ai, dj) in &result.matches {
+            associated_tracks[ai] = true;
+            associated_dets[dj] = true;
+            let ti = alive[ai];
+            self.apply_measurement_update(ti, &detections[dj], is_imm);
+        }
+    }
+
+    /// Cost matrix for the Hungarian path: the uniform-dimension bulk
+    /// (optionally parallel) helper when every alive track matches the
+    /// observation matrix, otherwise the per-track padded-H path.
+    fn hungarian_cost_matrix(&self, detections: &[DVector<f64>], alive: &[usize]) -> Vec<Vec<f64>> {
+        if !self.tracks_match_observation_dim(alive) {
+            return self.build_padded_cost_matrix(alive, detections);
+        }
         #[cfg(feature = "parallel")]
-        let cost_matrix = build_track_cost_matrix_parallel(
+        return build_track_cost_matrix_parallel(
             &self.tracks,
             alive,
             &self.observation_matrix,
@@ -596,41 +672,70 @@ impl MultiObjectTracker {
             self.gate_threshold,
         );
         #[cfg(not(feature = "parallel"))]
-        let cost_matrix = build_track_cost_matrix(
+        build_track_cost_matrix(
             &self.tracks,
             alive,
             &self.observation_matrix,
             &self.measurement_noise,
             detections,
             self.gate_threshold,
-        );
+        )
+    }
 
-        let result = hungarian_assignment(&cost_matrix, self.gate_threshold);
-        let h = self.observation_matrix.clone();
-        let r = self.measurement_noise.clone();
+    /// True when every alive track's state dimension matches the observation
+    /// matrix, so the uniform-H association helpers apply directly.
+    fn tracks_match_observation_dim(&self, alive: &[usize]) -> bool {
+        let cols = self.observation_matrix.ncols();
+        alive.iter().all(|&ti| self.tracks[ti].state.len() == cols)
+    }
 
-        for &(ai, dj) in &result.matches {
-            associated_tracks[ai] = true;
-            associated_dets[dj] = true;
-            let ti = alive[ai];
-            self.apply_measurement_update(ti, &detections[dj], &h, &r, is_imm);
+    /// Observation matrix for a track state of dimension `dim`: the
+    /// tracker's H, zero-padded on the right when the state carries
+    /// components beyond the observed kinematic prefix — e.g. the 7D reentry
+    /// state's β column (design Decision 4 of `orbital-ballistic-filter-models`).
+    /// Returned unchanged when `dim` already matches H's columns.
+    fn observation_for_dim(&self, dim: usize) -> DMatrix<f64> {
+        let h = &self.observation_matrix;
+        if dim <= h.ncols() {
+            return h.clone();
         }
+        let mut padded = DMatrix::zeros(h.nrows(), dim);
+        padded.view_mut((0, 0), h.shape()).copy_from(h);
+        padded
+    }
+
+    /// Mahalanobis cost matrix for mixed state dimensions: per-track padded
+    /// H (extra components such as β are unobserved), then the shared
+    /// assembly of [`build_cost_matrix`].
+    fn build_padded_cost_matrix(
+        &self,
+        alive: &[usize],
+        detections: &[DVector<f64>],
+    ) -> Vec<Vec<f64>> {
+        let r = &self.measurement_noise;
+        let mut predicted = Vec::with_capacity(alive.len());
+        let mut innovations = Vec::with_capacity(alive.len());
+        for &ti in alive {
+            let h = self.observation_for_dim(self.tracks[ti].state.len());
+            predicted.push(&h * &self.tracks[ti].state);
+            innovations.push(&h * &self.tracks[ti].covariance * h.transpose() + r);
+        }
+        build_cost_matrix(&predicted, &innovations, detections, self.gate_threshold)
     }
 
     /// Apply a single measurement update to a track (IMM or KF).
-    fn apply_measurement_update(
-        &mut self,
-        ti: usize,
-        detection: &DVector<f64>,
-        h: &DMatrix<f64>,
-        r: &DMatrix<f64>,
-        is_imm: bool,
-    ) {
+    ///
+    /// The observation matrix is padded per track dimension (see
+    /// [`Self::observation_for_dim`]) so 7D reentry tracks update alongside
+    /// 6D ones.
+    fn apply_measurement_update(&mut self, ti: usize, detection: &DVector<f64>, is_imm: bool) {
+        let h = self.observation_for_dim(self.tracks[ti].state.len());
+        let r = self.measurement_noise.clone();
         if is_imm {
             if let Some(key) = self.tracks[ti].imm_key {
                 #[cfg(feature = "learned-imm")]
                 if let Some(lf) = self.learned_imm_filters.get_mut(&key) {
-                    let result = lf.update_with_measurement(detection, h, r);
+                    let result = lf.update_with_measurement(detection, &h, &r);
                     self.tracks[ti].state = result.state;
                     self.tracks[ti].covariance = result.covariance;
                     self.tracks[ti].dominant_mode = Some(result.dominant_mode);
@@ -638,7 +743,7 @@ impl MultiObjectTracker {
                     return;
                 }
                 if let Some(imm) = self.imm_filters.get_mut(&key) {
-                    let result = imm.update_with_measurement(detection, h, r);
+                    let result = imm.update_with_measurement(detection, &h, &r);
                     self.tracks[ti].state = result.state;
                     self.tracks[ti].covariance = result.covariance;
                     self.tracks[ti].dominant_mode = Some(result.dominant_mode);
@@ -648,7 +753,7 @@ impl MultiObjectTracker {
         } else {
             let track = &self.tracks[ti];
             let mut kf = KalmanFilter::new(track.state.clone(), track.covariance.clone());
-            kf.update(detection, h, r);
+            kf.update(detection, &h, &r);
             self.tracks[ti].state = kf.x;
             self.tracks[ti].covariance = kf.p;
         }
@@ -751,23 +856,36 @@ impl MultiObjectTracker {
         }
     }
 
+    /// Reclassify a live track (spec scenario "Class reclassification"):
+    /// switch its [`TargetClass`] — and therefore the head whose motion
+    /// model `predict_single_model` dispatches — adapting the state
+    /// vector across head dimensions. The interleaved kinematic prefix
+    /// `[x, vx, y, vy, z, vz]` is shared by every head, so growing 6D → 7D
+    /// preserves it and births the appended β from the new head's prior,
+    /// while shrinking 7D → 6D drops β (the `Reentry7Mapping` pattern of
+    /// design Decisions 4/6, `orbital-ballistic-filter-models`).
+    ///
+    /// IMM-mode tracks keep their bank's state shape (the bank owns the
+    /// common 6D space); only the class tag changes for them. Returns
+    /// `false` when no live track has this `id`.
+    pub fn reclassify(&mut self, id: TrackId, new_class: TargetClass) -> bool {
+        let head = self.heads.get(new_class).clone();
+        let Some(track) = self.tracks.iter_mut().find(|t| t.id == id && t.is_alive()) else {
+            return false;
+        };
+        track.class = new_class;
+        if track.imm_key.is_none() {
+            adapt_track_dimension(track, &head);
+        }
+        true
+    }
+
     /// Create a new track from a detection.
     fn birth_track(&mut self, detection: &DVector<f64>, class: TargetClass) {
-        let head = self.heads.get(class);
-        let mut state = DVector::zeros(head.state_dim);
-        // Initialize position from detection, velocity from zero
-        let h = &self.observation_matrix;
-        let m_dim = detection.len();
-        for i in 0..m_dim.min(head.state_dim) {
-            // Map measurement indices to state indices via H
-            for j in 0..head.state_dim {
-                if h[(i, j)].abs() > 0.5 {
-                    state[j] = detection[i];
-                }
-            }
-        }
-
-        let cov = DMatrix::from_diagonal(&DVector::from_column_slice(&head.initial_covariance));
+        let head = self.heads.get(class).clone();
+        let h = self.observation_for_dim(head.state_dim);
+        let state = birth_state(detection, &head, &h);
+        let cov = birth_covariance(detection, &head);
         let mut track = Track::new(state.clone(), cov.clone(), class);
 
         // If in IMM mode, create a filter for this track. Build the bank while
@@ -811,6 +929,91 @@ impl MultiObjectTracker {
     pub fn alive_count(&self) -> usize {
         self.tracks.iter().filter(|t| t.is_alive()).count()
     }
+}
+
+/// EKF-style predict for one track through a nonlinear head model (design
+/// Decision 6 of `orbital-ballistic-filter-models`): `F = ∂f/∂x` evaluated
+/// at the prior mean, then `x ← f(x, dt)`, `P ← F·P·Fᵀ + Q`.
+fn ekf_predict_track(track: &mut Track, model: &dyn MotionModel, dt: f64) {
+    let f = model.jacobian(&track.state, dt);
+    track.state = model.predict(&track.state, dt);
+    track.covariance = &f * &track.covariance * f.transpose() + model.process_noise(dt);
+}
+
+/// Initial state for a newborn track: detection components mapped to state
+/// indices through the (dimension-padded) observation matrix `h`, remaining
+/// components zero — except model-specific extras: the reentry head's β is
+/// born at its `beta_init` (design Decision 6).
+fn birth_state(detection: &DVector<f64>, head: &TrackHead, h: &DMatrix<f64>) -> DVector<f64> {
+    let mut state = DVector::zeros(head.state_dim);
+    let m_dim = detection.len().min(h.nrows());
+    for i in 0..m_dim.min(head.state_dim) {
+        // Map measurement indices to state indices via H
+        for j in 0..head.state_dim {
+            if h[(i, j)].abs() > 0.5 {
+                state[j] = detection[i];
+            }
+        }
+    }
+    if let HeadModel::Reentry { beta_init, .. } = head.model
+        && head.state_dim == 7
+    {
+        state[6] = beta_init;
+    }
+    state
+}
+
+/// Initial covariance for a newborn track: the head's diagonal prior, with
+/// the orbital head's velocity entries refined to the circular-orbit prior
+/// `μ/(3‖r‖)` when the detection is a plausible ECI position (task 5.5
+/// resolution — see the Open Questions section of the
+/// `orbital-ballistic-filter-models` design).
+fn birth_covariance(detection: &DVector<f64>, head: &TrackHead) -> DMatrix<f64> {
+    let mut diag = head.initial_covariance.clone();
+    if matches!(head.model, HeadModel::KeplerJ2 { .. }) && detection.len() >= 3 {
+        let r = (detection[0].powi(2) + detection[1].powi(2) + detection[2].powi(2)).sqrt();
+        let earth = GravityModel::EARTH_WGS84;
+        if r > earth.equatorial_radius {
+            // Unknown direction at circular speed v_c = √(μ/r): zero-mean
+            // velocity with per-axis variance v_c²/3.
+            let vel_var = earth.mu / (3.0 * r);
+            for idx in [1usize, 3, 5] {
+                if idx < diag.len() {
+                    diag[idx] = vel_var;
+                }
+            }
+        }
+    }
+    DMatrix::from_diagonal(&DVector::from_column_slice(&diag))
+}
+
+/// Resize a track's state/covariance to a new head's `state_dim` after
+/// reclassification. The shared interleaved kinematic prefix is preserved
+/// (mean and covariance block); appended components start at the new head's
+/// diagonal prior, with the reentry β mean born at `beta_init`; dropped
+/// components are truncated.
+fn adapt_track_dimension(track: &mut Track, head: &TrackHead) {
+    let old_dim = track.state.len();
+    let new_dim = head.state_dim;
+    if old_dim == new_dim {
+        return;
+    }
+    let mut state = DVector::zeros(new_dim);
+    let mut cov = DMatrix::from_diagonal(&DVector::from_column_slice(&head.initial_covariance));
+    let keep = old_dim.min(new_dim);
+    state
+        .rows_mut(0, keep)
+        .copy_from(&track.state.rows(0, keep));
+    cov.view_mut((0, 0), (keep, keep))
+        .copy_from(&track.covariance.view((0, 0), (keep, keep)));
+    if let HeadModel::Reentry { beta_init, .. } = head.model
+        && new_dim == 7
+        && old_dim < 7
+    {
+        state[6] = beta_init;
+    }
+    track.state = state;
+    track.covariance = cov;
 }
 
 #[cfg(test)]
@@ -1523,5 +1726,354 @@ mod tests {
         assert!((ta.state[0] - tb.state[0]).abs() < 1e-12);
         assert!((ta.state[2] - tb.state[2]).abs() < 1e-12);
         assert_eq!(ta.lifecycle, tb.lifecycle);
+    }
+
+    // --- Orbital & ballistic head dispatch (orbital-ballistic-filter-models §5)
+
+    /// Task 5.3 (spec "Ballistic head uses the reentry model"): a track born
+    /// from ballistic-classified detections runs the 7D reentry model and
+    /// its state exposes the estimated β alongside position/velocity.
+    #[test]
+    fn ballistic_track_runs_7d_model_and_exposes_beta() {
+        let earth = GravityModel::EARTH_WGS84;
+        // Exo-atmospheric arc near apogee, truth propagated through the same
+        // reentry dynamics the head builds (drag ≈ 0 above the atmosphere).
+        let truth_model = TrackHead::ballistic().build_model();
+        let mut truth = DVector::from_column_slice(&[
+            earth.equatorial_radius + 1_200_000.0,
+            0.0, // x, vx
+            0.0,
+            800.0, // y, vy
+            0.0,
+            -200.0,  // z, vz
+            2_000.0, // true β (unobservable exo-atmospherically)
+        ]);
+        let dt = 1.0;
+        let mut tracker = MultiObjectTracker::new_cv_position(50.0, 500.0);
+        for _ in 0..6 {
+            let det = DVector::from_column_slice(&[truth[0], truth[2], truth[4]]);
+            tracker.step_classed(&[(det, TargetClass::Ballistic)], dt);
+            truth = truth_model.predict(&truth, dt);
+        }
+
+        assert_eq!(tracker.alive_count(), 1, "one ballistic track expected");
+        assert_eq!(tracker.confirmed_count(), 1, "2-of-3 should have confirmed");
+        let track = &tracker.tracks[0];
+        assert_eq!(track.class, TargetClass::Ballistic);
+        assert_eq!(track.state.len(), 7, "ballistic head must run the 7D state");
+        assert_eq!(track.covariance.shape(), (7, 7));
+
+        // β exposed alongside position/velocity: born at the head's
+        // beta_init and held positive; with zero drag there is no β
+        // information, so it stays at the prior.
+        let HeadModel::Reentry { beta_init, .. } = TrackHead::ballistic().model else {
+            panic!("ballistic head must select the reentry model");
+        };
+        assert!(track.state[6] > 0.0, "estimated β must stay positive");
+        assert!(
+            (track.state[6] - beta_init).abs() < 1e-6,
+            "β should sit at its prior exo-atmospherically, got {}",
+            track.state[6]
+        );
+
+        // The 7D filter followed the arc.
+        let pos_err = ((track.state[0] - truth[0]).powi(2)
+            + (track.state[2] - truth[2]).powi(2)
+            + (track.state[4] - truth[4]).powi(2))
+        .sqrt();
+        assert!(
+            pos_err < 5_000.0,
+            "reentry filter lost the arc: {pos_err} m"
+        );
+    }
+
+    /// Tasks 5.4 + 5.5 (spec "Orbital head tracks a satellite"): an
+    /// orbital-classified track dispatches the Kepler+J2 model. The
+    /// circular-orbit birth velocity prior lets the EKF learn velocity from
+    /// position updates, after which prediction across a measurement gap
+    /// follows the orbit while straight-line (CV) extrapolation of the same
+    /// state diverges by tens of km.
+    #[test]
+    fn orbital_track_follows_orbit_across_measurement_gap() {
+        let earth = GravityModel::EARTH_WGS84;
+        let radius = earth.equatorial_radius + 500_000.0;
+        let mean_motion = (earth.mu / (radius * radius * radius)).sqrt();
+        let truth = |t: f64| -> [f64; 3] {
+            let th = mean_motion * t;
+            [radius * th.cos(), radius * th.sin(), 0.0]
+        };
+
+        let dt = 30.0;
+        let mut tracker = MultiObjectTracker::new_cv_position(100.0, 100.0);
+        // Scans at t = 0..120 s: birth, then velocity convergence through
+        // the circular-orbit prior (task 5.5).
+        for k in 0..5 {
+            let det = DVector::from_column_slice(&truth(k as f64 * dt));
+            tracker.step_classed(&[(det, TargetClass::Orbital)], dt);
+        }
+        assert_eq!(tracker.alive_count(), 1, "one orbital track expected");
+        assert_eq!(tracker.tracks[0].class, TargetClass::Orbital);
+        assert_eq!(tracker.tracks[0].state.len(), 6);
+
+        // Pre-gap state for the straight-line comparison.
+        let s = tracker.tracks[0].state.clone();
+        let (p0, v0) = ([s[0], s[2], s[4]], [s[1], s[3], s[5]]);
+
+        // Gap: 3 missed scans (90 s), inside the orbital deletion window (5).
+        for _ in 0..3 {
+            tracker.step_classed(&[], dt);
+        }
+        assert_eq!(
+            tracker.alive_count(),
+            1,
+            "orbital head must coast through the gap"
+        );
+
+        let gap_s = 3.0 * dt;
+        let want = truth(4.0 * dt + gap_s);
+        let got = &tracker.tracks[0].state;
+        let model_err =
+            ((got[0] - want[0]).powi(2) + (got[2] - want[1]).powi(2) + (got[4] - want[2]).powi(2))
+                .sqrt();
+        let straight_err = ((p0[0] + v0[0] * gap_s - want[0]).powi(2)
+            + (p0[1] + v0[1] * gap_s - want[1]).powi(2)
+            + (p0[2] + v0[2] * gap_s - want[2]).powi(2))
+        .sqrt();
+
+        assert!(
+            model_err < 10_000.0,
+            "Kepler+J2 prediction left the orbit by {model_err} m over the gap"
+        );
+        assert!(
+            straight_err > 20_000.0 && straight_err > 2.0 * model_err,
+            "straight-line extrapolation should diverge measurably: \
+             straight {straight_err} m vs model {model_err} m"
+        );
+    }
+
+    /// Task 5.6 (spec "Heterogeneous target class tracking"): aircraft
+    /// (6D CV) and ballistic (7D reentry) tracks coexist in one tracker —
+    /// mixed state dimensions flow through the padded observation and
+    /// cost-matrix paths, and each class keeps its own model and policies.
+    #[test]
+    fn heterogeneous_aircraft_and_ballistic_classes_coexist() {
+        let earth = GravityModel::EARTH_WGS84;
+        let dt = 1.0;
+        let mut tracker = MultiObjectTracker::new_cv_position(50.0, 500.0);
+
+        let ballistic_model = TrackHead::ballistic().build_model();
+        let mut bal_truth = DVector::from_column_slice(&[
+            earth.equatorial_radius + 400_000.0,
+            0.0,
+            1.0e6,
+            700.0,
+            0.0,
+            -300.0,
+            1_500.0,
+        ]);
+        let mut ac = [0.0, 0.0, 10_000.0];
+        let ac_v = [250.0, 0.0, 0.0];
+
+        for _ in 0..8 {
+            let dets = vec![
+                (DVector::from_column_slice(&ac), TargetClass::Aircraft),
+                (
+                    DVector::from_column_slice(&[bal_truth[0], bal_truth[2], bal_truth[4]]),
+                    TargetClass::Ballistic,
+                ),
+            ];
+            tracker.step_classed(&dets, dt);
+            for (p, v) in ac.iter_mut().zip(ac_v) {
+                *p += v * dt;
+            }
+            bal_truth = ballistic_model.predict(&bal_truth, dt);
+        }
+
+        assert_eq!(tracker.alive_count(), 2, "both classes must be tracked");
+        assert_eq!(
+            tracker.confirmed_count(),
+            2,
+            "aircraft (3-of-5) and ballistic (2-of-3) both confirm in 8 scans"
+        );
+        let air = tracker
+            .tracks
+            .iter()
+            .find(|t| t.class == TargetClass::Aircraft)
+            .expect("aircraft track");
+        let bal = tracker
+            .tracks
+            .iter()
+            .find(|t| t.class == TargetClass::Ballistic)
+            .expect("ballistic track");
+        assert_eq!(air.state.len(), 6, "aircraft head stays 6D CV");
+        assert_eq!(
+            bal.state.len(),
+            7,
+            "ballistic head runs the 7D reentry state"
+        );
+        assert!(
+            (bal.state[0] - bal_truth[0]).abs() < 5_000.0,
+            "ballistic track follows its arc"
+        );
+        assert!(
+            (air.state[0] - ac[0]).abs() < 500.0,
+            "aircraft track follows its leg"
+        );
+    }
+
+    /// The JPDA path pads H per track dimension like Hungarian/MHT: a 7D
+    /// ballistic track alongside a 6D aircraft previously panicked on the
+    /// shared 3×6 observation matrix (PR #133 review finding).
+    #[test]
+    fn jpda_pads_observation_matrix_for_mixed_dimension_tracks() {
+        let earth = GravityModel::EARTH_WGS84;
+        let dt = 1.0;
+        let mut tracker = MultiObjectTracker::new_cv_position_with_strategy(
+            50.0,
+            500.0,
+            AssociationStrategy::Jpda {
+                detection_prob: 0.9,
+                // Low enough that the miss weight (1 − p_d)·λ never beats
+                // the Gaussian likelihood through the ballistic head's wide
+                // birth prior (S ~ km-scale ⇒ N(z; ẑ, S) is tiny).
+                clutter_density: 1e-30,
+            },
+        );
+
+        let ballistic_model = TrackHead::ballistic().build_model();
+        let mut bal_truth = DVector::from_column_slice(&[
+            earth.equatorial_radius + 400_000.0,
+            0.0,
+            1.0e6,
+            700.0,
+            0.0,
+            -300.0,
+            1_500.0,
+        ]);
+        let mut ac = [0.0, 0.0, 10_000.0];
+        let ac_v = [250.0, 0.0, 0.0];
+
+        for _ in 0..8 {
+            let dets = vec![
+                (DVector::from_column_slice(&ac), TargetClass::Aircraft),
+                (
+                    DVector::from_column_slice(&[bal_truth[0], bal_truth[2], bal_truth[4]]),
+                    TargetClass::Ballistic,
+                ),
+            ];
+            tracker.step_classed(&dets, dt);
+            for (p, v) in ac.iter_mut().zip(ac_v) {
+                *p += v * dt;
+            }
+            bal_truth = ballistic_model.predict(&bal_truth, dt);
+        }
+
+        assert_eq!(tracker.alive_count(), 2, "both classes tracked under JPDA");
+        let bal = tracker
+            .tracks
+            .iter()
+            .find(|t| t.class == TargetClass::Ballistic)
+            .expect("ballistic track");
+        assert_eq!(bal.state.len(), 7, "ballistic head runs the 7D state");
+        assert!(
+            (bal.state[0] - bal_truth[0]).abs() < 5_000.0,
+            "7D track follows its arc through JPDA updates"
+        );
+    }
+
+    /// Task 5.6 (spec "Class reclassification"): switching a track's class
+    /// re-dispatches its motion model and adapts the state vector across the
+    /// 6D/7D boundary — the kinematic prefix survives, β is born from the
+    /// new head's prior on the way up and dropped on the way down.
+    #[test]
+    fn reclassification_adapts_state_across_6d_7d_heads() {
+        let earth = GravityModel::EARTH_WGS84;
+        let mut tracker = MultiObjectTracker::new_cv_position(50.0, 1e4);
+        // Born Unknown (6D CV) from a plausible ECI position.
+        let p = [earth.equatorial_radius + 300_000.0, 0.0, 0.0];
+        let det = DVector::from_column_slice(&p);
+        tracker.step(std::slice::from_ref(&det), 1.0);
+        let id = tracker.tracks[0].id;
+        assert_eq!(tracker.tracks[0].state.len(), 6);
+
+        // Observed trajectory says "ballistic": reclassify 6D → 7D.
+        assert!(tracker.reclassify(id, TargetClass::Ballistic));
+        {
+            let t = &tracker.tracks[0];
+            assert_eq!(t.class, TargetClass::Ballistic);
+            assert_eq!(t.state.len(), 7);
+            assert_eq!(t.covariance.shape(), (7, 7));
+            assert!(
+                (t.state[0] - p[0]).abs() < 1e-9,
+                "kinematic prefix must be preserved"
+            );
+            assert!(t.state[6] > 0.0, "β born from the new head's prior");
+            assert!(t.covariance[(6, 6)] >= 1e6, "wide β prior installed");
+        }
+
+        // The next cycle predicts through the 7D reentry model and still
+        // associates and updates without dimension mismatches.
+        tracker.step_classed(&[(det.clone(), TargetClass::Ballistic)], 1.0);
+        assert_eq!(
+            tracker.alive_count(),
+            1,
+            "no duplicate birth after reclassification"
+        );
+        assert_eq!(tracker.tracks[0].state.len(), 7);
+        assert!(tracker.tracks[0].total_hits >= 2);
+
+        // Reclassify back down: 7D → 6D aircraft drops β.
+        assert!(tracker.reclassify(id, TargetClass::Aircraft));
+        {
+            let t = &tracker.tracks[0];
+            assert_eq!(t.class, TargetClass::Aircraft);
+            assert_eq!(t.state.len(), 6);
+            assert_eq!(t.covariance.shape(), (6, 6));
+        }
+        tracker.step(std::slice::from_ref(&det), 1.0);
+        assert_eq!(tracker.alive_count(), 1);
+
+        // Unknown id is a no-op.
+        assert!(!tracker.reclassify(TrackId::new(), TargetClass::Uav));
+    }
+
+    /// Task 5.5: the orbital head's velocity prior is refined at birth to
+    /// the circular-orbit variance μ/(3‖r‖) when the detection is a
+    /// plausible ECI position, and left at the head's static prior when the
+    /// detection is not (e.g. a near-origin local-frame position).
+    #[test]
+    fn orbital_birth_refines_velocity_prior_from_measured_radius() {
+        let earth = GravityModel::EARTH_WGS84;
+        let r_geo = 42_164_000.0;
+        let mut tracker = MultiObjectTracker::new_cv_position(100.0, 100.0);
+        tracker.step_classed(
+            &[(
+                DVector::from_column_slice(&[r_geo, 0.0, 0.0]),
+                TargetClass::Orbital,
+            )],
+            1.0,
+        );
+        let want = earth.mu / (3.0 * r_geo);
+        let cov = &tracker.tracks[0].covariance;
+        for idx in [1, 3, 5] {
+            assert!(
+                (cov[(idx, idx)] - want).abs() < 1e-6 * want,
+                "GEO-radius birth should tighten the velocity prior to {want}, \
+                 got {}",
+                cov[(idx, idx)]
+            );
+        }
+
+        // Sub-surface radius (local-frame coordinates): static prior stands.
+        let mut local = MultiObjectTracker::new_cv_position(100.0, 100.0);
+        local.step_classed(
+            &[(
+                DVector::from_column_slice(&[100.0, 200.0, 50.0]),
+                TargetClass::Orbital,
+            )],
+            1.0,
+        );
+        let static_prior = TrackHead::orbital().initial_covariance[1];
+        assert_eq!(local.tracks[0].covariance[(1, 1)], static_prior);
     }
 }

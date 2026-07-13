@@ -1,5 +1,5 @@
 name = "orbital-iss"
-description = "ISS pass tracking from a mid-latitude ground station. Uses a cached TLE so the scenario runs offline in the CI benchmark gate."
+description = "ISS pass tracking from a mid-latitude ground station. Uses a cached TLE so the scenario runs offline in the CI benchmark gate. Detections are lifted station-ENU -> ECI and tracked with the 6D Kepler+J2 orbital head (design Decisions 6/7 of orbital-ballistic-filter-models)."
 
 [source.Orbital]
 norad_ids = [25544]
@@ -10,26 +10,35 @@ station_alt_m = 1885.0
 
 [parameters]
 # 3-hour window to guarantee at least one ISS pass over the station,
-# regardless of TLE epoch phase. 5 s sampling × 2160 steps keeps the
-# CV Kalman's prediction-step distance (~35 km at ISS ground speed)
-# within the gate, at the cost of ~2 s of CI runtime.
+# regardless of TLE epoch phase, sampled at 5 s. The window contains one
+# ~10-minute pass (121 above-horizon samples).
 duration_s = 10800.0
 dt = 5.0
-measurement_noise_sigma = 1000.0
-# Generous gate in metres-squared of Mahalanobis residual: ISS slant
-# ranges are hundreds of km and even a few milliradians of angle noise
-# puts the innovation well above typical terrestrial tracker thresholds.
-gate_threshold = 100000.0
+# Radar noise: range sigma 100 m; angle sigma = 100 / 50000 = 2 mrad
+# (the runner's shared RAE noise convention) — a plausible
+# space-surveillance radar. At the ISS pass's median slant range this is
+# an effective Cartesian sigma of ~2.9 km (printed per run), which is
+# what the tracker's R uses. The historical sigma of 1000 m implied a
+# 20 mrad angle noise (~29 km cross-range) — an artifact of the old
+# smoke-gate pipeline, not a physical sensor.
+measurement_noise_sigma = 100.0
+# Mahalanobis gate on the 3D position innovation: chi-squared 3-DoF
+# 0.9999 quantile ~= 21, roughly doubled for the range-dependent RAE
+# noise that the fixed R linearises at the median slant range. Replaces
+# the 1e5 escape hatch the CV-in-ENU tracker needed to survive its 35 km
+# inter-scan prediction error (task 6.2).
+gate_threshold = 50.0
 
 [baselines]
-# The point of the CI gate is to catch regressions in the orbital
-# pipeline (SGP4 bindings, ECI→ENU transform, radar measurement
-# generation, tracker wiring) — not a tight tracking accuracy guarantee.
-# Orbital scenarios have sparse visibility windows and noisy
-# measurements, so a too-tight MOTA floor would flake. MOTA can
-# legitimately be slightly negative if the M-of-N confirmation window
-# never completes before a pass ends; the regression gate still catches
-# real pipeline breakage because on breakage the runner itself errors
-# out (propagation failures, TLE parse errors, missing TLE files), not
-# just MOTA degradation.
-mota = -2.0
+# Real accuracy floor (task 6.5, design Decision 7 calibration procedure):
+# observed MOTA 0.8926 on three consecutive runs (deterministic,
+# bitwise-identical; platform: macos-local, 2026-07-12; MOTP 981 m,
+# IDF1 0.946, 0 ID switches). Floor = observed_min - 0.15 margin for
+# cross-platform float-drift-induced association flips; cross-platform
+# confirmation comes from this PR's CI runs (adjust if ubuntu/windows
+# observe lower). Informal CV-head comparison (task 6.5): under the old
+# smoke gate the CV head scored MOTA -0.98 at 20 mrad noise; with this
+# scenario's settings and `scenario_type = "force-cv-head"` it scores
+# 0.0000 (zero confirmed tracks) — which fails this floor and would have
+# passed the old -2.0 smoke value (task 6.6 deliberate-regression check).
+mota = 0.74

@@ -1,5 +1,12 @@
-//! Trajectory generation: CV, CA, CTRV, ballistic, and kinematic-bicycle
-//! segments with stitching.
+//! Trajectory generation: CV, CA, CTRV, and kinematic-bicycle segments with
+//! stitching.
+//!
+//! Segments step an anchorless flat local frame (no Earth centre, no epoch).
+//! Ballistic trajectories are deliberately **not** representable here — the
+//! former flat-Earth `Ballistic` segment variant was removed by design
+//! Decision 5 of `orbital-ballistic-filter-models`; use
+//! [`crate::ballistic::BallisticProfile`] for phased boost/midcourse/reentry
+//! truth over a round rotating Earth.
 
 use nalgebra::Vector3;
 use serde::{Deserialize, Serialize};
@@ -58,8 +65,6 @@ pub enum SegmentType {
     Ca { acceleration: [f64; 3] },
     /// Constant turn rate and velocity (2D).
     Ctrv { turn_rate: f64 },
-    /// Ballistic (gravity + optional drag).
-    Ballistic { drag_coefficient: f64 },
     /// 2-DOF kinematic bicycle model (automotive-tracking-pipeline, task 3.1).
     ///
     /// Ground-vehicle steering kinematics: the heading turns at
@@ -96,8 +101,6 @@ pub struct Trajectory {
     pub dt: f64,
 }
 
-const GRAVITY: f64 = 9.81;
-
 /// Advance a single kinematic step of one segment type, updating `pos` and
 /// `vel` in place.
 fn advance_segment_step(
@@ -110,9 +113,6 @@ fn advance_segment_step(
         SegmentType::Cv => step_cv(pos, vel, dt),
         SegmentType::Ca { acceleration } => step_ca(pos, vel, acceleration, dt),
         SegmentType::Ctrv { turn_rate } => step_ctrv(pos, vel, *turn_rate, dt),
-        SegmentType::Ballistic { drag_coefficient } => {
-            step_ballistic(pos, vel, *drag_coefficient, dt)
-        }
         SegmentType::KinematicBicycle {
             steering_angle,
             acceleration,
@@ -179,18 +179,6 @@ fn step_bicycle(
     pos.z += vel.z * dt;
     vel.x = new_speed * new_heading.cos();
     vel.y = new_speed * new_heading.sin();
-}
-
-fn step_ballistic(pos: &mut Vector3<f64>, vel: &mut Vector3<f64>, drag: f64, dt: f64) {
-    let speed = vel.norm();
-    let drag_force = if speed > 1e-10 {
-        *vel * (-drag * speed)
-    } else {
-        Vector3::zeros()
-    };
-    let acc = drag_force + Vector3::new(0.0, 0.0, -GRAVITY);
-    *pos += *vel * dt + acc * 0.5 * dt * dt;
-    *vel += acc * dt;
 }
 
 impl Trajectory {
@@ -279,15 +267,19 @@ mod tests {
         assert!((last.position[0] - 500.0).abs() < 5.0);
     }
 
+    // Migrated from the removed flat-Earth `Ballistic { drag_coefficient:
+    // 0.0 }` segment (task 4.5 of `orbital-ballistic-filter-models`):
+    // drag-free "falls under gravity" is exactly a CA segment with
+    // a = [0, 0, −9.81].
     #[test]
-    fn ballistic_falls() {
+    fn free_fall_under_constant_gravity() {
         let traj = Trajectory {
             target_id: 2,
             initial_position: [0.0, 0.0, 10000.0],
             initial_velocity: [500.0, 0.0, 0.0],
             segments: vec![Segment {
-                segment_type: SegmentType::Ballistic {
-                    drag_coefficient: 0.0,
+                segment_type: SegmentType::Ca {
+                    acceleration: [0.0, 0.0, -9.81],
                 },
                 duration: 10.0,
             }],

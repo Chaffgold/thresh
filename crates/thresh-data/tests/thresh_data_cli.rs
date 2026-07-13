@@ -449,3 +449,31 @@ fn run_orbital_starlink_train_cached_tle_end_to_end() {
     assert!(stdout.contains("scenario:    orbital-starlink-train"));
     assert!(stdout.contains("regression: OK"));
 }
+
+/// The committed ballistic scenario must run end-to-end in the DEFAULT
+/// build — ballistic truth generation is pure Rust, no feature flag —
+/// and pass its calibrated MOTA floor. This is the same check the CI
+/// benchmark gate performs (spec "Ballistic benchmark end-to-end run" /
+/// "Ballistic baseline enforced" of `orbital-ballistic-filter-models`,
+/// task 6.3).
+#[test]
+fn run_ballistic_mrbm_end_to_end() {
+    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scenarios")
+        .join("ballistic-mrbm.toml");
+    assert!(manifest.exists(), "fixture {} missing", manifest.display());
+    let out = Command::new(bin_path())
+        .arg("run")
+        .arg(&manifest)
+        .output()
+        .expect("spawn thresh-data");
+    assert!(
+        out.status.success(),
+        "ballistic-mrbm scenario exited non-zero. stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("scenario:    ballistic-mrbm"));
+    assert!(stdout.contains("regression: OK"));
+}

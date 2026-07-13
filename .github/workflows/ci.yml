@@ -77,12 +77,15 @@ jobs:
           OPENSPEC_TELEMETRY: '0'
 
   synth-benchmark-gate:
-    # Runs every synthetic benchmark scenario through `thresh-data run` and
-    # fails the build if any scenario's regression check (MOTA / HOTA / IDF1
-    # baselines) does not pass. This is the cheap in-repo equivalent of the
-    # full benchmarks workflow — no network, no long-running integration
-    # tests, just the baseline regression gate for the scenarios checked
-    # into `crates/thresh-data/scenarios/`.
+    # Runs every synthetic and ballistic benchmark scenario through
+    # `thresh-data run` and fails the build if any scenario's regression
+    # check (MOTA / HOTA / IDF1 baselines) does not pass. This is the cheap
+    # in-repo equivalent of the full benchmarks workflow — no network, no
+    # long-running integration tests, just the baseline regression gate for
+    # the scenarios checked into `crates/thresh-data/scenarios/`. Ballistic
+    # scenarios ride in this job because their phased truth generation is
+    # pure Rust and runs under default features, exactly like the synthetic
+    # ones (orbital-ballistic-filter-models, task 6.3).
     name: Synthetic benchmark gate
     runs-on: ubuntu-latest
     steps:
@@ -91,19 +94,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build thresh-data CLI
         run: cargo build -p thresh-data --bin thresh-data
-      - name: Run all synthetic scenarios
+      - name: Run all synthetic and ballistic scenarios
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
           any=0
-          for toml in crates/thresh-data/scenarios/synth-*.toml; do
+          for toml in crates/thresh-data/scenarios/synth-*.toml \
+                      crates/thresh-data/scenarios/ballistic-*.toml; do
             any=1
             echo "=== $toml ==="
             ./target/debug/thresh-data run "$toml"
           done
           if [ "$any" -eq 0 ]; then
-            echo "no synth-*.toml scenarios found under crates/thresh-data/scenarios/" >&2
+            echo "no synth-*.toml / ballistic-*.toml scenarios found under crates/thresh-data/scenarios/" >&2
             exit 1
           fi
 

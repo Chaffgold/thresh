@@ -4602,6 +4602,7 @@ dependencies = [
  "tempfile",
  "thresh-core",
  "thresh-eval",
+ "thresh-filter",
  "thresh-synth",
  "thresh-tracker",
  "toml",

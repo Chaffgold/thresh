@@ -1,5 +1,6 @@
 //! Synthetic sensor data generation: radar, EO/IR, ADS-B with configurable targets.
 
+pub mod ballistic;
 pub mod eoir_physics;
 pub mod ionosphere;
 pub mod jsbsim;

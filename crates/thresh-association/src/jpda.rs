@@ -238,7 +238,9 @@ pub fn jpda_state_update(
 /// * `states` — prior state estimates, one per track.
 /// * `covariances` — prior covariance matrices, one per track.
 /// * `detections` — measurement vectors.
-/// * `h` — observation matrix (shared across all tracks).
+/// * `observation_matrices` — observation matrix per track, sized to that
+///   track's state dimension (pad unobserved trailing components with zero
+///   columns when tracks of different dimensions coexist).
 /// * `gate` — Mahalanobis distance squared gating threshold.
 /// * `p_detection` — probability of detection.
 /// * `clutter_density` — false alarm spatial density.
@@ -248,11 +250,16 @@ pub fn jpda_associate_and_update(
     states: &[DVector<f64>],
     covariances: &[DMatrix<f64>],
     detections: &[DVector<f64>],
-    h: &DMatrix<f64>,
+    observation_matrices: &[DMatrix<f64>],
     gate: f64,
     p_detection: f64,
     clutter_density: f64,
 ) -> Vec<JpdaUpdateResult> {
+    debug_assert_eq!(
+        observation_matrices.len(),
+        tracks.len(),
+        "one observation matrix per track"
+    );
     let result = jpda_probabilities(tracks, detections, gate, p_detection, clutter_density);
 
     result
@@ -266,7 +273,7 @@ pub fn jpda_associate_and_update(
                 &tracks[i],
                 detections,
                 betas,
-                h,
+                &observation_matrices[i],
             )
         })
         .collect()
@@ -579,7 +586,7 @@ mod tests {
             &states,
             &covariances,
             &detections,
-            &h,
+            &[h.clone(), h.clone()],
             100.0,
             0.9,
             1e-6,
@@ -590,6 +597,60 @@ mod tests {
         assert!(results[0].state[0] > 0.0);
         // Track 1 should move toward det 1
         assert!(results[1].state[0] < 10.0);
+    }
+
+    /// Tracks of different state dimensions update side by side when each
+    /// carries its own (padded) observation matrix — a 5D track whose extra
+    /// component is unobserved must not panic next to a 4D one.
+    #[test]
+    fn test_jpda_mixed_state_dimensions() {
+        let h4 = DMatrix::from_row_slice(2, 4, &[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+        let mut h5 = DMatrix::zeros(2, 5);
+        h5.view_mut((0, 0), (2, 4)).copy_from(&h4);
+        let r = DMatrix::identity(2, 2);
+
+        let states = vec![
+            DVector::from_column_slice(&[0.0, 0.0, 0.0, 0.0]),
+            DVector::from_column_slice(&[10.0, 0.0, 0.0, 0.0, 2.0]),
+        ];
+        let covariances = vec![DMatrix::identity(4, 4) * 5.0, DMatrix::identity(5, 5) * 5.0];
+        let tracks: Vec<JpdaTrack> = states
+            .iter()
+            .zip([&h4, &h5])
+            .map(|(s, h)| JpdaTrack {
+                predicted_measurement: h * s,
+                innovation_covariance: {
+                    let p = DMatrix::identity(h.ncols(), h.ncols()) * 5.0;
+                    h * &p * h.transpose() + &r
+                },
+            })
+            .collect();
+
+        let detections = vec![
+            DVector::from_column_slice(&[0.5, 0.0]),
+            DVector::from_column_slice(&[9.5, 0.0]),
+        ];
+
+        let results = jpda_associate_and_update(
+            &tracks,
+            &states,
+            &covariances,
+            &detections,
+            &[h4, h5],
+            100.0,
+            0.9,
+            1e-6,
+        );
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].state.len(), 4);
+        assert_eq!(results[1].state.len(), 5);
+        assert!(results[0].state[0] > 0.0, "4D track moves toward det 0");
+        assert!(results[1].state[0] < 10.0, "5D track moves toward det 1");
+        assert!(
+            results[1].covariance[(4, 4)].is_finite(),
+            "unobserved component keeps a finite variance"
+        );
     }
 
     #[test]
