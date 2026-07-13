@@ -2,6 +2,7 @@
 
 use nalgebra::{DMatrix, DVector};
 
+use crate::UpdateOutcome;
 use crate::traits::MotionModel;
 
 /// UKF tuning parameters.
@@ -130,7 +131,20 @@ impl UnscentedKalmanFilter {
     /// Update step given measurement z, observation function h, and noise R.
     ///
     /// `h_fn` maps state sigma points to measurement space.
-    pub fn update<F>(&mut self, z: &DVector<f64>, h_fn: F, r: &DMatrix<f64>)
+    ///
+    /// Returns the [`UpdateOutcome`] diagnostics of this update: the
+    /// innovation `y = z − ẑ` and the sigma-point innovation covariance
+    /// `S = Σ wc·Δz·Δzᵀ + R` actually used to form the gain — the moment of
+    /// the projected sigma points, **not** an `H P Hᵀ + R` reconstruction
+    /// (no `H` exists for the sigma-point formulation, so callers cannot
+    /// reproduce this `S` after the update) — plus the NIS `yᵀ S⁻¹ y`
+    /// computed at the gain-solve LU factorization. Diagnostics exist
+    /// **only** as this return value — nothing is stored on the filter, so
+    /// there is no stale or pre-first-update query surface. For NEES, read
+    /// the predicted state and covariance from the `pub` `x` / `p` fields
+    /// after [`Self::predict`] and before this call (no accessors alias
+    /// those fields).
+    pub fn update<F>(&mut self, z: &DVector<f64>, h_fn: F, r: &DMatrix<f64>) -> UpdateOutcome
     where
         F: Fn(&DVector<f64>) -> DVector<f64>,
     {
@@ -162,27 +176,49 @@ impl UnscentedKalmanFilter {
         // Kalman gain. K = Pxz * S^-1; S is symmetric, so K^T =
         // solve(S, Pxz^T). An LU solve is better-conditioned than
         // forming S^-1 explicitly.
-        let k = s_mat
-            .clone()
-            .lu()
+        let s_lu = s_mat.clone().lu();
+        let k = s_lu
             .solve(&pxz.transpose())
             .expect("UKF innovation covariance S is singular")
             .transpose();
 
         // Update
         let innovation = z - &z_pred;
+
+        // NIS at the same LU factorization that produced the gain:
+        // yᵀ S⁻¹ y = yᵀ · solve(S, y).
+        let s_inv_y = s_lu
+            .solve(&innovation)
+            .expect("UKF innovation covariance S is singular");
+        let nis = innovation.dot(&s_inv_y);
+
         self.x = &self.x + &k * &innovation;
         self.p = &self.p - &k * &s_mat * k.transpose();
 
         // Enforce symmetry and PSD for numerical stability
         self.p = (&self.p + self.p.transpose()) * 0.5;
         self.ensure_psd();
+
+        UpdateOutcome {
+            innovation,
+            innovation_covariance: s_mat,
+            nis,
+        }
     }
 
     /// Linear update (convenience for sensors with linear H).
-    pub fn update_linear(&mut self, z: &DVector<f64>, h: &DMatrix<f64>, r: &DMatrix<f64>) {
+    ///
+    /// Returns the same [`UpdateOutcome`] diagnostics as [`Self::update`];
+    /// the innovation covariance is still the sigma-point moment (which on a
+    /// linear `H` agrees with `H P Hᵀ + R` up to sigma-point rounding).
+    pub fn update_linear(
+        &mut self,
+        z: &DVector<f64>,
+        h: &DMatrix<f64>,
+        r: &DMatrix<f64>,
+    ) -> UpdateOutcome {
         let h_clone = h.clone();
-        self.update(z, move |x| &h_clone * x, r);
+        self.update(z, move |x| &h_clone * x, r)
     }
 }
 
@@ -247,6 +283,113 @@ mod tests {
         // And is close to naive (within ~10% for these uncertainties)
         assert!((mean[0] - naive_x).abs() < 20.0);
         assert!((mean[1] - naive_y).abs() < 20.0);
+    }
+
+    // Task 1.4 (eval-consistency-metrics), spec "UKF sigma-point S is
+    // exposed, not reconstructed": the returned S is bitwise the sigma-point
+    // moment Σ wc·Δz·Δzᵀ + R computed inside update — reproduced here with
+    // the same expressions in the same order on an identically-constructed
+    // twin — and is symmetric positive-definite.
+    #[test]
+    fn ukf_outcome_s_is_bitwise_the_sigma_point_moment() {
+        let x0 = DVector::from_column_slice(&[10.0, 1.0, -5.0, 0.5]);
+        let a = DMatrix::from_row_slice(
+            4,
+            4,
+            &[
+                2.0, 0.3, 0.1, 0.0, 0.3, 1.5, 0.2, 0.1, 0.1, 0.2, 3.0, 0.4, 0.0, 0.1, 0.4, 1.0,
+            ],
+        );
+        let p0 = &a * a.transpose();
+        let params = UkfParams {
+            alpha: 0.5,
+            beta: 2.0,
+            kappa: 0.0,
+        };
+
+        // Nonlinear measurement: range and bearing of (x, y) = (s[0], s[2]).
+        let h_fn = |s: &DVector<f64>| {
+            DVector::from_column_slice(&[(s[0] * s[0] + s[2] * s[2]).sqrt(), s[2].atan2(s[0])])
+        };
+        let r = DMatrix::from_diagonal(&DVector::from_column_slice(&[0.5, 0.01]));
+        let z = DVector::from_column_slice(&[11.5, -0.45]);
+
+        // Reproduce the internal moment on a twin with identical (x, p).
+        let mut twin = UnscentedKalmanFilter::new(x0.clone(), p0.clone(), params);
+        let (sigmas, wm, wc) = twin.sigma_points();
+        let z_sigmas: Vec<DVector<f64>> = sigmas.iter().map(h_fn).collect();
+        let m = z_sigmas[0].len();
+        let mut z_pred = DVector::zeros(m);
+        for (i, zs) in z_sigmas.iter().enumerate() {
+            z_pred += wm[i] * zs;
+        }
+        let mut expected_s = DMatrix::zeros(m, m);
+        for (i, zs) in z_sigmas.iter().enumerate() {
+            let z_diff = zs - &z_pred;
+            expected_s += wc[i] * &z_diff * z_diff.transpose();
+        }
+        expected_s += r.clone();
+
+        let mut ukf = UnscentedKalmanFilter::new(x0, p0, params);
+        let outcome = ukf.update(&z, h_fn, &r);
+
+        // Bitwise identity: same computation, not a reconstruction.
+        assert_eq!(outcome.innovation_covariance, expected_s);
+        assert_eq!(outcome.innovation, &z - &z_pred);
+
+        // Symmetric positive-definite.
+        let s = &outcome.innovation_covariance;
+        assert!((s - s.transpose()).amax() < 1e-12, "S must be symmetric");
+        let min_eig = s
+            .clone()
+            .symmetric_eigen()
+            .eigenvalues
+            .iter()
+            .copied()
+            .fold(f64::INFINITY, f64::min);
+        assert!(min_eig > 0.0, "S must be PD, min eig = {min_eig}");
+
+        // NIS is yᵀ S⁻¹ y at that same S.
+        let s_inv = s.clone().try_inverse().expect("S invertible");
+        let expected_nis = (outcome.innovation.transpose() * &s_inv * &outcome.innovation)[(0, 0)];
+        assert!((outcome.nis - expected_nis).abs() < 1e-9);
+    }
+
+    // Task 1.4, spec "UKF sigma-point S is exposed, not reconstructed"
+    // (linear clause): on a linear measurement model the sigma-point S
+    // agrees with the linear KF's H·P·Hᵀ + R within sigma-point tolerance.
+    #[test]
+    fn ukf_linear_model_s_matches_kf_closed_form() {
+        let x0 = DVector::from_column_slice(&[0.0, 5.0, 0.0, -3.0, 0.0, 1.0]);
+        let p0 = DMatrix::identity(6, 6) * 50.0;
+        let mut ukf = UnscentedKalmanFilter::new(
+            x0.clone(),
+            p0.clone(),
+            UkfParams {
+                alpha: 1.0,
+                beta: 2.0,
+                kappa: 0.0,
+            },
+        );
+
+        let h = DMatrix::from_row_slice(
+            2,
+            6,
+            &[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+        );
+        let r = DMatrix::identity(2, 2) * 4.0;
+        let z = DVector::from_column_slice(&[2.0, -1.0]);
+
+        let outcome = ukf.update_linear(&z, &h, &r);
+
+        let expected_s = &h * &p0 * h.transpose() + &r;
+        let expected_y = &z - &h * &x0;
+        assert!(
+            (&outcome.innovation_covariance - &expected_s).amax() < 1e-9,
+            "sigma-point S diverges from H·P·Hᵀ + R by {}",
+            (&outcome.innovation_covariance - &expected_s).amax()
+        );
+        assert!((&outcome.innovation - expected_y).amax() < 1e-9);
     }
 
     #[test]

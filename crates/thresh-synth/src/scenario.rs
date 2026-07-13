@@ -29,12 +29,30 @@ pub struct TimedMeasurement {
     pub measurement: Measurement,
 }
 
-/// Generate all ground truth and measurements for a scenario.
+/// Generate all ground truth and measurements for a scenario, drawing
+/// measurement noise from a thread-local RNG.
+///
+/// Non-deterministic across runs; benchmark gates that need reproducible
+/// statistics use [`run_scenario_with_rng`] with a seeded RNG instead.
 pub fn run_scenario(
     scenario: &Scenario,
     radar_config: &RadarConfig,
 ) -> (Vec<GroundTruth>, Vec<TimedMeasurement>) {
-    let mut rng = rand::rng();
+    run_scenario_with_rng(scenario, radar_config, &mut rand::rng())
+}
+
+/// Generate all ground truth and measurements for a scenario, drawing
+/// measurement noise from the caller's RNG.
+///
+/// With a seeded RNG the output is deterministic: identical scenario,
+/// radar config, and seed produce identical measurements, which the
+/// benchmark regression gates rely on (spec "Deterministic gate outcome",
+/// `eval-consistency-metrics`).
+pub fn run_scenario_with_rng<R: rand::Rng>(
+    scenario: &Scenario,
+    radar_config: &RadarConfig,
+    rng: &mut R,
+) -> (Vec<GroundTruth>, Vec<TimedMeasurement>) {
     let mut all_gt = Vec::new();
     let mut all_meas = Vec::new();
 
@@ -49,7 +67,7 @@ pub fn run_scenario(
                 velocity: wp.velocity,
             });
 
-            if let Some(m) = generate_radar(wp, radar_config, &mut rng) {
+            if let Some(m) = generate_radar(wp, radar_config, rng) {
                 all_meas.push(TimedMeasurement {
                     time: wp.time,
                     measurement: m,

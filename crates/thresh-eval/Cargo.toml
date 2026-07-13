@@ -8,5 +8,13 @@ license.workspace = true
 [dependencies]
 thresh-core = { path = "../thresh-core" }
 thresh-association = { path = "../thresh-association" }
+nalgebra = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+rand = "0.9"
+# Monte-Carlo falsifiability bracket (eval-consistency-metrics task 2.4)
+# drives real KF/UKF/CKF UpdateOutcome streams; thresh-filter does not
+# depend on thresh-eval, so this dev-dependency creates no cycle.
+thresh-filter = { path = "../thresh-filter" }

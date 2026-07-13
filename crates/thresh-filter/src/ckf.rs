@@ -12,6 +12,7 @@
 
 use nalgebra::{DMatrix, DVector};
 
+use crate::UpdateOutcome;
 use crate::traits::MotionModel;
 
 /// Cubature Kalman Filter state.
@@ -100,7 +101,22 @@ impl CubatureKalmanFilter {
     /// measurement noise `r`.
     ///
     /// `h_fn` maps a state vector into measurement space.
-    pub fn update<F>(&mut self, z: &DVector<f64>, h_fn: F, r: &DMatrix<f64>)
+    ///
+    /// Returns the [`UpdateOutcome`] diagnostics of this update — same
+    /// mechanism, names, types, and pre-first-update semantics as
+    /// [`crate::ukf::UnscentedKalmanFilter::update`]: the innovation
+    /// `y = z − ẑ` and the cubature-point innovation covariance
+    /// `S = Σ w·Δz·Δzᵀ + R` actually used to form the gain — the moment of
+    /// the propagated cubature points, **not** an `H P Hᵀ + R`
+    /// reconstruction (callers cannot reproduce this `S` after the update)
+    /// — plus the NIS `yᵀ S⁻¹ y` computed at the gain-solve LU
+    /// factorization. Diagnostics exist **only** as this return value —
+    /// nothing is stored on the filter, so there is no stale or
+    /// pre-first-update query surface. For NEES, read the predicted state
+    /// and covariance from the `pub` `x` / `p` fields after
+    /// [`Self::predict`] and before this call (no accessors alias those
+    /// fields).
+    pub fn update<F>(&mut self, z: &DVector<f64>, h_fn: F, r: &DMatrix<f64>) -> UpdateOutcome
     where
         F: Fn(&DVector<f64>) -> DVector<f64>,
     {
@@ -129,25 +145,47 @@ impl CubatureKalmanFilter {
         // K = Pxz * S^-1. S is symmetric, so K^T = S^-1 * Pxz^T =
         // solve(S, Pxz^T); an LU solve is better-conditioned than
         // forming S^-1 explicitly.
-        let k = s_mat
-            .clone()
-            .lu()
+        let s_lu = s_mat.clone().lu();
+        let k = s_lu
             .solve(&pxz.transpose())
             .expect("CKF innovation covariance S is singular")
             .transpose();
 
         let innovation = z - &z_pred;
+
+        // NIS at the same LU factorization that produced the gain:
+        // yᵀ S⁻¹ y = yᵀ · solve(S, y).
+        let s_inv_y = s_lu
+            .solve(&innovation)
+            .expect("CKF innovation covariance S is singular");
+        let nis = innovation.dot(&s_inv_y);
+
         self.x = &self.x + &k * &innovation;
         self.p = &self.p - &k * &s_mat * k.transpose();
 
         self.p = crate::cov::symmetrize(&self.p);
         crate::cov::ensure_psd(&mut self.p);
+
+        UpdateOutcome {
+            innovation,
+            innovation_covariance: s_mat,
+            nis,
+        }
     }
 
     /// Linear update (convenience for sensors with a linear `H`).
-    pub fn update_linear(&mut self, z: &DVector<f64>, h: &DMatrix<f64>, r: &DMatrix<f64>) {
+    ///
+    /// Returns the same [`UpdateOutcome`] diagnostics as [`Self::update`];
+    /// the innovation covariance is still the cubature-point moment (which
+    /// on a linear `H` agrees with `H P Hᵀ + R` up to cubature rounding).
+    pub fn update_linear(
+        &mut self,
+        z: &DVector<f64>,
+        h: &DMatrix<f64>,
+        r: &DMatrix<f64>,
+    ) -> UpdateOutcome {
         let h_clone = h.clone();
-        self.update(z, move |x| &h_clone * x, r);
+        self.update(z, move |x| &h_clone * x, r)
     }
 }
 
@@ -420,5 +458,110 @@ mod tests {
             "posterior covariances diverge by {}",
             (&ckf.p - &ukf.p).amax()
         );
+    }
+
+    // Task 1.4 (eval-consistency-metrics), spec "Cubature-point S is exposed
+    // from the update": the returned S is bitwise the cubature-point moment
+    // Σ w·Δz·Δzᵀ + R computed inside update — reproduced here with the same
+    // expressions in the same order on an identically-constructed twin —
+    // and is symmetric positive-definite.
+    #[test]
+    fn ckf_outcome_s_is_bitwise_the_cubature_point_moment() {
+        let x0 = DVector::from_column_slice(&[10.0, 1.0, -5.0, 0.5]);
+        let a = DMatrix::from_row_slice(
+            4,
+            4,
+            &[
+                2.0, 0.3, 0.1, 0.0, 0.3, 1.5, 0.2, 0.1, 0.1, 0.2, 3.0, 0.4, 0.0, 0.1, 0.4, 1.0,
+            ],
+        );
+        let p0 = &a * a.transpose();
+
+        // Nonlinear measurement: range and bearing of (x, y) = (s[0], s[2]).
+        let h_fn = |s: &DVector<f64>| {
+            DVector::from_column_slice(&[(s[0] * s[0] + s[2] * s[2]).sqrt(), s[2].atan2(s[0])])
+        };
+        let r = DMatrix::from_diagonal(&DVector::from_column_slice(&[0.5, 0.01]));
+        let z = DVector::from_column_slice(&[11.5, -0.45]);
+
+        // Reproduce the internal moment on a twin with identical (x, p).
+        let mut twin = CubatureKalmanFilter::new(x0.clone(), p0.clone());
+        let points = twin.cubature_points();
+        let w = 1.0 / (points.len() as f64);
+        let z_points: Vec<DVector<f64>> = points.iter().map(h_fn).collect();
+        let m = z_points[0].len();
+        let mut z_pred = DVector::zeros(m);
+        for zp in &z_points {
+            z_pred += w * zp;
+        }
+        let mut expected_s = DMatrix::zeros(m, m);
+        for zp in &z_points {
+            let z_diff = zp - &z_pred;
+            expected_s += w * &z_diff * z_diff.transpose();
+        }
+        expected_s += r.clone();
+
+        let mut ckf = CubatureKalmanFilter::new(x0, p0);
+        let outcome = ckf.update(&z, h_fn, &r);
+
+        // Bitwise identity: same computation, not a reconstruction.
+        assert_eq!(outcome.innovation_covariance, expected_s);
+        assert_eq!(outcome.innovation, &z - &z_pred);
+
+        // Symmetric positive-definite.
+        let s = &outcome.innovation_covariance;
+        assert!((s - s.transpose()).amax() < 1e-12, "S must be symmetric");
+        assert!(
+            smallest_eigenvalue(s) > 0.0,
+            "S must be PD, min eig = {}",
+            smallest_eigenvalue(s)
+        );
+
+        // NIS is yᵀ S⁻¹ y at that same S.
+        let s_inv = s.clone().try_inverse().expect("S invertible");
+        let expected_nis = (outcome.innovation.transpose() * &s_inv * &outcome.innovation)[(0, 0)];
+        assert!((outcome.nis - expected_nis).abs() < 1e-9);
+    }
+
+    // Task 1.4, spec "Diagnostics parity with UKF on a linear-Gaussian
+    // problem": identically initialised CKF and UKF driven by the same
+    // linear measurement sequence expose innovations within 1e-6 and S
+    // within 1e-4 per element, mirroring the posterior-parity tolerances of
+    // `ckf_and_ukf_agree_on_linear_problem`.
+    #[test]
+    fn ckf_and_ukf_update_outcomes_agree_on_linear_problem() {
+        let x0 = DVector::from_column_slice(&[0.0, 5.0, 0.0, -3.0, 0.0, 1.0]);
+        let p0 = DMatrix::identity(6, 6) * 50.0;
+        let mut ckf = CubatureKalmanFilter::new(x0.clone(), p0.clone());
+        let mut ukf = UnscentedKalmanFilter::new(x0, p0, UkfParams::default());
+
+        let model = ConstantVelocity::new(1.0);
+        let h = pos_obs_h();
+        let r = DMatrix::identity(3, 3) * 9.0;
+        let mut rng = Lcg::new(2024);
+
+        for step in 0..15 {
+            let t = (step + 1) as f64;
+            let z = DVector::from_column_slice(&[
+                5.0 * t + rng.next_gauss(),
+                -3.0 * t + rng.next_gauss(),
+                1.0 * t + rng.next_gauss(),
+            ]);
+            ckf.predict(&model, 1.0);
+            ukf.predict(&model, 1.0);
+            let co = ckf.update_linear(&z, &h, &r);
+            let uo = ukf.update_linear(&z, &h, &r);
+
+            assert!(
+                (&co.innovation - &uo.innovation).amax() < 1e-6,
+                "innovations diverge at step {step} by {}",
+                (&co.innovation - &uo.innovation).amax()
+            );
+            assert!(
+                (&co.innovation_covariance - &uo.innovation_covariance).amax() < 1e-4,
+                "innovation covariances diverge at step {step} by {}",
+                (&co.innovation_covariance - &uo.innovation_covariance).amax()
+            );
+        }
     }
 }

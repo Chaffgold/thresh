@@ -28,7 +28,7 @@ The benchmark result produced by the shared runner path SHALL optionally carry t
 The existing regression-check mechanism (`check_regression` precedent) SHALL enforce declared consistency bounds two-sidedly: a scenario fails when its ANEES or average NIS falls outside the declared interval, in either direction, and each violation SHALL produce a human-readable failure message naming the statistic, its value, and the violated bound. Scenarios that declare no consistency bounds SHALL be checked exactly as today.
 
 #### Scenario: Dishonest covariance fails the gate
-- **WHEN** a scenario TOML declares an ANEES interval calibrated for an honest filter, and the benchmark is run with the filter's process noise scaled down so its covariance is overconfident
+- **WHEN** a scenario TOML declares an ANEES interval calibrated for an honest filter, and the benchmark is run with the filter's claimed covariance made overconfident (e.g. its measurement-noise covariance understated relative to the noise the scenario actually generates; on truth with zero process noise, understating R is the operative covariance lie, since scaling an already-negligible Q is inert)
 - **THEN** the regression check SHALL return a failure identifying ANEES as above the declared upper bound, even if MOTA/HOTA/IDF1 still meet their baselines
 
 #### Scenario: Honest covariance passes the gate
@@ -36,7 +36,7 @@ The existing regression-check mechanism (`check_regression` precedent) SHALL enf
 - **THEN** the regression check SHALL return no consistency failures, and the MOT baseline checks SHALL behave exactly as before
 
 #### Scenario: Underconfident covariance also fails
-- **WHEN** the benchmark is run with process noise scaled up so ANEES falls below the declared lower bound
+- **WHEN** the benchmark is run with the filter's claimed covariance inflated (e.g. its measurement-noise covariance overstated) so ANEES falls below the declared lower bound
 - **THEN** the regression check SHALL return a failure identifying ANEES as below the lower bound (bounds are two-sided, not a one-sided ceiling)
 
 #### Scenario: Deterministic gate outcome

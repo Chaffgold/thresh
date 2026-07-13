@@ -123,6 +123,8 @@ pub fn build_classed_report(frames: &[ClassedFrameData], distance_threshold: f64
         total_gt: untagged.iter().map(|f| f.gt.len()).sum(),
         total_tracks: untagged.iter().map(|f| f.tracks.len()).sum(),
         per_class,
+        gospa: None,
+        consistency: None,
     }
 }
 

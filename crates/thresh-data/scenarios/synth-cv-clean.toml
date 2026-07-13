@@ -8,6 +8,27 @@ duration_s = 30.0
 dt = 1.0
 measurement_noise_sigma = 50.0
 gate_threshold = 500.0
+# Isotropic Cartesian measurement noise exactly matching the tracker's R —
+# the textbook consistency configuration the ANEES/ANIS gate below requires.
+# Under the default RAE radar model the cross-range error grows with range
+# (57-185 m across this scenario's 11-37 km targets vs the tracker's
+# isotropic 50 m R), which is genuinely overconfident: observed ANEES was
+# ~13.1 against a theoretical 95% interval of [2.60, 3.42].
+measurement_model = "cartesian"
 
 [baselines]
 mota = 0.5
+# ANEES/ANIS two-sided consistency bounds (eval-consistency-metrics task
+# 6.6). Anchored on the theoretical 95% chi-squared intervals printed by
+# the runner for this seeded run's sample counts, widened ±0.15:
+#   ANEES observed 3.2636 over 145 samples, theoretical [2.6145, 3.4116]
+#   ANIS  observed 3.2760 over 140 samples, theoretical [2.6079, 3.4191]
+# Deliberate covariance lies land far outside and MUST keep failing:
+#   tracker_noise_sigma = 5.0  -> ANEES 254.07 / ANIS 123.93 (overconfident)
+#   tracker_noise_sigma = 150. -> ANEES  1.09  / ANIS   1.50 (underconfident)
+# while MOTA still passes its floor in both cases (0.76 / 0.65) — the lie
+# is invisible to MOT metrics, which is the point of these gates.
+anees_min = 2.46
+anees_max = 3.56
+anis_min = 2.46
+anis_max = 3.57
