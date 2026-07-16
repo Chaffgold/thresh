@@ -1,0 +1,164 @@
+{
+  "case": "sun-moon-ephemeris",
+  "description": "Sun and Moon geocentric GCRF positions from an independent authority (astropy builtin ephemeris: ERFA epv00 / moon98) at six epochs, with the measured angular error of the analytic series the Rust ephemerides implement (Sun: Meeus Ch. 25 low-accuracy series mirrored from crates/thresh-core/src/orbital/ephemeris.rs; Moon: Vallado Alg 31). Spec scenario: 'Sun and Moon positions match the independent authority'.",
+  "frame": "GCRF (astropy GCRS; frame bias vs IAU-76 J2000 ~0.023 arcsec, far below every tolerance here)",
+  "authority": "astropy get_body(..., ephemeris='builtin') \u2014 positions in metres",
+  "epochs": [
+    {
+      "epoch_utc": "2025-09-01T00:00:00.000Z",
+      "sun_gcrf_m": [
+        -140447594104.3425,
+        50837345905.00186,
+        22037434329.344704
+      ],
+      "moon_gcrf_m": [
+        -92805331.72394863,
+        -341746657.24432814,
+        -188330479.5873031
+      ],
+      "measured_rust_series_error": {
+        "sun_arcsec": 9.09,
+        "moon_arcsec": 100.089,
+        "sun_distance_rel": 2.563e-05,
+        "moon_distance_rel": 0.0009407,
+        "note": "this generator's mirror of the series the Rust ephemerides implement: Meeus Ch. 25 Sun (mirrored from ephemeris.rs, TT centuries, obl80 obliquity) and Vallado Alg 31 Moon (coefficient-identical to the Rust transcription) \u2014 the tolerance basis"
+      },
+      "informational_vallado_alg29_sun_error": {
+        "sun_arcsec": 19.339,
+        "note": "reference-only: the sibling Vallado Alg 29 Sun series, NOT the series the Rust stack implements; enters no tolerance"
+      }
+    },
+    {
+      "epoch_utc": "2026-02-01T06:30:00.000Z",
+      "sun_gcrf_m": [
+        98695415813.06052,
+        -100453223817.45338,
+        -43544993151.17091
+      ],
+      "moon_gcrf_m": [
+        -203117792.0438492,
+        274635835.70264584,
+        140260206.72646353
+      ],
+      "measured_rust_series_error": {
+        "sun_arcsec": 36.497,
+        "moon_arcsec": 474.967,
+        "sun_distance_rel": 3.581e-06,
+        "moon_distance_rel": 0.001155,
+        "note": "this generator's mirror of the series the Rust ephemerides implement: Meeus Ch. 25 Sun (mirrored from ephemeris.rs, TT centuries, obl80 obliquity) and Vallado Alg 31 Moon (coefficient-identical to the Rust transcription) \u2014 the tolerance basis"
+      },
+      "informational_vallado_alg29_sun_error": {
+        "sun_arcsec": 12.802,
+        "note": "reference-only: the sibling Vallado Alg 29 Sun series, NOT the series the Rust stack implements; enters no tolerance"
+      }
+    },
+    {
+      "epoch_utc": "2026-03-20T12:00:00.000Z",
+      "sun_gcrf_m": [
+        148977096983.89932,
+        -1150895131.6124706,
+        -499508937.1848066
+      ],
+      "moon_gcrf_m": [
+        349354332.86569226,
+        98591582.06228217,
+        66373254.7382392
+      ],
+      "measured_rust_series_error": {
+        "sun_arcsec": 43.61,
+        "moon_arcsec": 306.703,
+        "sun_distance_rel": 4.327e-05,
+        "moon_distance_rel": 0.0009214,
+        "note": "this generator's mirror of the series the Rust ephemerides implement: Meeus Ch. 25 Sun (mirrored from ephemeris.rs, TT centuries, obl80 obliquity) and Vallado Alg 31 Moon (coefficient-identical to the Rust transcription) \u2014 the tolerance basis"
+      },
+      "informational_vallado_alg29_sun_error": {
+        "sun_arcsec": 24.146,
+        "note": "reference-only: the sibling Vallado Alg 29 Sun series, NOT the series the Rust stack implements; enters no tolerance"
+      }
+    },
+    {
+      "epoch_utc": "2026-05-10T00:00:00.000Z",
+      "sun_gcrf_m": [
+        99103201642.31229,
+        104573394406.9974,
+        45329929991.20729
+      ],
+      "moon_gcrf_m": [
+        302306558.3503787,
+        -226273316.54454517,
+        -107969779.10504349
+      ],
+      "measured_rust_series_error": {
+        "sun_arcsec": 53.487,
+        "moon_arcsec": 753.014,
+        "sun_distance_rel": 1.497e-05,
+        "moon_distance_rel": 0.0005109,
+        "note": "this generator's mirror of the series the Rust ephemerides implement: Meeus Ch. 25 Sun (mirrored from ephemeris.rs, TT centuries, obl80 obliquity) and Vallado Alg 31 Moon (coefficient-identical to the Rust transcription) \u2014 the tolerance basis"
+      },
+      "informational_vallado_alg29_sun_error": {
+        "sun_arcsec": 32.443,
+        "note": "reference-only: the sibling Vallado Alg 29 Sun series, NOT the series the Rust stack implements; enters no tolerance"
+      }
+    },
+    {
+      "epoch_utc": "2026-11-15T18:00:00.000Z",
+      "sun_gcrf_m": [
+        -89035691324.22002,
+        -108440052999.05138,
+        -47006122409.281586
+      ],
+      "moon_gcrf_m": [
+        224674253.49223262,
+        -302126399.6494586,
+        -144796527.76900008
+      ],
+      "measured_rust_series_error": {
+        "sun_arcsec": 16.663,
+        "moon_arcsec": 296.673,
+        "sun_distance_rel": 3.379e-05,
+        "moon_distance_rel": 0.0007389,
+        "note": "this generator's mirror of the series the Rust ephemerides implement: Meeus Ch. 25 Sun (mirrored from ephemeris.rs, TT centuries, obl80 obliquity) and Vallado Alg 31 Moon (coefficient-identical to the Rust transcription) \u2014 the tolerance basis"
+      },
+      "informational_vallado_alg29_sun_error": {
+        "sun_arcsec": 11.427,
+        "note": "reference-only: the sibling Vallado Alg 29 Sun series, NOT the series the Rust stack implements; enters no tolerance"
+      }
+    },
+    {
+      "epoch_utc": "2027-06-30T12:00:00.000Z",
+      "sun_gcrf_m": [
+        -21455606798.72278,
+        138147915966.3352,
+        59884633091.19662
+      ],
+      "moon_gcrf_m": [
+        246810479.62879565,
+        242306701.79621905,
+        141729873.92877805
+      ],
+      "measured_rust_series_error": {
+        "sun_arcsec": 35.288,
+        "moon_arcsec": 442.314,
+        "sun_distance_rel": 2.342e-05,
+        "moon_distance_rel": 0.001538,
+        "note": "this generator's mirror of the series the Rust ephemerides implement: Meeus Ch. 25 Sun (mirrored from ephemeris.rs, TT centuries, obl80 obliquity) and Vallado Alg 31 Moon (coefficient-identical to the Rust transcription) \u2014 the tolerance basis"
+      },
+      "informational_vallado_alg29_sun_error": {
+        "sun_arcsec": 10.903,
+        "note": "reference-only: the sibling Vallado Alg 29 Sun series, NOT the series the Rust stack implements; enters no tolerance"
+      }
+    }
+  ],
+  "tolerances": {
+    "sun_angular_arcsec": 170.0,
+    "moon_angular_arcsec": 2300.0,
+    "sun_distance_rel": 0.00013,
+    "moon_distance_rel": 0.0047,
+    "basis": "3x the worst measured error of this generator's mirror of the series the Rust ephemerides implement, against the astropy authority over the six fixture epochs. Sun: Meeus Ch. 25 low-accuracy series mirrored coefficient-for-coefficient from crates/thresh-core/src/orbital/ephemeris.rs, evaluated on TT Julian centuries with the IAU-1980 (obl80) mean obliquity and the IAU-76 precession transpose \u2014 the exact Rust chain, so the measured Sun error is the Rust stack's own error at these epochs (residual mirror differences are numerical noise). Moon: Vallado Alg 31 per the fetched moon.m, coefficient-identical to the Rust transcription but evaluated on the UTC Julian date with moon.m's truncated obliquity as fetched; the Rust evaluates TT and obl80 \u2014 TT-UTC = 69.184 s is ~38 arcsec of lunar motion, well inside one series error and covered by the 3x margin. The 3x margin otherwise buys headroom against future-epoch drift and authority-convention differences (geometric series vs the authority's light-time-corrected positions)."
+  },
+  "sources": {
+    "sun_series": "Meeus, 'Astronomical Algorithms', 2nd ed., Ch. 25 'Solar Coordinates', low-accuracy method (Eqs. 25.2-25.5, ~0.01 deg class) \u2014 the Sun series the Rust ephemerides implement. This generator mirrors the crates/thresh-core/src/orbital/ephemeris.rs Meeus Ch. 25 transcription coefficient for coefficient (the Rust file transcribed them from the book-faithful soniakeys/meeus v3 Go implementation, solar/solar.go, and pins Meeus Example 25.a as a spot test \u2014 re-asserted here at generation time).",
+    "moon_series": "CelesTrak/fundamentals-of-astrodynamics, software/matlab/moon.m (Vallado 2022, p. 294, Algorithm 31 \u2014 truncated ELP-lineage Moon), commit 102fe0182ea0c20d02fdf18b285faa6869067feb, https://github.com/CelesTrak/fundamentals-of-astrodynamics/blob/main/software/matlab/moon.m",
+    "sun_series_informational_reference": "CelesTrak/fundamentals-of-astrodynamics, software/matlab/sun.m (Vallado 2022, p. 285, Algorithm 29 \u2014 low-precision Sun, ~0.01 deg), commit 4555fdc4f611817cf55a8b3158860bdab0b552ee, https://github.com/CelesTrak/fundamentals-of-astrodynamics/blob/main/software/matlab/sun.m \u2014 reference-only: this is NOT the Sun series the Rust ephemerides implement (that is meeus-sun); its deltas are recorded as informational and enter no tolerance."
+  }
+}

@@ -7,7 +7,7 @@ thresh's orbital truth generation and coast prediction top out at two-body + J2 
 ## What Changes
 
 - **thresh-core/orbital**: higher-fidelity force models extending the existing shared force math — zonal J3/J4, a truncated EGM96 spherical-harmonic gravity subset (selectable low degree/order, coefficients embedded as const data), Harris-Priester atmospheric density (table-driven, solar-flux-free, deterministic; NRLMSISE-00 stays deferred), cannonball solar-radiation pressure with cylindrical Earth-shadow eclipse, and lunisolar third-body point-mass acceleration from analytic low-precision Sun/Moon ephemerides (Meeus/Vallado series — no ephemeris files; ANISE remains a possible later feature-gated provider).
-- **thresh-core/orbital**: an adaptive-step integrator — Dormand–Prince RK5(4) embedded pair with PI step-size control and dense output for grid sampling — alongside the retained fixed-step RK4 (Gauss–Jackson and symplectic integrators explicitly demoted per the advanced-methods integration analysis).
+- **thresh-core/orbital**: an adaptive-step integrator — Dormand–Prince RK5(4) embedded pair with PI step-size control and grid-exact sampling by step clamping — alongside the retained fixed-step RK4 (Gauss–Jackson and symplectic integrators explicitly demoted per the advanced-methods integration analysis).
 - **Frame/time discipline throughout**: GCRF is the integration frame, epochs are `thresh_core::time::Epoch`, and Sun/Moon positions plus sidereal-dependent forces (harmonic gravity, drag co-rotation) evaluate through the `FrameProvider` seam landed by `astro-time-and-frames`.
 - **`hifi-orbital` superseded (REMOVED)**: the nyx-space mandate, Orekit fallback, and maneuver modeling are retired (maneuvers deferred until a mission-planning consumer exists); its still-valid intents — configurable force models, higher-accuracy-than-SGP4, compatibility with filter covariance propagation — carry forward as requirements of the new capabilities.
 - **thresh-synth**: one high-fidelity truth-generation option wiring the new force stack into the existing closure-based propagate seam; the two-body+J2 default and every calibrated benchmark stay untouched (**zero baseline movement** — filter-side consumption of the new forces is a later change).
@@ -18,7 +18,7 @@ thresh's orbital truth generation and coast prediction top out at two-body + J2 
 ### New Capabilities
 
 - `orbital-force-models`: the configurable high-fidelity force stack — zonal J3/J4, truncated EGM96 harmonics, Harris-Priester density, cannonball SRP with eclipse, lunisolar third-body, analytic Sun/Moon ephemerides — each force individually toggleable, deterministic, and validated against independent references, composing with the existing closure-based acceleration seam the filters and synth propagators already consume.
-- `adaptive-orbit-propagation`: Dormand–Prince RK5(4) adaptive integration with PI step control, configurable tolerances, dense output onto caller grids, and GCRF/Epoch-disciplined propagation entry points; accuracy and step-behavior validated against golden trajectories and the retained RK4.
+- `adaptive-orbit-propagation`: Dormand–Prince RK5(4) adaptive integration with PI step control, configurable tolerances, grid-exact sampling onto caller grids (step clamping, interpolant-free), and GCRF/Epoch-disciplined propagation entry points; accuracy and step-behavior validated against golden trajectories and the retained RK4.
 
 ### Modified Capabilities
 

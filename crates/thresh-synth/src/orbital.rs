@@ -4,6 +4,9 @@
 use nalgebra::Vector3;
 use serde::{Deserialize, Serialize};
 use thresh_core::eci::{SECONDS_PER_DAY, eci_to_enu};
+use thresh_core::frames::Iau76Fk5Provider;
+use thresh_core::orbital::dormand_prince::{DpConfig, propagate_on_grid};
+use thresh_core::orbital::force_config::ForceModelConfig;
 use thresh_core::orbital::{
     ElementError, Frame, GravityModel, OrbitalElements, cartesian_to_keplerian, j2_acceleration,
     keplerian_to_cartesian, rk4_step, two_body_acceleration,
@@ -344,6 +347,124 @@ pub fn propagate(
     }
 
     results
+}
+
+// ---------------------------------------------------------------------------
+// High-fidelity truth propagation (orbit-propagation-fidelity, task 4.1)
+// ---------------------------------------------------------------------------
+
+/// Configuration for [`propagate_high_fidelity`]: a perturbation-force
+/// stack ([`ForceModelConfig`]) plus the adaptive Dormand–Prince
+/// integrator settings ([`DpConfig`]).
+///
+/// **API-only by design** (`orbit-propagation-fidelity` design.md, resolved
+/// open question): there is deliberately no scenario-TOML knob for this
+/// option until a benchmark scenario actually wants one, so every
+/// calibrated scenario keeps consuming the default RK4/J2 truth path
+/// ([`propagate`]) bit-for-bit unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct HighFidelityConfig {
+    /// Perturbation-force stack. The default is the J2 baseline (every
+    /// optional force disabled).
+    pub forces: ForceModelConfig,
+    /// Adaptive-step integrator settings (tolerances, step clamps).
+    pub integrator: DpConfig,
+}
+
+/// Propagate an orbital state with the configurable high-fidelity force
+/// stack under the adaptive Dormand–Prince integrator — the **additive**
+/// high-fidelity truth option beside the fixed-step RK4 [`propagate`],
+/// which is untouched (design Decision 1 of `orbit-propagation-fidelity`).
+///
+/// Mirrors [`propagate`]'s output shape: the first element is the initial
+/// state, followed by grid-exact samples every `output_dt_s` seconds and a
+/// final sample at exactly `duration_s` (each produced by an integration
+/// step landing on the requested time — see
+/// [`propagate_on_grid`]). Output epochs advance as
+/// `epoch_jd + t / 86 400` — the same Julian-date arithmetic as
+/// [`propagate`].
+///
+/// # Frame and time conventions (they differ from [`propagate`]!)
+///
+/// * The state is interpreted as **GCRF** — the high-fidelity stack's
+///   contract — not the TEME-consistent "ECI" of the default RK4 path.
+///   Convert explicitly (e.g. via
+///   [`thresh_core::orbital::OrbitalState::to_frame`]) before calling.
+/// * `epoch_jd` is read as a UTC Julian date ([`Epoch::from_jde_utc`]);
+///   Earth-fixed force legs (EGM96 harmonics, Harris-Priester co-rotation)
+///   rotate through the **zero-EOP** [`Iau76Fk5Provider`] at `epoch + t`.
+///   Callers needing explicit EOP should drive
+///   [`ForceModelConfig::build`] / [`propagate_on_grid`] directly.
+///
+/// # Panics
+///
+/// Panics when `duration_s` is negative or non-finite, `output_dt_s` is
+/// non-positive or non-finite, or the integrator configuration is invalid
+/// (see [`propagate_on_grid`]).
+pub fn propagate_high_fidelity(
+    initial: &OrbitalState,
+    duration_s: f64,
+    config: &HighFidelityConfig,
+    output_dt_s: f64,
+) -> Vec<OrbitalState> {
+    assert!(
+        duration_s >= 0.0 && duration_s.is_finite(),
+        "duration_s must be finite and >= 0, got {duration_s}"
+    );
+    assert!(
+        output_dt_s > 0.0 && output_dt_s.is_finite(),
+        "output_dt_s must be finite and > 0, got {output_dt_s}"
+    );
+
+    let mut results = vec![initial.clone()];
+    if duration_s == 0.0 {
+        return results;
+    }
+
+    let epoch = Epoch::from_jde_utc(initial.epoch_jd);
+    let provider = Iau76Fk5Provider::default();
+    let accel = config.forces.build(epoch, &provider);
+    let solution = propagate_on_grid(
+        &Vector3::from(initial.position),
+        &Vector3::from(initial.velocity),
+        &output_grid(duration_s, output_dt_s),
+        &config.integrator,
+        accel,
+    );
+    results.extend(solution.samples.iter().map(|sample| OrbitalState {
+        position: [sample.position.x, sample.position.y, sample.position.z],
+        velocity: [sample.velocity.x, sample.velocity.y, sample.velocity.z],
+        epoch_jd: initial.epoch_jd + sample.offset_s / SECONDS_PER_DAY,
+    }));
+    results
+}
+
+/// Strictly increasing output offsets for [`propagate_high_fidelity`]:
+/// every whole multiple of `output_dt_s` below `duration_s`, then
+/// `duration_s` itself (so the final sample lands exactly on the arc end,
+/// like [`propagate`]'s final-step sample).
+///
+/// Precondition: `duration_s > 0` and `output_dt_s > 0`, both finite
+/// (validated by the caller).
+fn output_grid(duration_s: f64, output_dt_s: f64) -> Vec<f64> {
+    let mut offsets = Vec::new();
+    let mut k = 1u64;
+    // Treat grid points within one part in 1e12 of the arc end as the end
+    // itself: when the duration is a float multiple of the cadence (e.g.
+    // dt = 1/3, duration = 1), `k * dt` can land infinitesimally below
+    // `duration_s`, which would emit a near-duplicate final sample and
+    // force the integrator through a sub-nanosecond closing step.
+    let end_cutoff = duration_s * (1.0 - 1e-12);
+    loop {
+        let t = k as f64 * output_dt_s;
+        if t >= end_cutoff {
+            break;
+        }
+        offsets.push(t);
+        k += 1;
+    }
+    offsets.push(duration_s);
+    offsets
 }
 
 // ---------------------------------------------------------------------------
@@ -702,6 +823,129 @@ mod tests {
                 "drag component {i} differs"
             );
         }
+    }
+
+    // ── High-fidelity truth option (orbit-propagation-fidelity, 4.1) ────
+
+    /// A LEO state for the high-fidelity tests (all components nonzero).
+    fn hifi_initial() -> OrbitalState {
+        OrbitalState::from_cartesian(
+            [3_949_660.9, 5_192_041.8, 1_814_987.9],
+            [-4_891.2, 1_744.7, 5_653.0],
+            2_461_072.770_833_333, // 2026-02-01T06:30 UTC
+        )
+    }
+
+    /// The high-fidelity option is a thin composition of
+    /// `ForceModelConfig::build` and `propagate_on_grid`: same grid, same
+    /// closure ⇒ **bitwise** identical samples, epochs advanced by
+    /// `t / 86 400` exactly like `propagate`. Running it twice is also
+    /// bitwise identical (deterministic adaptive stepping).
+    #[test]
+    fn high_fidelity_delegates_to_core_bitwise() {
+        let initial = hifi_initial();
+        let config = HighFidelityConfig::default();
+        let (duration, output_dt) = (300.0, 60.0);
+
+        let results = propagate_high_fidelity(&initial, duration, &config, output_dt);
+        let again = propagate_high_fidelity(&initial, duration, &config, output_dt);
+
+        let provider = Iau76Fk5Provider::default();
+        let accel = config
+            .forces
+            .build(Epoch::from_jde_utc(initial.epoch_jd), &provider);
+        let expected = propagate_on_grid(
+            &Vector3::from(initial.position),
+            &Vector3::from(initial.velocity),
+            &[60.0, 120.0, 180.0, 240.0, 300.0],
+            &config.integrator,
+            accel,
+        );
+
+        assert_eq!(results.len(), 6, "initial + 5 grid samples");
+        assert_eq!(results[0].position, initial.position);
+        assert_eq!(results[0].velocity, initial.velocity);
+        for (out, (sample, rerun)) in results[1..]
+            .iter()
+            .zip(expected.samples.iter().zip(&again[1..]))
+        {
+            let expected_jd = initial.epoch_jd + sample.offset_s / SECONDS_PER_DAY;
+            assert_eq!(out.epoch_jd.to_bits(), expected_jd.to_bits());
+            for i in 0..3 {
+                assert_eq!(out.position[i].to_bits(), sample.position[i].to_bits());
+                assert_eq!(out.velocity[i].to_bits(), sample.velocity[i].to_bits());
+                assert_eq!(out.position[i].to_bits(), rerun.position[i].to_bits());
+            }
+        }
+    }
+
+    /// A duration that is not a whole multiple of the output cadence gets
+    /// a final sample at exactly `duration_s` (grid-exact, like
+    /// `propagate`'s final step).
+    #[test]
+    fn high_fidelity_samples_the_arc_end_exactly() {
+        let initial = hifi_initial();
+        let results =
+            propagate_high_fidelity(&initial, 250.0, &HighFidelityConfig::default(), 60.0);
+        // initial + 60/120/180/240 + 250.
+        assert_eq!(results.len(), 6);
+        let last_jd = initial.epoch_jd + 250.0 / SECONDS_PER_DAY;
+        assert_eq!(
+            results.last().unwrap().epoch_jd.to_bits(),
+            last_jd.to_bits()
+        );
+    }
+
+    /// Enabling the full perturbation stack visibly moves the truth arc
+    /// away from the J2 baseline — the fidelity the option exists to add
+    /// (the quantitative validation lives in
+    /// `thresh-core/tests/golden_propagation.rs`).
+    #[test]
+    fn high_fidelity_full_stack_diverges_from_j2_baseline() {
+        use thresh_core::orbital::force_config::{
+            DragConfig as CoreDragConfig, GravityFidelity, SrpConfig, ThirdBodyConfig,
+        };
+
+        let initial = hifi_initial();
+        let baseline =
+            propagate_high_fidelity(&initial, 600.0, &HighFidelityConfig::default(), 600.0);
+        let full = HighFidelityConfig {
+            forces: ForceModelConfig {
+                gravity: GravityFidelity::Harmonics {
+                    degree: 12,
+                    order: 12,
+                },
+                drag: Some(CoreDragConfig::HarrisPriester { inv_beta: 0.011 }),
+                srp: Some(SrpConfig {
+                    cr_area_over_mass: 0.0065,
+                }),
+                third_body: ThirdBodyConfig {
+                    sun: true,
+                    moon: true,
+                },
+            },
+            integrator: DpConfig::default(),
+        };
+        let perturbed = propagate_high_fidelity(&initial, 600.0, &full, 600.0);
+
+        let delta = (Vector3::from(baseline.last().unwrap().position)
+            - Vector3::from(perturbed.last().unwrap().position))
+        .norm();
+        assert!(
+            delta > 0.1,
+            "full stack must move a 600 s LEO arc measurably: {delta:.3e} m"
+        );
+        assert!(
+            delta < 1_000.0,
+            "perturbations stay perturbative: {delta} m"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "output_dt_s")]
+    fn high_fidelity_rejects_nonpositive_output_dt() {
+        let _ =
+            propagate_high_fidelity(&hifi_initial(), 600.0, &HighFidelityConfig::default(), 0.0);
     }
 
     // ── From/TryFrom conversions with the core representation (task 2.6) ──

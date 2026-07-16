@@ -1,0 +1,304 @@
+{
+  "case": "harris-priester-table",
+  "description": "The published Harris-Priester min/max density table (mean solar activity, 100-1000 km) with the interpolation/bulge convention. Spec scenario: 'Published table values reproduced'.",
+  "sources": {
+    "table_primary": "CS-SI/Orekit HarrisPriester.java (table ALT_RHO and the density formula), commit 77cfa41667457f0db879a0fc7e892e7248c1e516, https://github.com/CS-SI/Orekit/blob/develop/src/main/java/org/orekit/models/earth/atmosphere/HarrisPriester.java \u2014 cites Montenbruck & Gill, 'Satellite Orbits', Springer 2005.",
+    "table_cross_check": "JuliaSpace/SatelliteToolboxAtmosphericModels.jl constants.jl (_HARRIS_PRIESTER_ALT_RHO), commit 268c2645923d5a1c4206785c9c98f1ff2eccd0e4, https://github.com/JuliaSpace/SatelliteToolboxAtmosphericModels.jl/blob/main/src/harrispriester/constants.jl \u2014 independent transcription of the same table.",
+    "agreement": "all 50 rows identical between the two fetched transcriptions"
+  },
+  "convention": {
+    "bulge_exponent_n": 2,
+    "apex": "Sun direction rotated +30 deg about the ITRF +z axis (right ascension + 30 deg, declination preserved)",
+    "density_formula": "rho(h, psi) = rho_min(h) + (rho_max(h) - rho_min(h)) * cos^n(psi/2), cos^2(psi/2) = (1 + cos psi)/2",
+    "height_interpolation": "exponential between bracketing nodes: rho_x(h) = rho_x(h_i) * (rho_x(h_{i+1})/rho_x(h_i))^((h_i - h)/(h_i - h_{i+1})) for x in {min, max}",
+    "altitude_definition": "geodetic height above the WGS-84 ellipsoid (erfa.gc2gd equivalent) in the trajectory stack; the table nodes and the worked examples below take height directly",
+    "clamp": "rho = 0 above 1000 km; below 100 km out of the model's band"
+  },
+  "table": [
+    {
+      "altitude_m": 100000.0,
+      "rho_min_kg_m3": 4.974e-07,
+      "rho_max_kg_m3": 4.974e-07
+    },
+    {
+      "altitude_m": 120000.0,
+      "rho_min_kg_m3": 2.49e-08,
+      "rho_max_kg_m3": 2.49e-08
+    },
+    {
+      "altitude_m": 130000.0,
+      "rho_min_kg_m3": 8.377e-09,
+      "rho_max_kg_m3": 8.71e-09
+    },
+    {
+      "altitude_m": 140000.0,
+      "rho_min_kg_m3": 3.899e-09,
+      "rho_max_kg_m3": 4.059e-09
+    },
+    {
+      "altitude_m": 150000.0,
+      "rho_min_kg_m3": 2.122e-09,
+      "rho_max_kg_m3": 2.215e-09
+    },
+    {
+      "altitude_m": 160000.0,
+      "rho_min_kg_m3": 1.263e-09,
+      "rho_max_kg_m3": 1.344e-09
+    },
+    {
+      "altitude_m": 170000.0,
+      "rho_min_kg_m3": 8.008e-10,
+      "rho_max_kg_m3": 8.758e-10
+    },
+    {
+      "altitude_m": 180000.0,
+      "rho_min_kg_m3": 5.283e-10,
+      "rho_max_kg_m3": 6.01e-10
+    },
+    {
+      "altitude_m": 190000.0,
+      "rho_min_kg_m3": 3.617e-10,
+      "rho_max_kg_m3": 4.297e-10
+    },
+    {
+      "altitude_m": 200000.0,
+      "rho_min_kg_m3": 2.557e-10,
+      "rho_max_kg_m3": 3.162e-10
+    },
+    {
+      "altitude_m": 210000.0,
+      "rho_min_kg_m3": 1.839e-10,
+      "rho_max_kg_m3": 2.396e-10
+    },
+    {
+      "altitude_m": 220000.0,
+      "rho_min_kg_m3": 1.341e-10,
+      "rho_max_kg_m3": 1.853e-10
+    },
+    {
+      "altitude_m": 230000.0,
+      "rho_min_kg_m3": 9.949e-11,
+      "rho_max_kg_m3": 1.455e-10
+    },
+    {
+      "altitude_m": 240000.0,
+      "rho_min_kg_m3": 7.488e-11,
+      "rho_max_kg_m3": 1.157e-10
+    },
+    {
+      "altitude_m": 250000.0,
+      "rho_min_kg_m3": 5.709e-11,
+      "rho_max_kg_m3": 9.308e-11
+    },
+    {
+      "altitude_m": 260000.0,
+      "rho_min_kg_m3": 4.403e-11,
+      "rho_max_kg_m3": 7.555e-11
+    },
+    {
+      "altitude_m": 270000.0,
+      "rho_min_kg_m3": 3.43e-11,
+      "rho_max_kg_m3": 6.182e-11
+    },
+    {
+      "altitude_m": 280000.0,
+      "rho_min_kg_m3": 2.697e-11,
+      "rho_max_kg_m3": 5.095e-11
+    },
+    {
+      "altitude_m": 290000.0,
+      "rho_min_kg_m3": 2.139e-11,
+      "rho_max_kg_m3": 4.226e-11
+    },
+    {
+      "altitude_m": 300000.0,
+      "rho_min_kg_m3": 1.708e-11,
+      "rho_max_kg_m3": 3.526e-11
+    },
+    {
+      "altitude_m": 320000.0,
+      "rho_min_kg_m3": 1.099e-11,
+      "rho_max_kg_m3": 2.511e-11
+    },
+    {
+      "altitude_m": 340000.0,
+      "rho_min_kg_m3": 7.214e-12,
+      "rho_max_kg_m3": 1.819e-11
+    },
+    {
+      "altitude_m": 360000.0,
+      "rho_min_kg_m3": 4.824e-12,
+      "rho_max_kg_m3": 1.337e-11
+    },
+    {
+      "altitude_m": 380000.0,
+      "rho_min_kg_m3": 3.274e-12,
+      "rho_max_kg_m3": 9.955e-12
+    },
+    {
+      "altitude_m": 400000.0,
+      "rho_min_kg_m3": 2.249e-12,
+      "rho_max_kg_m3": 7.492e-12
+    },
+    {
+      "altitude_m": 420000.0,
+      "rho_min_kg_m3": 1.558e-12,
+      "rho_max_kg_m3": 5.684e-12
+    },
+    {
+      "altitude_m": 440000.0,
+      "rho_min_kg_m3": 1.091e-12,
+      "rho_max_kg_m3": 4.355e-12
+    },
+    {
+      "altitude_m": 460000.0,
+      "rho_min_kg_m3": 7.701e-13,
+      "rho_max_kg_m3": 3.362e-12
+    },
+    {
+      "altitude_m": 480000.0,
+      "rho_min_kg_m3": 5.474e-13,
+      "rho_max_kg_m3": 2.612e-12
+    },
+    {
+      "altitude_m": 500000.0,
+      "rho_min_kg_m3": 3.916e-13,
+      "rho_max_kg_m3": 2.042e-12
+    },
+    {
+      "altitude_m": 520000.0,
+      "rho_min_kg_m3": 2.819e-13,
+      "rho_max_kg_m3": 1.605e-12
+    },
+    {
+      "altitude_m": 540000.0,
+      "rho_min_kg_m3": 2.042e-13,
+      "rho_max_kg_m3": 1.267e-12
+    },
+    {
+      "altitude_m": 560000.0,
+      "rho_min_kg_m3": 1.488e-13,
+      "rho_max_kg_m3": 1.005e-12
+    },
+    {
+      "altitude_m": 580000.0,
+      "rho_min_kg_m3": 1.092e-13,
+      "rho_max_kg_m3": 7.997e-13
+    },
+    {
+      "altitude_m": 600000.0,
+      "rho_min_kg_m3": 8.07e-14,
+      "rho_max_kg_m3": 6.39e-13
+    },
+    {
+      "altitude_m": 620000.0,
+      "rho_min_kg_m3": 6.012e-14,
+      "rho_max_kg_m3": 5.123e-13
+    },
+    {
+      "altitude_m": 640000.0,
+      "rho_min_kg_m3": 4.519e-14,
+      "rho_max_kg_m3": 4.121e-13
+    },
+    {
+      "altitude_m": 660000.0,
+      "rho_min_kg_m3": 3.43e-14,
+      "rho_max_kg_m3": 3.325e-13
+    },
+    {
+      "altitude_m": 680000.0,
+      "rho_min_kg_m3": 2.632e-14,
+      "rho_max_kg_m3": 2.691e-13
+    },
+    {
+      "altitude_m": 700000.0,
+      "rho_min_kg_m3": 2.043e-14,
+      "rho_max_kg_m3": 2.185e-13
+    },
+    {
+      "altitude_m": 720000.0,
+      "rho_min_kg_m3": 1.607e-14,
+      "rho_max_kg_m3": 1.779e-13
+    },
+    {
+      "altitude_m": 740000.0,
+      "rho_min_kg_m3": 1.281e-14,
+      "rho_max_kg_m3": 1.452e-13
+    },
+    {
+      "altitude_m": 760000.0,
+      "rho_min_kg_m3": 1.036e-14,
+      "rho_max_kg_m3": 1.19e-13
+    },
+    {
+      "altitude_m": 780000.0,
+      "rho_min_kg_m3": 8.496e-15,
+      "rho_max_kg_m3": 9.776e-14
+    },
+    {
+      "altitude_m": 800000.0,
+      "rho_min_kg_m3": 7.069e-15,
+      "rho_max_kg_m3": 8.059e-14
+    },
+    {
+      "altitude_m": 840000.0,
+      "rho_min_kg_m3": 4.68e-15,
+      "rho_max_kg_m3": 5.741e-14
+    },
+    {
+      "altitude_m": 880000.0,
+      "rho_min_kg_m3": 3.2e-15,
+      "rho_max_kg_m3": 4.21e-14
+    },
+    {
+      "altitude_m": 920000.0,
+      "rho_min_kg_m3": 2.21e-15,
+      "rho_max_kg_m3": 3.13e-14
+    },
+    {
+      "altitude_m": 960000.0,
+      "rho_min_kg_m3": 1.56e-15,
+      "rho_max_kg_m3": 2.36e-14
+    },
+    {
+      "altitude_m": 1000000.0,
+      "rho_min_kg_m3": 1.15e-15,
+      "rho_max_kg_m3": 1.81e-14
+    }
+  ],
+  "worked_examples": {
+    "note": "tool-computed from the table with the convention above (generator-evaluated, not published values)",
+    "values": [
+      {
+        "height_m": 400000.0,
+        "cos_psi": 1.0,
+        "density_kg_m3": 7.492e-12,
+        "note": "node 400 km, bulge apex (psi = 0): rho = rho_max"
+      },
+      {
+        "height_m": 400000.0,
+        "cos_psi": -1.0,
+        "density_kg_m3": 2.249e-12,
+        "note": "node 400 km, anti-apex (psi = 180 deg): rho = rho_min"
+      },
+      {
+        "height_m": 400000.0,
+        "cos_psi": 0.0,
+        "density_kg_m3": 4.8705e-12,
+        "note": "node 400 km, psi = 90 deg: rho_min + (rho_max-rho_min)/2"
+      },
+      {
+        "height_m": 410000.0,
+        "cos_psi": 1.0,
+        "density_kg_m3": 6.525682186561035e-12,
+        "note": "off-node 410 km, apex: exponential interpolation check"
+      },
+      {
+        "height_m": 410000.0,
+        "cos_psi": -1.0,
+        "density_kg_m3": 1.8718819407216898e-12,
+        "note": "off-node 410 km, anti-apex: exponential interpolation check"
+      }
+    ]
+  }
+}
