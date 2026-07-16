@@ -1,0 +1,667 @@
+{
+  "case": "egm96-spot-accelerations",
+  "description": "EGM96 12x12 gravitational accelerations at fixed ITRF positions, computed by this generator's own fully-normalized Legendre evaluation of the fetched coefficient file (independent of the Rust implementation). Spec scenario: 'Harmonic acceleration matches independent evaluation'.",
+  "model": {
+    "name": "EGM96",
+    "degree": 12,
+    "order": 12,
+    "gm_m3_s2": 398600441500000.0,
+    "reference_radius_m": 6378136.3,
+    "tide_system": "tide_free",
+    "normalization": "fully normalized (geodetic, no Condon-Shortley phase)",
+    "includes_central_term": true,
+    "degree_1_terms": "absent (geocentric origin)",
+    "coefficient_source": "ICGEM (GFZ) EGM96 gfc file, http://icgem.gfz-potsdam.de/getmodel/gfc/971b0a3b49a497910aad23cd85e066d4cd9af0aeafe7ce6301a696bed8570be3/EGM96.gfc \u2014 SHA-256 5247a9e9c316dd2c8f8fd491d53be0e163cb5cb3676b021754240cc9e44cb43b. Header: earth_gravity_constant 0.3986004415E+15 m^3/s^2, radius 0.6378136300E+07 m, tide_system tide_free. Citation in file header: Lemoine et al., NASA/TP-1998-206861.",
+    "coefficient_cross_check": "NGA EGM96 spherical-harmonic package, https://earth-info.nga.mil/php/download.php?file=egm-96spherical \u2014 inner file `EGM96` SHA-256 1e5e6c30343989b8e2eda0bb96bde06ef05981eec69934d6e44aace4f0d6a9d5 (original 1996 NASA/NIMA distribution); cross-check source for the degree-2..12 subset (bit-equal, all 88 rows).",
+    "fetched_from": "local copy /private/tmp/claude-501/-Users-e-Development-GitHub-thresh/421b8a15-fee7-4d94-9fe6-0111b1b28733/scratchpad/EGM96.gfc (THRESH_EGM96_GFC)",
+    "coefficients": [
+      {
+        "n": 2,
+        "m": 0,
+        "c_bar": -0.000484165371736,
+        "s_bar": 0.0
+      },
+      {
+        "n": 2,
+        "m": 1,
+        "c_bar": -1.86987635955e-10,
+        "s_bar": 1.19528012031e-09
+      },
+      {
+        "n": 2,
+        "m": 2,
+        "c_bar": 2.43914352398e-06,
+        "s_bar": -1.40016683654e-06
+      },
+      {
+        "n": 3,
+        "m": 0,
+        "c_bar": 9.57254173792e-07,
+        "s_bar": 0.0
+      },
+      {
+        "n": 3,
+        "m": 1,
+        "c_bar": 2.02998882184e-06,
+        "s_bar": 2.48513158716e-07
+      },
+      {
+        "n": 3,
+        "m": 2,
+        "c_bar": 9.04627768605e-07,
+        "s_bar": -6.19025944205e-07
+      },
+      {
+        "n": 3,
+        "m": 3,
+        "c_bar": 7.21072657057e-07,
+        "s_bar": 1.41435626958e-06
+      },
+      {
+        "n": 4,
+        "m": 0,
+        "c_bar": 5.39873863789e-07,
+        "s_bar": 0.0
+      },
+      {
+        "n": 4,
+        "m": 1,
+        "c_bar": -5.36321616971e-07,
+        "s_bar": -4.73440265853e-07
+      },
+      {
+        "n": 4,
+        "m": 2,
+        "c_bar": 3.50694105785e-07,
+        "s_bar": 6.6267157254e-07
+      },
+      {
+        "n": 4,
+        "m": 3,
+        "c_bar": 9.90771803829e-07,
+        "s_bar": -2.00928369177e-07
+      },
+      {
+        "n": 4,
+        "m": 4,
+        "c_bar": -1.88560802735e-07,
+        "s_bar": 3.08853169333e-07
+      },
+      {
+        "n": 5,
+        "m": 0,
+        "c_bar": 6.8532347563e-08,
+        "s_bar": 0.0
+      },
+      {
+        "n": 5,
+        "m": 1,
+        "c_bar": -6.21012128528e-08,
+        "s_bar": -9.44226127525e-08
+      },
+      {
+        "n": 5,
+        "m": 2,
+        "c_bar": 6.52438297612e-07,
+        "s_bar": -3.23349612668e-07
+      },
+      {
+        "n": 5,
+        "m": 3,
+        "c_bar": -4.51955406071e-07,
+        "s_bar": -2.14847190624e-07
+      },
+      {
+        "n": 5,
+        "m": 4,
+        "c_bar": -2.95301647654e-07,
+        "s_bar": 4.96658876769e-08
+      },
+      {
+        "n": 5,
+        "m": 5,
+        "c_bar": 1.74971983203e-07,
+        "s_bar": -6.69384278219e-07
+      },
+      {
+        "n": 6,
+        "m": 0,
+        "c_bar": -1.49957994714e-07,
+        "s_bar": 0.0
+      },
+      {
+        "n": 6,
+        "m": 1,
+        "c_bar": -7.60879384947e-08,
+        "s_bar": 2.62890545501e-08
+      },
+      {
+        "n": 6,
+        "m": 2,
+        "c_bar": 4.81732442832e-08,
+        "s_bar": -3.73728201347e-07
+      },
+      {
+        "n": 6,
+        "m": 3,
+        "c_bar": 5.71730990516e-08,
+        "s_bar": 9.02694517163e-09
+      },
+      {
+        "n": 6,
+        "m": 4,
+        "c_bar": -8.62142660109e-08,
+        "s_bar": -4.71408154267e-07
+      },
+      {
+        "n": 6,
+        "m": 5,
+        "c_bar": -2.6713332549e-07,
+        "s_bar": -5.36488432483e-07
+      },
+      {
+        "n": 6,
+        "m": 6,
+        "c_bar": 9.67616121092e-09,
+        "s_bar": -2.37192006935e-07
+      },
+      {
+        "n": 7,
+        "m": 0,
+        "c_bar": 9.0978937145e-08,
+        "s_bar": 0.0
+      },
+      {
+        "n": 7,
+        "m": 1,
+        "c_bar": 2.79872910488e-07,
+        "s_bar": 9.54336911867e-08
+      },
+      {
+        "n": 7,
+        "m": 2,
+        "c_bar": 3.29743816488e-07,
+        "s_bar": 9.30667596042e-08
+      },
+      {
+        "n": 7,
+        "m": 3,
+        "c_bar": 2.50398657706e-07,
+        "s_bar": -2.17198608738e-07
+      },
+      {
+        "n": 7,
+        "m": 4,
+        "c_bar": -2.75114355257e-07,
+        "s_bar": -1.23800392323e-07
+      },
+      {
+        "n": 7,
+        "m": 5,
+        "c_bar": 1.93765507243e-09,
+        "s_bar": 1.77377719872e-08
+      },
+      {
+        "n": 7,
+        "m": 6,
+        "c_bar": -3.58856860645e-07,
+        "s_bar": 1.51789817739e-07
+      },
+      {
+        "n": 7,
+        "m": 7,
+        "c_bar": 1.09185148045e-09,
+        "s_bar": 2.44415707993e-08
+      },
+      {
+        "n": 8,
+        "m": 0,
+        "c_bar": 4.96711667324e-08,
+        "s_bar": 0.0
+      },
+      {
+        "n": 8,
+        "m": 1,
+        "c_bar": 2.33422047893e-08,
+        "s_bar": 5.90060493411e-08
+      },
+      {
+        "n": 8,
+        "m": 2,
+        "c_bar": 8.02978722615e-08,
+        "s_bar": 6.54175425859e-08
+      },
+      {
+        "n": 8,
+        "m": 3,
+        "c_bar": -1.91877757009e-08,
+        "s_bar": -8.63454445021e-08
+      },
+      {
+        "n": 8,
+        "m": 4,
+        "c_bar": -2.44600105471e-07,
+        "s_bar": 7.00233016934e-08
+      },
+      {
+        "n": 8,
+        "m": 5,
+        "c_bar": -2.55352403037e-08,
+        "s_bar": 8.91462164788e-08
+      },
+      {
+        "n": 8,
+        "m": 6,
+        "c_bar": -6.57361610961e-08,
+        "s_bar": 3.09238461807e-07
+      },
+      {
+        "n": 8,
+        "m": 7,
+        "c_bar": 6.72811580072e-08,
+        "s_bar": 7.47440473633e-08
+      },
+      {
+        "n": 8,
+        "m": 8,
+        "c_bar": -1.24092493016e-07,
+        "s_bar": 1.20533165603e-07
+      },
+      {
+        "n": 9,
+        "m": 0,
+        "c_bar": 2.76714300853e-08,
+        "s_bar": 0.0
+      },
+      {
+        "n": 9,
+        "m": 1,
+        "c_bar": 1.43387502749e-07,
+        "s_bar": 2.16834947618e-08
+      },
+      {
+        "n": 9,
+        "m": 2,
+        "c_bar": 2.22288318564e-08,
+        "s_bar": -3.22196647116e-08
+      },
+      {
+        "n": 9,
+        "m": 3,
+        "c_bar": -1.60811502143e-07,
+        "s_bar": -7.42287409462e-08
+      },
+      {
+        "n": 9,
+        "m": 4,
+        "c_bar": -9.00179225336e-09,
+        "s_bar": 1.94666779475e-08
+      },
+      {
+        "n": 9,
+        "m": 5,
+        "c_bar": -1.66165092924e-08,
+        "s_bar": -5.41113191483e-08
+      },
+      {
+        "n": 9,
+        "m": 6,
+        "c_bar": 6.26941938248e-08,
+        "s_bar": 2.22903525945e-07
+      },
+      {
+        "n": 9,
+        "m": 7,
+        "c_bar": -1.18366323475e-07,
+        "s_bar": -9.65152667886e-08
+      },
+      {
+        "n": 9,
+        "m": 8,
+        "c_bar": 1.88436022794e-07,
+        "s_bar": -3.08566220421e-09
+      },
+      {
+        "n": 9,
+        "m": 9,
+        "c_bar": -4.77475386132e-08,
+        "s_bar": 9.66412847714e-08
+      },
+      {
+        "n": 10,
+        "m": 0,
+        "c_bar": 5.26222488569e-08,
+        "s_bar": 0.0
+      },
+      {
+        "n": 10,
+        "m": 1,
+        "c_bar": 8.35115775652e-08,
+        "s_bar": -1.31314331796e-07
+      },
+      {
+        "n": 10,
+        "m": 2,
+        "c_bar": -9.42413882081e-08,
+        "s_bar": -5.1579165739e-08
+      },
+      {
+        "n": 10,
+        "m": 3,
+        "c_bar": -6.89895048176e-09,
+        "s_bar": -1.53768828694e-07
+      },
+      {
+        "n": 10,
+        "m": 4,
+        "c_bar": -8.40764549716e-08,
+        "s_bar": -7.92806255331e-08
+      },
+      {
+        "n": 10,
+        "m": 5,
+        "c_bar": -4.93395938185e-08,
+        "s_bar": -5.05370221897e-08
+      },
+      {
+        "n": 10,
+        "m": 6,
+        "c_bar": -3.75885236598e-08,
+        "s_bar": -7.95667053872e-08
+      },
+      {
+        "n": 10,
+        "m": 7,
+        "c_bar": 8.11460540925e-09,
+        "s_bar": -3.36629641314e-09
+      },
+      {
+        "n": 10,
+        "m": 8,
+        "c_bar": 4.04927981694e-08,
+        "s_bar": -9.18705975922e-08
+      },
+      {
+        "n": 10,
+        "m": 9,
+        "c_bar": 1.25491334939e-07,
+        "s_bar": -3.76516222392e-08
+      },
+      {
+        "n": 10,
+        "m": 10,
+        "c_bar": 1.00538634409e-07,
+        "s_bar": -2.4014844952e-08
+      },
+      {
+        "n": 11,
+        "m": 0,
+        "c_bar": -5.09613707522e-08,
+        "s_bar": 0.0
+      },
+      {
+        "n": 11,
+        "m": 1,
+        "c_bar": 1.51687209933e-08,
+        "s_bar": -2.68604146166e-08
+      },
+      {
+        "n": 11,
+        "m": 2,
+        "c_bar": 1.86309749878e-08,
+        "s_bar": -9.90693862047e-08
+      },
+      {
+        "n": 11,
+        "m": 3,
+        "c_bar": -3.09871239854e-08,
+        "s_bar": -1.4813180426e-07
+      },
+      {
+        "n": 11,
+        "m": 4,
+        "c_bar": -3.89580205051e-08,
+        "s_bar": -6.3666651198e-08
+      },
+      {
+        "n": 11,
+        "m": 5,
+        "c_bar": 3.77848029452e-08,
+        "s_bar": 4.94736238169e-08
+      },
+      {
+        "n": 11,
+        "m": 6,
+        "c_bar": -1.18676592395e-09,
+        "s_bar": 3.44769584593e-08
+      },
+      {
+        "n": 11,
+        "m": 7,
+        "c_bar": 4.11565188074e-09,
+        "s_bar": -8.98252808977e-08
+      },
+      {
+        "n": 11,
+        "m": 8,
+        "c_bar": -5.984108413e-09,
+        "s_bar": 2.43989612237e-08
+      },
+      {
+        "n": 11,
+        "m": 9,
+        "c_bar": -3.14231072723e-08,
+        "s_bar": 4.17731829829e-08
+      },
+      {
+        "n": 11,
+        "m": 10,
+        "c_bar": -5.21882681927e-08,
+        "s_bar": -1.83364561788e-08
+      },
+      {
+        "n": 11,
+        "m": 11,
+        "c_bar": 4.60344448746e-08,
+        "s_bar": -6.96662308185e-08
+      },
+      {
+        "n": 12,
+        "m": 0,
+        "c_bar": 3.77252636558e-08,
+        "s_bar": 0.0
+      },
+      {
+        "n": 12,
+        "m": 1,
+        "c_bar": -5.40654977836e-08,
+        "s_bar": -4.35675748979e-08
+      },
+      {
+        "n": 12,
+        "m": 2,
+        "c_bar": 1.42979642253e-08,
+        "s_bar": 3.20975937619e-08
+      },
+      {
+        "n": 12,
+        "m": 3,
+        "c_bar": 3.93995876403e-08,
+        "s_bar": 2.44264863505e-08
+      },
+      {
+        "n": 12,
+        "m": 4,
+        "c_bar": -6.86908127934e-08,
+        "s_bar": 4.15081109011e-09
+      },
+      {
+        "n": 12,
+        "m": 5,
+        "c_bar": 3.0941112873e-08,
+        "s_bar": 7.82536279033e-09
+      },
+      {
+        "n": 12,
+        "m": 6,
+        "c_bar": 3.41523275208e-09,
+        "s_bar": 3.91765484449e-08
+      },
+      {
+        "n": 12,
+        "m": 7,
+        "c_bar": -1.86909958587e-08,
+        "s_bar": 3.56131849382e-08
+      },
+      {
+        "n": 12,
+        "m": 8,
+        "c_bar": -2.53769398865e-08,
+        "s_bar": 1.69361024629e-08
+      },
+      {
+        "n": 12,
+        "m": 9,
+        "c_bar": 4.22880630662e-08,
+        "s_bar": 2.52692598301e-08
+      },
+      {
+        "n": 12,
+        "m": 10,
+        "c_bar": -6.17619654902e-09,
+        "s_bar": 3.08375794212e-08
+      },
+      {
+        "n": 12,
+        "m": 11,
+        "c_bar": 1.12502994122e-08,
+        "s_bar": -6.37946501558e-09
+      },
+      {
+        "n": 12,
+        "m": 12,
+        "c_bar": -2.4953260739e-09,
+        "s_bar": -1.117806019e-08
+      }
+    ]
+  },
+  "evaluation": {
+    "potential": "Barthelmes, 'Definition of Functionals of the Geopotential ...' (GFZ STR09/02, revised Jan 2013), Eq. (108): W = (GM/r) * sum_l sum_m (R/r)^l * Plm(sin phi) * (Clm cos(m lambda) + Slm sin(m lambda)), spherical geocentric coordinates, fully normalized. Fetched from https://gfzpublic.gfz.de/pubman/item/item_104132_4/component/file_104133/0902-2.pdf",
+    "legendre_recursion": "Fully-normalized associated Legendre recursion: seeds P00=1, P11=sqrt(3)*u; sectoral Pmm = u*sqrt((2m+1)/(2m))*P(m-1,m-1); non-sectoral Pnm = a_nm*t*P(n-1,m) - b_nm*P(n-2,m) with a_nm = sqrt((2n-1)(2n+1)/((n-m)(n+m))), b_nm = sqrt((2n+1)(n+m-1)(n-m-1)/((n-m)(n+m)(2n-3))); t = sin(lat), u = cos(lat); normalization sqrt(k(2n+1)(n-m)!/(n+m)!), k=1 (m=0) else 2. Fetched from the MITgcm geoid cookbook sec. 3.7 (http://mitgcm.org/~mlosch/geoidcookbook/node11.html), which follows Holmes & Featherstone 2002 (J. Geodesy 76:279) and Torge 1991.",
+    "gradient": "analytic spherical gradient (r, geocentric latitude, longitude components), cross-checked per spot against 60-digit mpmath central differences of the same potential and against a Laplacian-harmonicity residual; C20-only evaluation matches the closed-form J2 to <= 1e-12 relative (see PROVENANCE.md)."
+  },
+  "tolerance": {
+    "relative_per_component": 1e-09,
+    "basis": "both stacks evaluate the identical truncated model from the same verified coefficients; this generator's float64 evaluation agrees with 60-digit arithmetic to 2.2e-14 relative (measured, worst spot), so 1e-9 leaves >100x headroom for the Rust recursion's own float64 noise while catching any single-coefficient or normalization error (smallest such error observed >= 1e-5 relative)."
+  },
+  "spots": [
+    {
+      "name": "leo-equatorial",
+      "position_itrf_m": [
+        6778137.0,
+        0.0,
+        0.0
+      ],
+      "acceleration_total_m_s2": [
+        -8.688522605317043,
+        -4.6430038296113453e-05,
+        4.6224527722749834e-05
+      ],
+      "acceleration_central_m_s2": [
+        -8.675950994401916,
+        -0.0,
+        -0.0
+      ],
+      "acceleration_perturbation_m_s2": [
+        -0.012571610915127707,
+        -4.6430038296113453e-05,
+        4.6224527722749834e-05
+      ],
+      "generator_self_check": {
+        "mpmath_gradient_rel_delta": 2.167e-14,
+        "laplacian_residual_rel": 3.826e-12
+      }
+    },
+    {
+      "name": "leo-mid-latitude",
+      "position_itrf_m": [
+        2396433.3182557216,
+        4150744.2641697857,
+        4792866.636511441
+      ],
+      "acceleration_total_m_s2": [
+        -3.060630102276921,
+        -5.301467235160529,
+        -6.139110470478369
+      ],
+      "acceleration_central_m_s2": [
+        -3.0674118906918837,
+        -5.312913242419253,
+        -6.134823781383766
+      ],
+      "acceleration_perturbation_m_s2": [
+        0.006781788414962797,
+        0.01144600725872369,
+        -0.004286689094603169
+      ],
+      "generator_self_check": {
+        "mpmath_gradient_rel_delta": 1.28e-14,
+        "laplacian_residual_rel": 5.855e-12
+      }
+    },
+    {
+      "name": "high-latitude-1000km",
+      "position_itrf_m": [
+        -640600.0223134763,
+        -1109551.785976698,
+        7266046.520386233
+      ],
+      "acceleration_total_m_s2": [
+        0.6328286416163623,
+        1.096069596730151,
+        -7.194853849347155
+      ],
+      "acceleration_central_m_s2": [
+        0.6357473806836484,
+        1.1011467641229122,
+        -7.211005123881508
+      ],
+      "acceleration_perturbation_m_s2": [
+        -0.0029187390672861246,
+        -0.005077167392761206,
+        0.01615127453435239
+      ],
+      "generator_self_check": {
+        "mpmath_gradient_rel_delta": 1.679e-14,
+        "laplacian_residual_rel": 2.855e-12
+      }
+    },
+    {
+      "name": "meo",
+      "position_itrf_m": [
+        -19920000.000000004,
+        11500817.362257345,
+        -13279999.999999998
+      ],
+      "acceleration_total_m_s2": [
+        0.4237725547742144,
+        -0.24466534067563042,
+        0.2825682946440909
+      ],
+      "acceleration_central_m_s2": [
+        0.4237823816798634,
+        -0.24467087214068978,
+        0.2825215877865755
+      ],
+      "acceleration_perturbation_m_s2": [
+        -9.826905648990802e-06,
+        5.531465059355201e-06,
+        4.670685751539949e-05
+      ],
+      "generator_self_check": {
+        "mpmath_gradient_rel_delta": 1.113e-15,
+        "laplacian_residual_rel": 3.357e-13
+      }
+    }
+  ]
+}

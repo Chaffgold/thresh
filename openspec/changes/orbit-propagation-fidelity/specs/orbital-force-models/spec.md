@@ -11,7 +11,7 @@ The system SHALL provide a force-model configuration that composes selectable pe
 
 #### Scenario: Baseline configuration matches the existing math
 - **WHEN** the configuration enables only two-body + J2 gravity
-- **THEN** the composed acceleration SHALL agree with the existing `two_body_acceleration` + `j2_acceleration` path to floating-point equivalence at the same state
+- **THEN** the composed acceleration SHALL agree with the existing `two_body_acceleration` + `j2_acceleration` functions — evaluated under the force stack's single gravitational constant set (the EGM96-derived `GravityModel`, so the harmonic-consistency identities remain meaningful) — to floating-point equivalence at the same state
 
 ### Requirement: Truncated spherical-harmonic gravity with executable normalization contract
 The system SHALL evaluate Earth gravity from embedded normalized EGM96 coefficients to a selectable degree and order (at least 12×12), using a normalized associated-Legendre recursion evaluated in the Earth-fixed frame, with coefficients transcribed from the authoritative EGM96 distribution and cited at the table. Consistency with the closed-form zonals SHALL be tested: a harmonics evaluation restricted to C̄₂₀ SHALL reproduce the analytic J2 acceleration, and zonal-only harmonics SHALL reproduce the closed-form J3/J4 terms, within tight relative tolerance.
@@ -57,7 +57,7 @@ The system SHALL compute Sun and Moon positions from embedded analytic series (M
 - **THEN** the angular error SHALL be within the per-body tolerance recorded in the fixture provenance
 
 ### Requirement: Earth-fixed force legs use the frame provider
-Force terms that are naturally Earth-fixed (spherical-harmonic gravity, atmosphere co-rotation) SHALL evaluate through the `FrameProvider` seam at the arc epoch plus elapsed time — never through an ad-hoc rotation — so provider substitution (e.g. explicit EOP) propagates into force evaluation without code changes.
+The high-fidelity force terms that are naturally Earth-fixed (spherical-harmonic gravity, Harris-Priester atmosphere co-rotation) SHALL evaluate through the `FrameProvider` seam at the arc epoch plus elapsed time — never through an ad-hoc rotation — so provider substitution (e.g. explicit EOP) propagates into force evaluation without code changes. The legacy exponential-drag tier deliberately retains the existing inertial co-rotation approximation for continuity with the pre-existing model and SHALL document that approximation at its API.
 
 #### Scenario: Provider parameters shift Earth-fixed forces
 - **WHEN** the same harmonic-gravity evaluation runs under the zero-default provider and under a provider with non-zero ΔUT1
