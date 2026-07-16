@@ -13,7 +13,7 @@
     "degree_1_terms": "absent (geocentric origin)",
     "coefficient_source": "ICGEM (GFZ) EGM96 gfc file, http://icgem.gfz-potsdam.de/getmodel/gfc/971b0a3b49a497910aad23cd85e066d4cd9af0aeafe7ce6301a696bed8570be3/EGM96.gfc \u2014 SHA-256 5247a9e9c316dd2c8f8fd491d53be0e163cb5cb3676b021754240cc9e44cb43b. Header: earth_gravity_constant 0.3986004415E+15 m^3/s^2, radius 0.6378136300E+07 m, tide_system tide_free. Citation in file header: Lemoine et al., NASA/TP-1998-206861.",
     "coefficient_cross_check": "NGA EGM96 spherical-harmonic package, https://earth-info.nga.mil/php/download.php?file=egm-96spherical \u2014 inner file `EGM96` SHA-256 1e5e6c30343989b8e2eda0bb96bde06ef05981eec69934d6e44aace4f0d6a9d5 (original 1996 NASA/NIMA distribution); cross-check source for the degree-2..12 subset (bit-equal, all 88 rows).",
-    "fetched_from": "local copy /private/tmp/claude-501/-Users-e-Development-GitHub-thresh/421b8a15-fee7-4d94-9fe6-0111b1b28733/scratchpad/EGM96.gfc (THRESH_EGM96_GFC)",
+    "fetched_from": "http://icgem.gfz-potsdam.de/getmodel/gfc/971b0a3b49a497910aad23cd85e066d4cd9af0aeafe7ce6301a696bed8570be3/EGM96.gfc (local sha256-verified copy via THRESH_EGM96_GFC)",
     "coefficients": [
       {
         "n": 2,

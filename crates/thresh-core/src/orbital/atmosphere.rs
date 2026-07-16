@@ -235,9 +235,12 @@ pub fn harris_priester_density(height_m: f64, cos_psi: f64) -> f64 {
     let i = hp_bracket_index(h);
     let rho_min = hp_interpolate(h, i, 1);
     let rho_max = hp_interpolate(h, i, 2);
-    // cos²(ψ/2) = (1 + cos ψ)/2, floored at zero exactly like the fetched
-    // reference (`c2Psi2` in Orekit; defensive against cos_psi < −1 noise).
-    let bulge = ((1.0 + cos_psi) / 2.0).max(0.0);
+    // cos²(ψ/2) = (1 + cos ψ)/2, clamped to the physical [0, 1] weight:
+    // the zero floor matches the fetched reference (`c2Psi2` in Orekit,
+    // defensive against cos_psi < −1 noise), and the unit cap keeps
+    // normalized-dot-product noise (cos_psi marginally above 1) from
+    // extrapolating density beyond rho_max.
+    let bulge = ((1.0 + cos_psi) / 2.0).clamp(0.0, 1.0);
     rho_min + (rho_max - rho_min) * bulge
 }
 

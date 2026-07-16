@@ -449,9 +449,15 @@ pub fn propagate_high_fidelity(
 fn output_grid(duration_s: f64, output_dt_s: f64) -> Vec<f64> {
     let mut offsets = Vec::new();
     let mut k = 1u64;
+    // Treat grid points within one part in 1e12 of the arc end as the end
+    // itself: when the duration is a float multiple of the cadence (e.g.
+    // dt = 1/3, duration = 1), `k * dt` can land infinitesimally below
+    // `duration_s`, which would emit a near-duplicate final sample and
+    // force the integrator through a sub-nanosecond closing step.
+    let end_cutoff = duration_s * (1.0 - 1e-12);
     loop {
         let t = k as f64 * output_dt_s;
-        if t >= duration_s {
+        if t >= end_cutoff {
             break;
         }
         offsets.push(t);

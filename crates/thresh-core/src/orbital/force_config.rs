@@ -181,6 +181,7 @@ impl ForceModelConfig {
         epoch: Epoch,
         provider: &P,
     ) -> impl Fn(f64, &Vector3<f64>, &Vector3<f64>) -> Vector3<f64> {
+        self.validate();
         let model = egm96_gravity_model();
         move |t_s: f64, position: &Vector3<f64>, velocity: &Vector3<f64>| {
             let at = epoch + t_s;
@@ -198,6 +199,36 @@ impl ForceModelConfig {
                 )
                 + srp_leg(self.srp, position, sun.as_ref())
                 + third_body_leg(self.third_body, position, sun.as_ref(), &at)
+        }
+    }
+
+    /// Panic with a clear message on physically invalid coefficients —
+    /// a negative or non-finite `Cd·A/m` / `Cr·A/m` silently reverses or
+    /// poisons the acceleration, and non-finite zonals poison gravity.
+    /// Checked once at [`ForceModelConfig::build`], never per evaluation
+    /// (same pattern as the integrator's `validate_config`).
+    fn validate(&self) {
+        if let GravityFidelity::Zonal { j3, j4 } = self.gravity {
+            assert!(
+                j3.is_finite() && j4.is_finite(),
+                "zonal coefficients must be finite, got j3 = {j3}, j4 = {j4}"
+            );
+        }
+        if let Some(
+            DragConfig::HarrisPriester { inv_beta } | DragConfig::Exponential { inv_beta },
+        ) = self.drag
+        {
+            assert!(
+                inv_beta.is_finite() && inv_beta >= 0.0,
+                "drag inv_beta (Cd*A/m) must be finite and >= 0, got {inv_beta}"
+            );
+        }
+        if let Some(srp) = self.srp {
+            assert!(
+                srp.cr_area_over_mass.is_finite() && srp.cr_area_over_mass >= 0.0,
+                "SRP Cr*A/m must be finite and >= 0, got {}",
+                srp.cr_area_over_mass
+            );
         }
     }
 

@@ -414,8 +414,19 @@ fn accept_trial<F: TimeAwareAccel>(
 /// clamping the final step to land on it (grid-exact sampling, design
 /// Decision 6). Steps at or below the floor are accepted unconditionally
 /// (see [`DpConfig::min_step_s`]).
+///
+/// The loop is driven by an integer iteration budget rather than the
+/// float time itself: acceptances advance `t` by at least `min_step_s`
+/// and each rejection shrinks `h` toward the floor, so the budget below
+/// is generous by construction — exhausting it means a configuration
+/// invariant is broken, and panicking loudly beats spinning.
 fn advance_to_target<F: TimeAwareAccel>(ctx: &mut StepCtx<'_, F>, target: f64) {
-    while ctx.t < target {
+    let accept_budget = ((target - ctx.t) / ctx.config.min_step_s).ceil().max(1.0);
+    let max_iterations = (accept_budget as usize).saturating_mul(8).max(1024);
+    for _ in 0..max_iterations {
+        if ctx.t >= target {
+            return;
+        }
         let remaining = target - ctx.t;
         let lands = ctx.h >= remaining;
         let h_try = if lands { remaining } else { ctx.h };
@@ -429,6 +440,13 @@ fn advance_to_target<F: TimeAwareAccel>(ctx: &mut StepCtx<'_, F>, target: f64) {
                 .reject(h_try, trial.err)
                 .max(ctx.config.min_step_s);
         }
+    }
+    if ctx.t < target {
+        panic!(
+            "adaptive stepper exhausted {max_iterations} iterations before reaching \
+             t = {target} (reached {}); min_step_s = {} — configuration invariant broken",
+            ctx.t, ctx.config.min_step_s
+        );
     }
 }
 

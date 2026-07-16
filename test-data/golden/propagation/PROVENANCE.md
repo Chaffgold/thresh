@@ -59,7 +59,7 @@ velocity transport term uses omega_earth = 7.2921150e-5 rad/s
 - **legendre-recursion**: Fully-normalized associated Legendre recursion: seeds P00=1, P11=sqrt(3)*u; sectoral Pmm = u*sqrt((2m+1)/(2m))*P(m-1,m-1); non-sectoral Pnm = a_nm*t*P(n-1,m) - b_nm*P(n-2,m) with a_nm = sqrt((2n-1)(2n+1)/((n-m)(n+m))), b_nm = sqrt((2n+1)(n+m-1)(n-m-1)/((n-m)(n+m)(2n-3))); t = sin(lat), u = cos(lat); normalization sqrt(k(2n+1)(n-m)!/(n+m)!), k=1 (m=0) else 2. Fetched from the MITgcm geoid cookbook sec. 3.7 (http://mitgcm.org/~mlosch/geoidcookbook/node11.html), which follows Holmes & Featherstone 2002 (J. Geodesy 76:279) and Torge 1991.
 - **barthelmes**: Barthelmes, 'Definition of Functionals of the Geopotential ...' (GFZ STR09/02, revised Jan 2013), Eq. (108): W = (GM/r) * sum_l sum_m (R/r)^l * Plm(sin phi) * (Clm cos(m lambda) + Slm sin(m lambda)), spherical geocentric coordinates, fully normalized. Fetched from https://gfzpublic.gfz.de/pubman/item/item_104132_4/component/file_104133/0902-2.pdf
 
-EGM96 coefficients were consumed from: local copy /private/tmp/claude-501/-Users-e-Development-GitHub-thresh/421b8a15-fee7-4d94-9fe6-0111b1b28733/scratchpad/EGM96.gfc (THRESH_EGM96_GFC).
+EGM96 coefficients were consumed from: http://icgem.gfz-potsdam.de/getmodel/gfc/971b0a3b49a497910aad23cd85e066d4cd9af0aeafe7ce6301a696bed8570be3/EGM96.gfc (local sha256-verified copy via THRESH_EGM96_GFC).
 
 ## `sun-moon-ephemeris.json`
 

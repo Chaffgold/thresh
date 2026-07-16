@@ -447,7 +447,14 @@ def fetch_egm96_gfc_bytes() -> tuple[bytes, str]:
     """Return (file bytes, description of where they came from)."""
     override = os.environ.get("THRESH_EGM96_GFC")
     if override:
-        return Path(override).read_bytes(), f"local copy {override} (THRESH_EGM96_GFC)"
+        # Stable, machine-independent origin label: the canonical source is
+        # the ICGEM URL; the local copy is verified against the pinned
+        # SHA-256 by the caller, so recording the URL is truthful and keeps
+        # regenerated fixtures byte-identical across machines.
+        return (
+            Path(override).read_bytes(),
+            f"{EGM96_ICGEM_URL} (local sha256-verified copy via THRESH_EGM96_GFC)",
+        )
     req = urllib.request.Request(
         EGM96_ICGEM_URL, headers={"User-Agent": "thresh-golden-generator/1.0"}
     )
@@ -2119,10 +2126,14 @@ def provenance_markdown(
         "",
         "Measured at generation time:",
         "",
-        "| arc | integrator (m) | ephemeris swap (m) | apex conv (m) | rtol 1e-9 (m, info) "
-        "| tolerance (m) | tolerance (m/s) |",
-        "|-----|----------------|--------------------|---------------|---------------------"
-        "|---------------|-----------------|",
+        (
+            "| arc | integrator (m) | ephemeris swap (m) | apex conv (m) "
+            + "| rtol 1e-9 (m, info) | tolerance (m) | tolerance (m/s) |"
+        ),
+        (
+            "|-----|----------------|--------------------|---------------"
+            + "|---------------------|---------------|-----------------|"
+        ),
     ]
     for m in arc_measured:
         lines.append(
