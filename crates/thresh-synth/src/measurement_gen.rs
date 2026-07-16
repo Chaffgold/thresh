@@ -2,7 +2,10 @@
 
 use rand::Rng;
 use rand_distr::{Distribution, Normal};
+use serde::{Deserialize, Serialize};
 use thresh_core::measurement::Measurement;
+use thresh_core::propagation::iono_delay::{IonoDelayConfig, iono_range_delay_m};
+use thresh_core::propagation::refraction::{RefractionConfig, apply_refraction};
 
 use crate::trajectory::Waypoint;
 
@@ -158,6 +161,77 @@ impl Default for RadarConfig {
     }
 }
 
+/// Opt-in atmospheric-bias configuration for synthetic radar generation
+/// (design Decision 4 of the `atmospheric-measurement-propagation` change).
+///
+/// Bundles the tropospheric-refraction and ionospheric-group-delay models
+/// (either optional) plus the station altitude the refraction ray integral
+/// starts from. Passed as an `Option` on the biased generation path
+/// ([`generate_radar_biased`]); when the whole config is absent, generation is
+/// byte-for-byte the pre-change behaviour (spec "Default generation is
+/// unchanged"). The frequency lives inside [`IonoDelayConfig`].
+///
+/// Serde-defaulted throughout so a partial TOML/JSON config parses: an omitted
+/// `refraction` or `iono` disables that term, and `station_alt_m` defaults to
+/// the surface (0 m). Applying it biases the **true** geometric RAE *before*
+/// measurement noise is added (bias-then-noise), and only the range and
+/// elevation channels — refraction and ionospheric delay are azimuthally
+/// symmetric, so azimuth is untouched.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+pub struct AtmosphereBiasConfig {
+    /// Tropospheric-refraction model (`None` disables refraction bias).
+    #[serde(default)]
+    pub refraction: Option<RefractionConfig>,
+    /// Ionospheric group-delay model (`None` disables the delay bias).
+    #[serde(default)]
+    pub iono: Option<IonoDelayConfig>,
+    /// Radar station altitude above the surface (m), the lower endpoint of the
+    /// refraction ray integral. The target altitude is derived per detection
+    /// as `station_alt_m + up`, `up` being the ENU vertical component.
+    #[serde(default)]
+    pub station_alt_m: f64,
+}
+
+impl AtmosphereBiasConfig {
+    /// Bias a true geometric `(elevation, range)` into the apparent measurement
+    /// the atmosphere would produce, given the detection's ENU vertical
+    /// component `up_m` (`= range·sin(elevation)`).
+    ///
+    /// Refraction is applied first (bending the elevation and lengthening the
+    /// range), then the ionospheric delay is added at the resulting apparent
+    /// elevation — the same order [`thresh_core::propagation::correct_atmosphere`]
+    /// inverts. Returns `(apparent_elevation_rad, apparent_range_m)`.
+    ///
+    /// The ionospheric leg is a **step function of target altitude** (the
+    /// simplification documented at [`IonoDelayConfig`]): the full thin-shell
+    /// slant delay applies only when the target altitude
+    /// (`station_alt_m + up_m`) is at or above the configured shell height —
+    /// such targets traverse effectively all of the TEC. Sub-ionospheric
+    /// targets (aircraft, low ballistic segments) accumulate essentially none
+    /// of it, so no delay is added; fractional traversal for targets inside
+    /// the ionosphere is out of scope and approximated by the step.
+    pub fn apply_to_rae(&self, elevation_rad: f64, range_m: f64, up_m: f64) -> (f64, f64) {
+        let target_alt_m = self.station_alt_m + up_m;
+        let (apparent_el, refracted_range) = match &self.refraction {
+            Some(cfg) => apply_refraction(
+                cfg,
+                elevation_rad,
+                range_m,
+                self.station_alt_m,
+                target_alt_m,
+            ),
+            None => (elevation_rad, range_m),
+        };
+        let apparent_range = match &self.iono {
+            Some(cfg) if target_alt_m >= cfg.shell_height_m => {
+                refracted_range + iono_range_delay_m(cfg, apparent_el)
+            }
+            _ => refracted_range,
+        };
+        (apparent_el, apparent_range)
+    }
+}
+
 /// Generate a radar measurement from a waypoint (or None if not detected).
 ///
 /// When `rcs_m2` is `Some(...)` and the config has a `radar_equation`, detection
@@ -168,7 +242,7 @@ pub fn generate_radar<R: Rng>(
     config: &RadarConfig,
     rng: &mut R,
 ) -> Option<Measurement> {
-    generate_radar_with_rcs(waypoint, config, None, rng)
+    generate_radar_full(waypoint, config, None, None, rng)
 }
 
 /// Generate a radar measurement with an explicit target RCS.
@@ -176,6 +250,45 @@ pub fn generate_radar_with_rcs<R: Rng>(
     waypoint: &Waypoint,
     config: &RadarConfig,
     rcs_m2: Option<f64>,
+    rng: &mut R,
+) -> Option<Measurement> {
+    generate_radar_full(waypoint, config, rcs_m2, None, rng)
+}
+
+/// Generate a radar measurement, optionally applying atmospheric bias to the
+/// true RAE geometry before measurement noise is added (bias-then-noise; design
+/// Decision 4).
+///
+/// With `bias = None` this is exactly [`generate_radar_with_rcs`] — the same
+/// RNG draws in the same order, so the output is byte-for-byte identical to the
+/// pre-change generator (spec "Default generation is unchanged"). With
+/// `bias = Some(cfg)` the geometric range and elevation are shifted by the
+/// modeled refraction and ionospheric delay via
+/// [`AtmosphereBiasConfig::apply_to_rae`] *before* the Gaussian noise samples
+/// are added.
+pub fn generate_radar_biased<R: Rng>(
+    waypoint: &Waypoint,
+    config: &RadarConfig,
+    rcs_m2: Option<f64>,
+    bias: Option<&AtmosphereBiasConfig>,
+    rng: &mut R,
+) -> Option<Measurement> {
+    generate_radar_full(waypoint, config, rcs_m2, bias, rng)
+}
+
+/// Core radar-measurement generator shared by the public entry points.
+///
+/// Detection probability is computed from the **true** geometric range (the
+/// SNR that governs detection is unaffected by the propagation bias). When
+/// `bias` is `Some`, the reported range/elevation are the atmosphere-biased
+/// apparent values; azimuth is never biased. The three noise samples are drawn
+/// in range/azimuth/elevation order regardless of `bias`, so the `None` path is
+/// bitwise identical to the pre-change generator.
+fn generate_radar_full<R: Rng>(
+    waypoint: &Waypoint,
+    config: &RadarConfig,
+    rcs_m2: Option<f64>,
+    bias: Option<&AtmosphereBiasConfig>,
     rng: &mut R,
 ) -> Option<Measurement> {
     let pos = &waypoint.position;
@@ -194,15 +307,22 @@ pub fn generate_radar_with_rcs<R: Rng>(
     let azimuth = pos[1].atan2(pos[0]);
     let elevation = (pos[2] / range).asin();
 
+    // Bias the TRUE RAE before noise (bias-then-noise). `None` leaves the
+    // geometry untouched, so the noise-add below matches the pre-change bytes.
+    let (biased_elevation, biased_range) = match bias {
+        Some(cfg) => cfg.apply_to_rae(elevation, range, pos[2]),
+        None => (elevation, range),
+    };
+
     let std_normal = Normal::new(0.0, 1.0).unwrap();
     let range_n: f64 = std_normal.sample(rng);
     let az_n: f64 = std_normal.sample(rng);
     let el_n: f64 = std_normal.sample(rng);
 
     Some(Measurement::Radar {
-        range: range + range_n * config.range_sigma,
+        range: biased_range + range_n * config.range_sigma,
         azimuth: azimuth + az_n * config.azimuth_sigma,
-        elevation: elevation + el_n * config.elevation_sigma,
+        elevation: biased_elevation + el_n * config.elevation_sigma,
         range_rate: None,
         time: waypoint.time,
         sensor_id: config.sensor_id,
@@ -473,5 +593,262 @@ mod tests {
         let mut rng = rand::rng();
         let result = generate_radar(&wp, &config, &mut rng);
         assert!(result.is_some(), "Should detect at p_detection=1.0");
+    }
+
+    // --- Atmospheric bias (design Decision 4) ---------------------------------
+
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    /// A low-elevation waypoint whose geometry produces a meaningful bias:
+    /// ~5.7° elevation at ~40 km slant range.
+    fn low_el_waypoint() -> Waypoint {
+        Waypoint {
+            time: 3.0,
+            position: [38_000.0, 12_000.0, 4_000.0],
+            velocity: [180.0, 20.0, 0.0],
+        }
+    }
+
+    fn demo_bias() -> AtmosphereBiasConfig {
+        AtmosphereBiasConfig {
+            refraction: Some(RefractionConfig::crpl()),
+            iono: Some(IonoDelayConfig::new(20.0, 1.3e9)),
+            station_alt_m: 0.0,
+        }
+    }
+
+    /// Spec "Default generation is unchanged": with the bias config absent the
+    /// new biased entry point draws the same RNG samples in the same order and
+    /// returns byte-for-byte the pre-change `generate_radar` output. Compared
+    /// against a hand-inlined replica of the original algorithm at a shared
+    /// seed (the "identical-RNG comparison").
+    #[test]
+    fn default_generation_is_bitwise_identical() {
+        let config = RadarConfig {
+            p_detection: 1.0,
+            ..Default::default()
+        };
+        let wp = low_el_waypoint();
+
+        // Replica of the pre-change generator: pd draw, then range/az/el noise.
+        let mut replica_rng = StdRng::seed_from_u64(0xA7A7_1234_5678_9ABC);
+        let pos = wp.position;
+        let range = (pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]).sqrt();
+        let _pd_draw: f64 = replica_rng.random::<f64>(); // consumed; p_detection = 1.0 always detects
+        let azimuth = pos[1].atan2(pos[0]);
+        let elevation = (pos[2] / range).asin();
+        let std_normal = Normal::new(0.0, 1.0).unwrap();
+        let range_n: f64 = std_normal.sample(&mut replica_rng);
+        let az_n: f64 = std_normal.sample(&mut replica_rng);
+        let el_n: f64 = std_normal.sample(&mut replica_rng);
+        let expected = Measurement::Radar {
+            range: range + range_n * config.range_sigma,
+            azimuth: azimuth + az_n * config.azimuth_sigma,
+            elevation: elevation + el_n * config.elevation_sigma,
+            range_rate: None,
+            time: wp.time,
+            sensor_id: config.sensor_id,
+        };
+
+        // Existing API, and the new biased entry with `None`, must both match
+        // the replica bit-for-bit at the same seed.
+        for produced in [
+            generate_radar(
+                &wp,
+                &config,
+                &mut StdRng::seed_from_u64(0xA7A7_1234_5678_9ABC),
+            ),
+            generate_radar_biased(
+                &wp,
+                &config,
+                None,
+                None,
+                &mut StdRng::seed_from_u64(0xA7A7_1234_5678_9ABC),
+            ),
+        ] {
+            let (
+                Some(Measurement::Radar {
+                    range: r,
+                    azimuth: a,
+                    elevation: e,
+                    ..
+                }),
+                Measurement::Radar {
+                    range: er,
+                    azimuth: ea,
+                    elevation: ee,
+                    ..
+                },
+            ) = (produced, &expected)
+            else {
+                panic!("expected radar measurements");
+            };
+            assert_eq!(r.to_bits(), er.to_bits(), "range must be bitwise identical");
+            assert_eq!(
+                a.to_bits(),
+                ea.to_bits(),
+                "azimuth must be bitwise identical"
+            );
+            assert_eq!(
+                e.to_bits(),
+                ee.to_bits(),
+                "elevation must be bitwise identical"
+            );
+        }
+    }
+
+    /// Spec "Bias applied before noise": with the noise sigmas set to zero the
+    /// biased generator returns exactly the true geometry plus the modeled
+    /// refraction and ionospheric biases — bit-for-bit `apply_to_rae`, with
+    /// azimuth untouched.
+    #[test]
+    fn bias_applied_before_noise_zero_noise() {
+        let config = RadarConfig {
+            p_detection: 1.0,
+            range_sigma: 0.0,
+            azimuth_sigma: 0.0,
+            elevation_sigma: 0.0,
+            clutter_rate: 0.0,
+            ..Default::default()
+        };
+        let wp = low_el_waypoint();
+        let bias = demo_bias();
+
+        let pos = wp.position;
+        let range = (pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]).sqrt();
+        let true_azimuth = pos[1].atan2(pos[0]);
+        let true_elevation = (pos[2] / range).asin();
+        let (expected_el, expected_range) = bias.apply_to_rae(true_elevation, range, pos[2]);
+
+        let mut rng = StdRng::seed_from_u64(0x1122_3344_5566_7788);
+        let Some(Measurement::Radar {
+            range: got_range,
+            azimuth: got_az,
+            elevation: got_el,
+            ..
+        }) = generate_radar_biased(&wp, &config, None, Some(&bias), &mut rng)
+        else {
+            panic!("expected a radar detection at p_detection = 1.0");
+        };
+
+        // Zero noise ⇒ output is exactly the biased truth (bitwise).
+        assert_eq!(got_range.to_bits(), expected_range.to_bits());
+        assert_eq!(got_el.to_bits(), expected_el.to_bits());
+        // Azimuth carries neither bias nor (zero) noise.
+        assert_eq!(got_az.to_bits(), true_azimuth.to_bits());
+
+        // Sanity: refraction lengthens the range and lifts the elevation. The
+        // configured iono term contributes zero here — the 4 km target is far
+        // below the 450 km shell, so the step-function gate (documented at
+        // `IonoDelayConfig`) correctly withholds the full-traversal delay.
+        assert!(
+            expected_range > range,
+            "biased range {expected_range} must exceed true {range}"
+        );
+        assert!(
+            expected_el > true_elevation,
+            "biased elevation {expected_el} must exceed true {true_elevation}"
+        );
+        // The tropospheric excess alone is ~10 m at this low-elevation
+        // geometry, so the range bias is well above a metre.
+        assert!(
+            expected_range - range > 1.0,
+            "range bias {} m unexpectedly small",
+            expected_range - range
+        );
+    }
+
+    /// Each bias term can be enabled independently; a fully-empty config is the
+    /// identity on the geometry (only noise, which is zeroed here, remains).
+    /// The iono-only case uses an exo-ionospheric target (above the shell) so
+    /// the step-function gate admits the delay.
+    #[test]
+    fn bias_terms_are_independently_optional() {
+        let wp = low_el_waypoint();
+        let pos = wp.position;
+        let range = (pos[0] * pos[0] + pos[1] * pos[1] + pos[2] * pos[2]).sqrt();
+        let elevation = (pos[2] / range).asin();
+
+        let empty = AtmosphereBiasConfig::default();
+        let (el0, r0) = empty.apply_to_rae(elevation, range, pos[2]);
+        assert_eq!(el0.to_bits(), elevation.to_bits());
+        assert_eq!(r0.to_bits(), range.to_bits());
+
+        // Exo-ionospheric geometry: a target well above the 450 km shell.
+        let exo_up_m: f64 = 600_000.0;
+        let exo_range_m: f64 = 1_200_000.0;
+        let exo_el = (exo_up_m / exo_range_m).asin();
+        let iono_only = AtmosphereBiasConfig {
+            iono: Some(IonoDelayConfig::new(20.0, 1.3e9)),
+            ..Default::default()
+        };
+        let (el_i, r_i) = iono_only.apply_to_rae(exo_el, exo_range_m, exo_up_m);
+        assert_eq!(
+            el_i.to_bits(),
+            exo_el.to_bits(),
+            "iono leaves elevation untouched"
+        );
+        assert!(r_i > exo_range_m, "iono lengthens range above the shell");
+
+        let refr_only = AtmosphereBiasConfig {
+            refraction: Some(RefractionConfig::crpl()),
+            ..Default::default()
+        };
+        let (el_r, r_r) = refr_only.apply_to_rae(elevation, range, pos[2]);
+        assert!(el_r > elevation, "refraction lifts elevation");
+        assert!(r_r > range, "refraction lengthens range");
+    }
+
+    /// The ionospheric leg is a step function of target altitude (the
+    /// simplification documented at `IonoDelayConfig` and `apply_to_rae`):
+    /// zero delay below the configured shell height, the full thin-shell
+    /// slant delay at or above it.
+    #[test]
+    fn iono_gate_is_step_function_of_target_altitude() {
+        let iono_cfg = IonoDelayConfig::new(20.0, 1.3e9);
+        let shell_m = iono_cfg.shell_height_m;
+        let bias = AtmosphereBiasConfig {
+            iono: Some(iono_cfg),
+            ..Default::default()
+        };
+        let range_m: f64 = 1_500_000.0;
+
+        // Sub-ionospheric (aircraft) target: identity on the range.
+        let aircraft_up_m: f64 = 4_000.0;
+        let el_low = (aircraft_up_m / range_m).asin();
+        let (_, r_low) = bias.apply_to_rae(el_low, range_m, aircraft_up_m);
+        assert_eq!(
+            r_low.to_bits(),
+            range_m.to_bits(),
+            "sub-ionospheric target must accumulate no delay"
+        );
+
+        // Target exactly at the shell and above it: the full slant delay,
+        // bit-for-bit `iono_range_delay_m` at the apparent elevation.
+        for up_m in [shell_m, shell_m + 150_000.0] {
+            let el = (up_m / range_m).asin();
+            let (_, r) = bias.apply_to_rae(el, range_m, up_m);
+            let expected = range_m + iono_range_delay_m(bias.iono.as_ref().unwrap(), el);
+            assert_eq!(
+                r.to_bits(),
+                expected.to_bits(),
+                "exo-ionospheric target (up = {up_m} m) must carry the full slant delay"
+            );
+        }
+    }
+
+    /// Serde: an empty table parses to the all-absent default (the opt-out
+    /// path), and a partial table fills only the fields it names.
+    #[test]
+    fn atmosphere_bias_serde_defaults() {
+        let empty: AtmosphereBiasConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty, AtmosphereBiasConfig::default());
+        let partial: AtmosphereBiasConfig =
+            serde_json::from_str(r#"{"iono": {"vtec_tecu": 12.0, "frequency_hz": 1.3e9}}"#)
+                .unwrap();
+        assert!(partial.refraction.is_none());
+        assert_eq!(partial.station_alt_m.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(partial.iono.unwrap().vtec_tecu, 12.0);
     }
 }

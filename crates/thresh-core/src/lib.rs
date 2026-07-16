@@ -10,6 +10,7 @@ pub mod measurement;
 pub mod motion_mode;
 pub mod orbital;
 pub mod othr;
+pub mod propagation;
 pub mod sensor;
 pub mod state;
 pub mod time;

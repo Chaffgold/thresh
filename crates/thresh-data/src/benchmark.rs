@@ -10,6 +10,7 @@ use rand::rngs::StdRng;
 use serde::{Deserialize, Serialize};
 
 use thresh_core::eci::enu_to_eci;
+use thresh_core::propagation::correct_atmosphere;
 use thresh_core::track::TargetClass;
 use thresh_eval::consistency::{
     ConsistencyAccumulator, EstimateFrame, INTERLEAVED_POSITION_INDICES, TrackEstimate, chi2,
@@ -19,8 +20,8 @@ use thresh_eval::gospa::{GospaParams, gospa_sequence};
 use thresh_eval::hota::compute_hota_at_threshold;
 use thresh_eval::matching::FrameData;
 use thresh_eval::metrics::{compute_idf1, compute_mot_metrics};
-use thresh_synth::measurement_gen::RadarConfig;
-use thresh_synth::scenario::{GroundTruth, run_scenario_with_rng};
+use thresh_synth::measurement_gen::{AtmosphereBiasConfig, RadarConfig, generate_radar_biased};
+use thresh_synth::scenario::{GroundTruth, Scenario, TimedMeasurement, run_scenario_with_rng};
 use thresh_synth::trajectory::{Segment, SegmentType, Trajectory};
 use thresh_tracker::tracker::MultiObjectTracker;
 use thresh_tracker::tracker_variant::TrackerVariant;
@@ -249,6 +250,24 @@ pub struct ScenarioParameters {
     /// see, in both directions).
     #[serde(default)]
     pub tracker_noise_sigma: Option<f64>,
+    /// Optional atmospheric-bias configuration for the synthetic RAE radar
+    /// generator (`atmospheric-measurement-propagation` design Decision 4).
+    ///
+    /// `None` (the default, and every committed scenario) generates the exact
+    /// pre-change geometry — the honest measurement path. `Some(cfg)` biases
+    /// the true RAE by tropospheric refraction and ionospheric group delay
+    /// before noise, feeding the corrected-vs-uncorrected consistency
+    /// demonstration (Decision 5). Ignored by the `Cartesian` measurement
+    /// model, which bypasses the radar generator.
+    #[serde(default)]
+    pub atmosphere_bias: Option<AtmosphereBiasConfig>,
+    /// When `true`, the runner removes [`Self::atmosphere_bias`] at the
+    /// RAE→Cartesian conversion seam (the inverse models with the *same*
+    /// parameters) before feeding detections to the tracker. `false` (the
+    /// default) leaves detections untouched — the uncorrected path. No effect
+    /// when `atmosphere_bias` is `None`.
+    #[serde(default)]
+    pub atmosphere_correction: bool,
 }
 
 /// Measurement model driving the synthetic runner's noise generation.
@@ -615,7 +634,7 @@ pub fn run_synthetic_benchmark(manifest: &ScenarioManifest) -> BenchmarkResult {
     // --- Build trajectories (deterministic, spread out) ---
     let trajectories = build_trajectories(params);
 
-    let scenario = thresh_synth::scenario::Scenario {
+    let scenario = Scenario {
         name: manifest.name.clone(),
         trajectories,
     };
@@ -627,8 +646,15 @@ pub fn run_synthetic_benchmark(manifest: &ScenarioManifest) -> BenchmarkResult {
     // (spec "Deterministic gate outcome" — matches the seeded ballistic /
     // orbital / ADS-B runners in this file; previously thread-local).
     let mut scenario_rng = StdRng::seed_from_u64(0x5EED_C0DE_5EED_C0DE);
-    let (gt_entries, measurements) =
-        run_scenario_with_rng(&scenario, &radar_config, &mut scenario_rng);
+    // With `atmosphere_bias` absent (every committed scenario) this is the
+    // exact pre-change generation call — bitwise-identical measurements. The
+    // biased runner draws the same RNG samples in the same order, so an honest
+    // and a biased run share the noise realisation and differ only by the
+    // deterministic bias (the demonstration's clean A/B).
+    let (gt_entries, measurements) = match &params.atmosphere_bias {
+        Some(bias) => run_scenario_biased(&scenario, &radar_config, bias, &mut scenario_rng),
+        None => run_scenario_with_rng(&scenario, &radar_config, &mut scenario_rng),
+    };
 
     // --- Run tracker ---
     // The benchmark runner currently only drives the Cartesian ENU tracker
@@ -648,9 +674,21 @@ pub fn run_synthetic_benchmark(manifest: &ScenarioManifest) -> BenchmarkResult {
     if params.measurement_model == MeasurementModel::Cartesian {
         collect_cartesian_measurements(&gt_entries, params, &mut scenario_rng, &mut meas_by_time);
     } else {
+        // Correction seam (design Decision 5, resolved open question 4.1): a
+        // thin wrapper around `measurement_to_cartesian` that first inverts the
+        // atmospheric bias on the RAE. Active only when correction is requested
+        // *and* a bias config is present; otherwise the default conversion runs
+        // unchanged (byte-identical to the pre-change path).
+        let correction = params
+            .atmosphere_correction
+            .then_some(params.atmosphere_bias.as_ref())
+            .flatten();
         for tm in &measurements {
             let key = (tm.time / params.dt).round() as i64;
-            let pos = measurement_to_cartesian(&tm.measurement);
+            let pos = match correction {
+                Some(bias) => measurement_to_cartesian_corrected(&tm.measurement, bias),
+                None => measurement_to_cartesian(&tm.measurement),
+            };
             meas_by_time.entry(key).or_default().push(pos);
         }
     }
@@ -702,6 +740,46 @@ pub fn run_synthetic_benchmark(manifest: &ScenarioManifest) -> BenchmarkResult {
         params.measurement_noise_sigma * 5.0,
         start,
     )
+}
+
+/// Biased sibling of `thresh_synth::scenario::run_scenario_with_rng`: same
+/// ground-truth collection, time-sort, and RNG draw sequence, but the radar
+/// detections carry the atmospheric bias (design Decision 4). Lives here rather
+/// than in `thresh-synth`'s scenario module so the honest generation path (and
+/// every committed scenario) stays literally untouched; only the demonstration
+/// opts in via `atmosphere_bias`.
+///
+/// Because `generate_radar_biased` consumes the same RNG samples in the same
+/// order as `generate_radar`, a biased run and an honest run at the same seed
+/// share their detection decisions and noise realisation — they differ only by
+/// the deterministic bias.
+fn run_scenario_biased<R: rand::Rng>(
+    scenario: &Scenario,
+    radar_config: &RadarConfig,
+    bias: &AtmosphereBiasConfig,
+    rng: &mut R,
+) -> (Vec<GroundTruth>, Vec<TimedMeasurement>) {
+    let mut all_gt = Vec::new();
+    let mut all_meas = Vec::new();
+    for traj in &scenario.trajectories {
+        for wp in &traj.generate() {
+            all_gt.push(GroundTruth {
+                target_id: traj.target_id,
+                time: wp.time,
+                position: wp.position,
+                velocity: wp.velocity,
+            });
+            if let Some(m) = generate_radar_biased(wp, radar_config, None, Some(bias), rng) {
+                all_meas.push(TimedMeasurement {
+                    time: wp.time,
+                    measurement: m,
+                });
+            }
+        }
+    }
+    all_meas.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+    all_gt.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+    (all_gt, all_meas)
 }
 
 // ---------------------------------------------------------------------------
@@ -835,6 +913,53 @@ fn measurement_to_cartesian(m: &thresh_core::measurement::Measurement) -> DVecto
     }
 }
 
+/// Correction seam (design Decision 5): convert a radar measurement to
+/// Cartesian after removing the modeled atmospheric bias from its RAE.
+///
+/// The single wrapper around [`measurement_to_cartesian`] the resolved open
+/// question 4.1 selected: it inverts refraction and ionospheric delay with
+/// [`correct_atmosphere`] (the *same* `bias` parameters the generator used),
+/// then applies the identical `range·(cos/sin)` reconstruction. The target
+/// altitude for the refraction inverse is derived from the apparent geometry
+/// (`station_alt_m + range·sin(elevation)`). The ionospheric leg is gated on
+/// that altitude exactly as the forward model gates it
+/// (`AtmosphereBiasConfig::apply_to_rae`'s step-function simplification,
+/// documented at `IonoDelayConfig`): sub-ionospheric targets received no
+/// forward delay, so none is subtracted. Non-radar measurements have no RAE
+/// bias and fall through to the plain conversion.
+fn measurement_to_cartesian_corrected(
+    m: &thresh_core::measurement::Measurement,
+    bias: &AtmosphereBiasConfig,
+) -> DVector<f64> {
+    match m {
+        thresh_core::measurement::Measurement::Radar {
+            range,
+            azimuth,
+            elevation,
+            ..
+        } => {
+            let target_alt_m = bias.station_alt_m + range * elevation.sin();
+            let iono = bias
+                .iono
+                .as_ref()
+                .filter(|cfg| target_alt_m >= cfg.shell_height_m);
+            let (corr_el, corr_range) = correct_atmosphere(
+                bias.refraction.as_ref(),
+                iono,
+                *elevation,
+                *range,
+                bias.station_alt_m,
+                target_alt_m,
+            );
+            let x = corr_range * corr_el.cos() * azimuth.cos();
+            let y = corr_range * corr_el.cos() * azimuth.sin();
+            let z = corr_range * corr_el.sin();
+            DVector::from_column_slice(&[x, y, z])
+        }
+        other => measurement_to_cartesian(other),
+    }
+}
+
 /// Dispatch to the appropriate trajectory builder based on `scenario_type`.
 fn build_trajectories(params: &ScenarioParameters) -> Vec<Trajectory> {
     match params.scenario_type.as_deref() {
@@ -842,11 +967,50 @@ fn build_trajectories(params: &ScenarioParameters) -> Vec<Trajectory> {
         Some("maneuvering") => build_maneuvering_trajectories(params),
         Some("heterogeneous") => build_heterogeneous_trajectories(params),
         Some("low-pd") => build_low_pd_trajectories(params),
+        Some("low-elevation") => build_low_elevation_trajectories(params),
         Some(other) => {
             eprintln!("unknown scenario_type {other:?}, falling back to cv-clean");
             build_cv_clean_trajectories(params)
         }
     }
+}
+
+/// Build the low-elevation aircraft geometry for the atmospheric-bias
+/// demonstration (design Decision 5 / resolved open question 4.2): a handful of
+/// aircraft-like CV targets at long slant range and low altitude so their
+/// elevation sits in the 4°–6° band where tropospheric refraction is large
+/// (~10 m excess range) but still above the 1° refraction validity floor. (A
+/// configured ionospheric term contributes zero at these altitudes: aircraft
+/// sit far below the thin-shell height, so the step-function gate withholds
+/// the full-traversal delay — the demonstration bias is refraction-only in
+/// effect.) Each flies outbound, so its elevation falls and its range grows
+/// over the scenario — the bias is time-varying. ANEES (truth-referenced) sees
+/// it; ANIS does not — the smooth bias is absorbed into the filter's state, so
+/// innovation self-consistency stays essentially unmoved (measured in the
+/// demonstration's three-run table and recorded in design.md).
+fn build_low_elevation_trajectories(params: &ScenarioParameters) -> Vec<Trajectory> {
+    // (initial [east, north, up] m, velocity m/s) — chosen so |pos| ≈ 37–50 km
+    // and asin(up/|pos|) ≈ 4°–6.3°.
+    let targets = [
+        ([38_000.0, 5_000.0, 3_500.0], [180.0, 20.0, 0.0]),
+        ([45_000.0, -8_000.0, 4_200.0], [200.0, -15.0, 0.0]),
+        ([35_000.0, 12_000.0, 2_600.0], [160.0, 25.0, 0.0]),
+        ([50_000.0, 0.0, 5_500.0], [220.0, 10.0, 0.0]),
+    ];
+    targets
+        .into_iter()
+        .enumerate()
+        .map(|(i, (initial_position, initial_velocity))| Trajectory {
+            target_id: i as u32,
+            initial_position,
+            initial_velocity,
+            segments: vec![Segment {
+                segment_type: SegmentType::Cv,
+                duration: params.duration_s,
+            }],
+            dt: params.dt,
+        })
+        .collect()
 }
 
 /// Build 5 constant-velocity trajectories spread in space (the original
@@ -1021,18 +1185,25 @@ fn collect_cartesian_measurements<R: rand::Rng>(
 /// Return the appropriate `RadarConfig` for a scenario type.
 ///
 /// Default (cv-clean / maneuvering / heterogeneous) uses perfect detection
-/// (`p_detection = 1.0`, `clutter_rate = 0.0`). The `"low-pd"` variant
-/// models a challenging sensor environment with `p_detection = 0.7` and
-/// `clutter_rate = 5.0`.
+/// (`p_detection = 1.0`, `clutter_rate = 0.0`) and an angular sigma of
+/// `measurement_noise_sigma / 10 000`. The `"low-pd"` variant models a
+/// challenging sensor environment with `p_detection = 0.7` and
+/// `clutter_rate = 5.0`. The `"low-elevation"` demonstration variant keeps
+/// perfect detection but tightens the angular sigma by 25× (divisor 250 000),
+/// so the *random* cross-range error stays a few metres and the *deterministic*
+/// atmospheric bias is what moves MOTP / ANEES / ANIS — the clean A/B the
+/// corrected-vs-uncorrected demonstration needs. Existing scenario types keep
+/// the `/ 10 000` divisor unchanged (benchmark invariance).
 fn radar_config_for_scenario(params: &ScenarioParameters) -> RadarConfig {
-    let (p_detection, clutter_rate) = match params.scenario_type.as_deref() {
-        Some("low-pd") => (0.7, 5.0),
-        _ => (1.0, 0.0),
+    let (p_detection, clutter_rate, angle_divisor) = match params.scenario_type.as_deref() {
+        Some("low-pd") => (0.7, 5.0, 10_000.0),
+        Some("low-elevation") => (1.0, 0.0, 250_000.0),
+        _ => (1.0, 0.0, 10_000.0),
     };
     RadarConfig {
         range_sigma: params.measurement_noise_sigma,
-        azimuth_sigma: params.measurement_noise_sigma / 10_000.0,
-        elevation_sigma: params.measurement_noise_sigma / 10_000.0,
+        azimuth_sigma: params.measurement_noise_sigma / angle_divisor,
+        elevation_sigma: params.measurement_noise_sigma / angle_divisor,
         p_detection,
         clutter_rate,
         ..Default::default()
@@ -2108,6 +2279,8 @@ mod tests {
                 scenario_type: Some("cv-clean".into()),
                 measurement_model: MeasurementModel::Cartesian,
                 tracker_noise_sigma: None,
+                atmosphere_bias: None,
+                atmosphere_correction: false,
             },
             baselines: Some(Baselines {
                 mota: Some(0.5),
@@ -2268,6 +2441,171 @@ mod tests {
         );
     }
 
+    // --- Atmospheric-bias demonstration (design Decision 5, task 4.3) --------
+
+    /// The demonstration bias (design open question 4.2, resolved:
+    /// low-elevation aircraft): CRPL tropospheric refraction plus a 25 TECU
+    /// L-band (1.3 GHz) ionospheric term, station at sea level. The iono term
+    /// is configured but **inert** at aircraft altitude — the target sits far
+    /// below the 450 km thin shell, so the step-function gate (documented at
+    /// `IonoDelayConfig`) correctly withholds the full-traversal delay on both
+    /// the forward and the correction path: the demonstration bias is
+    /// refraction-only in effect, and the demo doubles as an end-to-end check
+    /// that no unphysical iono bias is attributed to aircraft.
+    fn demonstration_bias() -> AtmosphereBiasConfig {
+        use thresh_core::propagation::iono_delay::IonoDelayConfig;
+        use thresh_core::propagation::refraction::RefractionConfig;
+        AtmosphereBiasConfig {
+            refraction: Some(RefractionConfig::crpl()),
+            iono: Some(IonoDelayConfig::new(25.0, 1.3e9)),
+            station_alt_m: 0.0,
+        }
+    }
+
+    /// Code-constructed manifest for the three-run demonstration (the
+    /// `tracker_noise_sigma` deliberate-regression pattern): the low-elevation
+    /// aircraft geometry, honest RAE radar model, optionally biased and/or
+    /// corrected. No committed scenario TOML is touched.
+    fn demonstration_manifest(
+        bias: Option<AtmosphereBiasConfig>,
+        correct: bool,
+    ) -> ScenarioManifest {
+        ScenarioManifest {
+            name: "atmos-demo".into(),
+            description: "low-elevation aircraft, atmospheric-bias demonstration".into(),
+            source: ScenarioSource::Synthetic,
+            parameters: ScenarioParameters {
+                duration_s: 40.0,
+                dt: 1.0,
+                measurement_noise_sigma: 50.0,
+                gate_threshold: 500.0,
+                tracker_variant: None,
+                scenario_type: Some("low-elevation".into()),
+                measurement_model: MeasurementModel::RadarRae,
+                tracker_noise_sigma: None,
+                atmosphere_bias: bias,
+                atmosphere_correction: correct,
+            },
+            baselines: None,
+        }
+    }
+
+    /// Specs "Uncorrected bias degrades the tracker measurably", "Correction
+    /// recovers near-honest statistics", "Demonstration is deterministic": the
+    /// three-run demonstration through the real synthetic benchmark runner.
+    ///
+    /// Recorded values (fixed seed, this geometry — 4°–6° elevation aircraft,
+    /// refraction-only in effect: the configured 25 TECU L-band iono term is
+    /// gated to zero at aircraft altitude; all three runs share the noise
+    /// realisation so they differ only by the deterministic bias):
+    ///
+    /// | run          | MOTA   | MOTP (m) | ANEES  | ANIS   |
+    /// |--------------|--------|----------|--------|--------|
+    /// | honest       | 0.9512 | 34.808   | 1.5440 | 1.5947 |
+    /// | uncorrected  | 0.9512 | 84.648   | 6.2900 | 1.5948 |
+    /// | corrected    | 0.9512 | 34.803   | 1.5438 | 1.5947 |
+    ///
+    /// The tropospheric bias alone (elevation bending dominates: ~0.05° at
+    /// this geometry maps to tens of metres of cross-range error at 37–50 km,
+    /// on top of the ~10–12 m excess range) inflates MOTP 2.43× and ANEES
+    /// 4.07× while leaving MOTA (and IDF1) untouched — the systematic offset
+    /// is invisible to detection and to MOTA, exactly the failure mode the
+    /// eval-consistency gate exists to catch. ANIS is essentially unmoved
+    /// (1.5947 → 1.5948): the smoothly-varying bias is absorbed into the CV
+    /// filter's state, so innovation self-consistency (ANIS) cannot see it
+    /// while estimate-vs-truth consistency (ANEES) can — ANEES is the
+    /// sensitive statistic here, and the demonstration is scored on the
+    /// ANEES/MOTP separation (open question 4.2). Correction (the same
+    /// parameters, inverted at the conversion seam with the same altitude
+    /// gate) returns MOTP to within 0.02% and ANEES to within 0.02% of
+    /// honest.
+    #[test]
+    fn atmospheric_bias_demonstration_through_runner() {
+        let bias = demonstration_bias();
+        let honest = run_synthetic_benchmark(&demonstration_manifest(None, false));
+        let uncorrected = run_synthetic_benchmark(&demonstration_manifest(Some(bias), false));
+        let corrected = run_synthetic_benchmark(&demonstration_manifest(Some(bias), true));
+
+        // Record the three runs at the test (spec: "values recorded at the test").
+        for (label, r) in [
+            ("honest", &honest),
+            ("uncorrected", &uncorrected),
+            ("corrected", &corrected),
+        ] {
+            eprintln!(
+                "atmos-demo {label}: MOTA {:.4} MOTP {:.4} IDF1 {:.4} \
+                 ANEES {:.4} ({} samples) ANIS {:.4} ({} samples)",
+                r.mota,
+                r.motp,
+                r.idf1,
+                r.anees.unwrap(),
+                r.anees_samples,
+                r.anis.unwrap(),
+                r.anis_samples,
+            );
+        }
+
+        // The runner populates both consistency statistics.
+        assert!(honest.anees.is_some() && honest.anis.is_some());
+        assert!(honest.anees_samples > 0 && honest.anis_samples > 0);
+
+        let (h_anees, u_anees, c_anees) = (
+            honest.anees.unwrap(),
+            uncorrected.anees.unwrap(),
+            corrected.anees.unwrap(),
+        );
+
+        // Scenario "Uncorrected bias degrades the tracker measurably": MOTP
+        // inflates and ANEES shifts well beyond the honest run (documented
+        // margins: MOTP ≥ 1.5× and ANEES ≥ 2× honest — observed 2.43× / 4.07×).
+        assert!(
+            uncorrected.motp > honest.motp * 1.5,
+            "uncorrected MOTP {:.4} must exceed 1.5× honest {:.4}",
+            uncorrected.motp,
+            honest.motp
+        );
+        assert!(
+            u_anees > h_anees * 2.0,
+            "uncorrected ANEES {u_anees:.4} must exceed 2× honest {h_anees:.4}"
+        );
+
+        // The bias is invisible to detection: MOTA/IDF1 are identical across all
+        // three runs (they share the seed, and the bias keeps every track within
+        // the MOTA match threshold).
+        assert_eq!(uncorrected.mota.to_bits(), honest.mota.to_bits());
+        assert_eq!(corrected.mota.to_bits(), honest.mota.to_bits());
+        assert_eq!(uncorrected.idf1.to_bits(), honest.idf1.to_bits());
+
+        // Scenario "Correction recovers near-honest statistics": with the same
+        // parameters inverted at the seam, MOTP and ANEES return to within
+        // documented bands of honest (MOTP within 5%, ANEES within 0.25).
+        assert!(
+            (corrected.motp - honest.motp).abs() < honest.motp * 0.05,
+            "corrected MOTP {:.4} must be within 5% of honest {:.4}",
+            corrected.motp,
+            honest.motp
+        );
+        assert!(
+            (c_anees - h_anees).abs() < 0.25,
+            "corrected ANEES {c_anees:.4} must be within 0.25 of honest {h_anees:.4}"
+        );
+
+        // Scenario "Demonstration is deterministic": re-running each config with
+        // the same seed reproduces every statistic bit-for-bit.
+        for manifest in [
+            demonstration_manifest(None, false),
+            demonstration_manifest(Some(bias), false),
+            demonstration_manifest(Some(bias), true),
+        ] {
+            let a = run_synthetic_benchmark(&manifest);
+            let b = run_synthetic_benchmark(&manifest);
+            assert_eq!(a.mota.to_bits(), b.mota.to_bits());
+            assert_eq!(a.motp.to_bits(), b.motp.to_bits());
+            assert_eq!(a.anees.map(f64::to_bits), b.anees.map(f64::to_bits));
+            assert_eq!(a.anis.map(f64::to_bits), b.anis.map(f64::to_bits));
+        }
+    }
+
     /// A `BenchmarkResult` with the given MOT values and absent
     /// consistency statistics (the pre-`eval-consistency-metrics` shape).
     fn mot_result(mota: f64, motp: f64, idf1: f64, hota: f64) -> BenchmarkResult {
@@ -2326,6 +2664,8 @@ mod tests {
             scenario_type: Some("maneuvering".into()),
             measurement_model: MeasurementModel::RadarRae,
             tracker_noise_sigma: None,
+            atmosphere_bias: None,
+            atmosphere_correction: false,
         };
         let trajs = build_maneuvering_trajectories(&params);
         assert_eq!(trajs.len(), 4, "expected 4 maneuvering trajectories");
@@ -2354,6 +2694,8 @@ mod tests {
             scenario_type: Some("heterogeneous".into()),
             measurement_model: MeasurementModel::RadarRae,
             tracker_noise_sigma: None,
+            atmosphere_bias: None,
+            atmosphere_correction: false,
         };
         let trajs = build_heterogeneous_trajectories(&params);
         assert_eq!(trajs.len(), 5, "expected 5 heterogeneous trajectories");
@@ -2387,6 +2729,8 @@ mod tests {
             scenario_type: Some("low-pd".into()),
             measurement_model: MeasurementModel::RadarRae,
             tracker_noise_sigma: None,
+            atmosphere_bias: None,
+            atmosphere_correction: false,
         };
         let low_pd = build_low_pd_trajectories(&params);
         let cv_clean = build_cv_clean_trajectories(&params);
@@ -2412,6 +2756,8 @@ mod tests {
             scenario_type: None,
             measurement_model: MeasurementModel::RadarRae,
             tracker_noise_sigma: None,
+            atmosphere_bias: None,
+            atmosphere_correction: false,
         };
         let default_cfg = radar_config_for_scenario(&default_params);
         assert!(
