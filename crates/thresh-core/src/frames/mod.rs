@@ -81,6 +81,7 @@ use crate::time::Epoch;
 /// orientation (and, for [`Frame::Pef`]/[`Frame::Itrf`], in co-rotating with
 /// the Earth).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
 pub enum Frame {
     /// Geocentric Celestial Reference Frame — the inertial anchor of the
     /// chain, treated as the J2000 mean equator/mean equinox frame (the
@@ -1030,7 +1031,7 @@ mod tests {
         assert!(!Frame::Teme.is_earth_fixed());
 
         let json = serde_json::to_string(&Frame::Teme).unwrap();
-        assert_eq!(json, "\"Teme\"");
+        assert_eq!(json, "\"TEME\"", "serde form matches Display and fixtures");
         assert_eq!(serde_json::from_str::<Frame>(&json).unwrap(), Frame::Teme);
     }
 

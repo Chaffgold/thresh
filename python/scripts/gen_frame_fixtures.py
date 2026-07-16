@@ -884,9 +884,12 @@ def provenance_markdown(versions: dict, vallado_residuals: dict, zero_fixtures: 
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
-def write_json(path: Path, obj: dict) -> None:
-    path.write_text(json.dumps(obj, indent=2) + "\n", encoding="utf-8")
-    json.loads(path.read_text(encoding="utf-8"))  # parse-back check
+def render_json(obj: dict) -> str:
+    # allow_nan=False: a non-finite value anywhere in a fixture is a
+    # generator bug — fail here rather than emit JSON Rust cannot parse.
+    text = json.dumps(obj, indent=2, allow_nan=False) + "\n"
+    json.loads(text)  # parse-back check on the exact rendered bytes
+    return text
 
 
 def main() -> int:
@@ -894,9 +897,14 @@ def main() -> int:
     versions = package_versions()
     print(f"generator toolchain: {versions}")
 
+    # Build and render every output in memory first; write only after all
+    # succeed, so a failure partway never leaves a mixed fixture set on
+    # disk.
+    outputs: dict[str, str] = {}
+
     vallado, residuals = build_vallado_fixture()
-    write_json(OUT_DIR / "vallado-example-3-15.json", vallado)
-    print("vallado-example-3-15.json written; pyerfa-vs-published residuals:")
+    outputs["vallado-example-3-15.json"] = render_json(vallado)
+    print("vallado-example-3-15.json rendered; pyerfa-vs-published residuals:")
     for leg, res in residuals.items():
         print(f"  {leg:5s} dr={res['dr_m']:.6f} m  dv={res['dv_mps']:.6f} m/s")
 
@@ -904,8 +912,8 @@ def main() -> int:
     for case in ZERO_EOP_CASES:
         fx = build_zero_eop_fixture(case)
         zero_fixtures.append(fx)
-        write_json(OUT_DIR / f"{case['name']}.json", fx)
-        print(f"{case['name']}.json written; comparisons:")
+        outputs[f"{case['name']}.json"] = render_json(fx)
+        print(f"{case['name']}.json rendered; comparisons:")
         for comp in fx["comparisons"]:
             print(
                 f"  {comp['from_frame']:>4s}->{comp['to_frame']:<4s} "
@@ -915,10 +923,11 @@ def main() -> int:
                 f"tolerance {comp['tolerance_m']:.1f} m / {comp['tolerance_mps']:.4f} m/s"
             )
 
-    (OUT_DIR / "PROVENANCE.md").write_text(
-        provenance_markdown(versions, residuals, zero_fixtures), encoding="utf-8"
-    )
-    print(f"PROVENANCE.md written; all fixtures in {OUT_DIR}")
+    outputs["PROVENANCE.md"] = provenance_markdown(versions, residuals, zero_fixtures)
+
+    for name, text in outputs.items():
+        (OUT_DIR / name).write_text(text, encoding="utf-8")
+    print(f"all {len(outputs)} outputs written atomically to {OUT_DIR}")
     return 0
 
 
