@@ -29,5 +29,5 @@
 
 ## 5. Wrap-up
 
-- [ ] 5.1 Full gates: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check`, rustdoc `-Dwarnings`, `openspec validate --all --strict`; complexity spot-check on the ray-integral and mapping helpers.
+- [ ] 5.1 Full gates: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check`, rustdoc `-Dwarnings`, `openspec validate --all --strict --no-interactive`; complexity spot-check on the ray-integral and mapping helpers.
 - [ ] 5.2 Update proposal.md/design.md with implementation-time divergences and the resolutions of the three design Open Questions (demonstration geometry, correction-seam home, quadrature discretization).
