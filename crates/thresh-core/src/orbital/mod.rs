@@ -18,6 +18,6 @@ pub use atmosphere::{ATMOSPHERE_TABLE, atmosphere_density, drag_acceleration};
 pub use gravity::{GravityModel, j2_acceleration, two_body_acceleration};
 pub use integrate::{rk4_stage, rk4_step};
 pub use state::{
-    ElementError, OrbitalElements, OrbitalFrame, OrbitalState, cartesian_to_keplerian,
+    ElementError, Frame, OrbitalElements, OrbitalFrame, OrbitalState, cartesian_to_keplerian,
     keplerian_to_cartesian,
 };

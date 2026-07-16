@@ -5,9 +5,10 @@ use nalgebra::Vector3;
 use serde::{Deserialize, Serialize};
 use thresh_core::eci::{SECONDS_PER_DAY, eci_to_enu};
 use thresh_core::orbital::{
-    ElementError, GravityModel, OrbitalElements, OrbitalFrame, cartesian_to_keplerian,
-    j2_acceleration, keplerian_to_cartesian, rk4_step, two_body_acceleration,
+    ElementError, Frame, GravityModel, OrbitalElements, cartesian_to_keplerian, j2_acceleration,
+    keplerian_to_cartesian, rk4_step, two_body_acceleration,
 };
+use thresh_core::time::Epoch;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -45,15 +46,28 @@ pub fn atmosphere_density(alt_m: f64) -> f64 {
 /// This is the propagator's lightweight Cartesian sample type — it appears
 /// in serialized outputs and the inner RK4 loop. The frame-disciplined
 /// element-representation type is [`thresh_core::orbital::OrbitalState`];
-/// `From` / `TryFrom` conversions between the two are provided below, and
-/// consolidating them is owned by the `astro-time-and-frames` change.
+/// `From` / `TryFrom` conversions between the two are provided below.
+///
+/// # Why `epoch_jd` stays a raw `f64` (astro-time-and-frames, Decision 6)
+///
+/// This type is the innermost plumbing of the truth generators and the
+/// calibrated benchmark chain, whose metrics must stay **bitwise** stable.
+/// Converting `JD → Epoch → JD` through `hifitime`'s integer-nanosecond
+/// representation is not guaranteed bit-exact (measured: up to 1 ulp of a
+/// Julian date), and epoch-stepping in exact seconds rounds differently
+/// from the propagator's `jd + dt/86400` arithmetic — either would silently
+/// drift the calibrated floors. So the sample type keeps the raw UTC Julian
+/// date, and the time-scale-aware [`Epoch`] appears at the API boundary:
+/// the `From`/`TryFrom` conversions below construct it via
+/// [`Epoch::from_jde_utc`] / read it back via `to_jde_utc_days()`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrbitalState {
     /// Position in ECI (metres).
     pub position: [f64; 3],
     /// Velocity in ECI (m/s).
     pub velocity: [f64; 3],
-    /// Epoch as Julian Date.
+    /// Epoch as a Julian Date in the **UTC** scale (see the type-level note
+    /// for why this is not an [`Epoch`]).
     pub epoch_jd: f64,
 }
 
@@ -133,9 +147,12 @@ impl OrbitalState {
 /// Convert the synth Cartesian sample into the frame-disciplined
 /// [`thresh_core::orbital::OrbitalState`].
 ///
-/// The synth propagator's fixed conventions are assumed:
-/// [`OrbitalFrame::EciGmst`] and Earth's WGS-84 `mu`. Consolidation of the
-/// two types is owned by the `astro-time-and-frames` change.
+/// The synth propagator's fixed conventions are assumed: Earth's WGS-84
+/// `mu`, and [`Frame::Teme`] — the truthful name for the "ECI" of the
+/// repo's GMST-only rotation convention (`astro-time-and-frames` design
+/// Decision 6: that chain always was TEME-consistent; the tag now says so).
+/// The sample's UTC Julian date becomes a time-scale-aware epoch via
+/// [`Epoch::from_jde_utc`].
 impl From<OrbitalState> for thresh_core::orbital::OrbitalState {
     fn from(state: OrbitalState) -> Self {
         Self {
@@ -144,15 +161,18 @@ impl From<OrbitalState> for thresh_core::orbital::OrbitalState {
                 velocity: Vector3::new(state.velocity[0], state.velocity[1], state.velocity[2]),
             },
             mu: GravityModel::EARTH_WGS84.mu,
-            frame: OrbitalFrame::EciGmst,
-            epoch_jd: state.epoch_jd,
+            frame: Frame::Teme,
+            epoch: Epoch::from_jde_utc(state.epoch_jd),
         }
     }
 }
 
 /// Convert a [`thresh_core::orbital::OrbitalState`] into the synth Cartesian
-/// sample, dropping the `mu` and frame tags (the synth type is ECI-GMST /
-/// Earth by convention — see `From<OrbitalState>` above).
+/// sample, dropping the `mu` and frame tags (the synth type is TEME / Earth
+/// by convention — see `From<OrbitalState>` above) and reading the epoch
+/// back as a UTC Julian date (`to_jde_utc_days()`; not guaranteed bit-exact
+/// against a JD the epoch was constructed from — see the [`OrbitalState`]
+/// type-level note).
 ///
 /// Fallible (`TryFrom` rather than `From`) because a `Tle`-represented state
 /// cannot be converted without SGP4
@@ -165,7 +185,7 @@ impl TryFrom<thresh_core::orbital::OrbitalState> for OrbitalState {
         Ok(Self {
             position: [position.x, position.y, position.z],
             velocity: [velocity.x, velocity.y, velocity.z],
-            epoch_jd: state.epoch_jd,
+            epoch_jd: state.epoch.to_jde_utc_days(),
         })
     }
 }
@@ -687,7 +707,7 @@ mod tests {
     // ── From/TryFrom conversions with the core representation (task 2.6) ──
 
     #[test]
-    fn synth_to_core_assumes_eci_gmst_and_earth_mu() {
+    fn synth_to_core_assumes_teme_and_earth_mu() {
         let synth = OrbitalState::from_cartesian(
             [7_000_000.0, 1_000.0, -2_000.0],
             [10.0, 7_500.0, -20.0],
@@ -695,9 +715,11 @@ mod tests {
         );
         let core = thresh_core::orbital::OrbitalState::from(synth.clone());
 
-        assert_eq!(core.frame, OrbitalFrame::EciGmst);
+        // The GMST-convention "ECI" is truthfully TEME (astro-time-and-
+        // frames design Decision 6), and the UTC JD becomes an Epoch.
+        assert_eq!(core.frame, Frame::Teme);
         assert_eq!(core.mu.to_bits(), GravityModel::EARTH_WGS84.mu.to_bits());
-        assert_eq!(core.epoch_jd, synth.epoch_jd);
+        assert_eq!(core.epoch, Epoch::from_jde_utc(synth.epoch_jd));
         let (pos, vel) = core.as_cartesian().unwrap();
         for i in 0..3 {
             assert_eq!(pos[i].to_bits(), synth.position[i].to_bits());
@@ -715,7 +737,11 @@ mod tests {
         let core = thresh_core::orbital::OrbitalState::from(synth.clone());
         let back = OrbitalState::try_from(core).unwrap();
 
-        assert_eq!(back.epoch_jd, synth.epoch_jd);
+        // Position/velocity round-trip bitwise unconditionally. The epoch
+        // JD round trip through hifitime's integer-nanosecond storage is
+        // bit-exact for half-integral JDs like this TLE epoch (general JDs
+        // may differ by 1 ulp — the reason the sample type keeps raw JDs).
+        assert_eq!(back.epoch_jd.to_bits(), synth.epoch_jd.to_bits());
         for i in 0..3 {
             assert_eq!(back.position[i].to_bits(), synth.position[i].to_bits());
             assert_eq!(back.velocity[i].to_bits(), synth.velocity[i].to_bits());
@@ -732,8 +758,8 @@ mod tests {
                     .to_string(),
             },
             mu: GravityModel::EARTH_WGS84.mu,
-            frame: OrbitalFrame::Teme,
-            epoch_jd: 2_460_310.5,
+            frame: Frame::Teme,
+            epoch: Epoch::from_jde_utc(2_460_310.5),
         };
         assert_eq!(
             OrbitalState::try_from(tle_state).unwrap_err(),

@@ -1,0 +1,193 @@
+{
+  "case": "vallado-example-3-15",
+  "description": "Vallado's worked IAU-76/FK5 reduction (Fundamentals of Astrodynamics and Applications, Example 3-15; identical LEO test case published in AAS 06-675 and AIAA 2006-6753 Rev 3). Input is the ITRF state; every leg's published position must be reproduced to <= 1 m with the fixture's EOP inputs.",
+  "epoch_utc": "2004-04-06T07:51:28.386009Z",
+  "eop": {
+    "dut1_s": -0.4399619,
+    "dat_s": 32,
+    "xp_arcsec": -0.140682,
+    "yp_arcsec": 0.333309,
+    "lod_s": 0.0015563,
+    "ddpsi_arcsec": -0.052195,
+    "ddeps_arcsec": -0.003875,
+    "note": "dut1/xp/yp from ex3_15.m (AAS 06-675 rounds dut1 to -0.439962 s; AIAA 2006-6753 Rev 3 to -0.439961 s - sub-mm effect). lod affects only the omega magnitude in velocity terms (~mm/s here); ddpsi/ddeps are the EOP nutation corrections, recorded for completeness but NOT applied by the IAU-76/FK5 provider under test (compare against the *_iau76 rows)."
+  },
+  "input": {
+    "frame": "ITRF",
+    "r_m": [
+      -1033479.383,
+      7901295.2754,
+      6380356.5958
+    ],
+    "v_mps": [
+      -3225.63652,
+      -2872.45145,
+      5531.924446
+    ],
+    "source": "Vallado, Seago, Seidelmann, 'Implementation Issues Surrounding the New IAU Reference Frameworks' (AAS 06-675), LEO test case, p. 17. https://www.agi.com/getmedia/2a33d303-9a4e-4520-9da0-86a4d5e45a10/Implementation-Issues-Surrounding-the-New-IAU-Reference-Systems-for-Astrodynamics.pdf (row 'ITRF'); inputs also in CelesTrak/fundamentals-of-astrodynamics companion code, software/matlab/ex3_15.m (input epoch and EOP for Example 3-15). https://github.com/CelesTrak/fundamentals-of-astrodynamics/blob/main/software/matlab/ex3_15.m"
+  },
+  "legs": [
+    {
+      "frame": "PEF",
+      "published": {
+        "r_m": [
+          -1033475.0313,
+          7901305.5856,
+          6380344.5328
+        ],
+        "v_mps": [
+          -3225.632747,
+          -2872.442511,
+          5531.931288
+        ],
+        "source": "Vallado, Seago, Seidelmann, 'Implementation Issues Surrounding the New IAU Reference Frameworks' (AAS 06-675), LEO test case, p. 17. https://www.agi.com/getmedia/2a33d303-9a4e-4520-9da0-86a4d5e45a10/Implementation-Issues-Surrounding-the-New-IAU-Reference-Systems-for-Astrodynamics.pdf (row 'PEF iau76')",
+        "note": "Polar motion removed (W^T with the fixture xp/yp)."
+      },
+      "tolerance_m": 1.0,
+      "tolerance_mps": 0.01
+    },
+    {
+      "frame": "TOD",
+      "published": {
+        "r_m": [
+          5094514.7804,
+          6127366.4612,
+          6380344.5328
+        ],
+        "v_mps": [
+          -4746.088567,
+          786.077222,
+          5531.931288
+        ],
+        "source": "Vallado, Seago, Seidelmann, 'Implementation Issues Surrounding the New IAU Reference Frameworks' (AAS 06-675), LEO test case, p. 17. https://www.agi.com/getmedia/2a33d303-9a4e-4520-9da0-86a4d5e45a10/Implementation-Issues-Surrounding-the-New-IAU-Reference-Systems-for-Astrodynamics.pdf (row 'TOD iau76')",
+        "note": "PEF spun to true-of-date by GAST-1982 (GMST82 + full equation of the equinoxes)."
+      },
+      "tolerance_m": 1.0,
+      "tolerance_mps": 0.01
+    },
+    {
+      "frame": "MOD",
+      "published": {
+        "r_m": [
+          5094029.0167,
+          6127870.9363,
+          6380247.8885
+        ],
+        "v_mps": [
+          -4746.262495,
+          786.014149,
+          5531.791025
+        ],
+        "source": "Vallado, Seago, Seidelmann, 'Implementation Issues Surrounding the New IAU Reference Frameworks' (AAS 06-675), LEO test case, p. 17. https://www.agi.com/getmedia/2a33d303-9a4e-4520-9da0-86a4d5e45a10/Implementation-Issues-Surrounding-the-New-IAU-Reference-Systems-for-Astrodynamics.pdf (row 'MOD iau76')",
+        "note": "IAU-1980 nutation removed (full 106-term series, no ddpsi/ddeps corrections)."
+      },
+      "tolerance_m": 1.0,
+      "tolerance_mps": 0.01
+    },
+    {
+      "frame": "GCRF",
+      "published": {
+        "r_m": [
+          5102509.6,
+          6123011.52,
+          6378136.3
+        ],
+        "v_mps": [
+          -4743.2196,
+          790.5366,
+          5533.75619
+        ],
+        "source": "Vallado, Seago, Seidelmann, 'Implementation Issues Surrounding the New IAU Reference Frameworks' (AAS 06-675), LEO test case, p. 17. https://www.agi.com/getmedia/2a33d303-9a4e-4520-9da0-86a4d5e45a10/Implementation-Issues-Surrounding-the-New-IAU-Reference-Systems-for-Astrodynamics.pdf (row 'J2000 iau76')",
+        "note": "IAU-76 precession removed. This is the classical IAU-76/FK5 'J2000' result WITHOUT ddpsi/ddeps EOP corrections - the exact chain Iau76Fk5Provider implements. It differs from true GCRF by the ~0.023 arcsec frame bias (~0.7 m at this radius); see gcrf_with_eop_corrections for the corrected row."
+      },
+      "tolerance_m": 1.0,
+      "tolerance_mps": 0.01,
+      "astropy_iau2006_2000a": {
+        "r_m": [
+          5102508.9658,
+          6123011.3971,
+          6378136.9253
+        ],
+        "v_mps": [
+          -4743.2201569,
+          790.5364912,
+          5533.7557411
+        ],
+        "delta_vs_published_m": 0.8991,
+        "delta_vs_published_mps": 0.000723,
+        "note": "astropy GCRS/TEME with the fixture EOP forced (dUT1 at the IERS-table layer, patched polar-motion lookup); IAU-2006/2000A theory, so it differs from the IAU-76/FK5 published rows by frame bias + nutation-theory deltas."
+      }
+    },
+    {
+      "frame": "TEME",
+      "published": {
+        "r_m": [
+          5094180.1072,
+          6127644.7052,
+          6380344.5327
+        ],
+        "v_mps": [
+          -4746.131494,
+          785.817998,
+          5531.931288
+        ],
+        "source": "Vallado, Crawford, Hujsak, Kelso, 'Revisiting Spacetrack Report #3' (AIAA 2006-6753, Rev 3), Appendix C - TEME Coordinate System, p. 32. https://celestrak.org/publications/AIAA/2006-6753/AIAA-2006-6753-Rev3.pdf",
+        "note": "TEME = R3(-GMST82) applied to PEF (equivalently R3(+EqEquinox) applied to TOD)."
+      },
+      "tolerance_m": 1.0,
+      "tolerance_mps": 0.01,
+      "astropy_iau2006_2000a": {
+        "r_m": [
+          5094180.1687,
+          6127644.654,
+          6380344.5327
+        ],
+        "v_mps": [
+          -4746.1315379,
+          785.8180883,
+          5531.9312877
+        ],
+        "delta_vs_published_m": 0.08,
+        "delta_vs_published_mps": 0.0001,
+        "note": "astropy GCRS/TEME with the fixture EOP forced (dUT1 at the IERS-table layer, patched polar-motion lookup); IAU-2006/2000A theory, so it differs from the IAU-76/FK5 published rows by frame bias + nutation-theory deltas."
+      }
+    }
+  ],
+  "gcrf_with_eop_corrections": {
+    "r_m": [
+      5102508.9579,
+      6123011.4007,
+      6378136.9282
+    ],
+    "v_mps": [
+      -4743.220157,
+      790.536497,
+      5533.755727
+    ],
+    "source": "Vallado, Seago, Seidelmann, 'Implementation Issues Surrounding the New IAU Reference Frameworks' (AAS 06-675), LEO test case, p. 17. https://www.agi.com/getmedia/2a33d303-9a4e-4520-9da0-86a4d5e45a10/Implementation-Issues-Surrounding-the-New-IAU-Reference-Systems-for-Astrodynamics.pdf (row 'GCRF iau76 w corr')",
+    "note": "Informational: IAU-76/FK5 WITH ddpsi/ddeps applied (true GCRF to ~1 cm)."
+  },
+  "generator_self_check_residuals": {
+    "note": "Independent pyerfa IAU-76/FK5 chain vs the published rows at generation time (guards the transcription; not a fixture target).",
+    "PEF": {
+      "dr_m": 5.5e-05,
+      "dv_mps": 0.0
+    },
+    "TOD": {
+      "dr_m": 0.008575,
+      "dv_mps": 5e-06
+    },
+    "MOD": {
+      "dr_m": 0.008564,
+      "dv_mps": 5e-06
+    },
+    "GCRF": {
+      "dr_m": 0.008554,
+      "dv_mps": 5e-06
+    },
+    "TEME": {
+      "dr_m": 0.080012,
+      "dv_mps": 4.8e-05
+    }
+  }
+}

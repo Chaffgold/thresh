@@ -4,6 +4,7 @@ pub mod coords;
 pub mod detection;
 pub mod eci;
 pub mod ego;
+pub mod frames;
 pub mod geodetic;
 pub mod measurement;
 pub mod motion_mode;

@@ -130,6 +130,9 @@ fn build_fixture(obj: &FixtureObject) -> Result<Sgp4Fixture, String> {
         norad_id: tle.norad_id,
         tle_line1: obj.line1.to_string(),
         tle_line2: obj.line2.to_string(),
+        // Raw UTC-scale JD by design: the committed fixtures stay
+        // byte-identical across the astro-time-and-frames migration; the
+        // schema's `Sgp4Fixture::epoch()` converts on load.
         epoch_jd: tle.epoch_jd(),
         frame: "TEME".to_string(),
         samples,

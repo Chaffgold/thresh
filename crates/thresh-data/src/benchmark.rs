@@ -148,7 +148,11 @@ pub enum ScenarioSource {
         pitch_kick_deg: f64,
         /// Ballistic coefficient β = m/(C_d·A) (kg/m²).
         beta_kg_m2: f64,
-        /// Launch epoch as Julian Date.
+        /// Launch epoch as a Julian Date in the **UTC** scale (kept as a
+        /// raw TOML float — it feeds `BallisticProfile::epoch_jd`, the
+        /// calibrated chain's raw-JD plumbing; see that field for the
+        /// bitwise-invariance rationale of `astro-time-and-frames`
+        /// Decision 6).
         epoch_jd: f64,
         /// Radar station geodetic latitude (degrees).
         station_lat_deg: f64,
@@ -1053,16 +1057,23 @@ fn radar_config_for_scenario(params: &ScenarioParameters) -> RadarConfig {
 ///    orbital HTTP clients. The local-file path is what allows the CI
 ///    synthetic-benchmark gate to run orbital scenarios offline.
 /// 2. Propagate each TLE via SGP4 → TEME → ECEF → ENU relative to the
-///    station configured in `ScenarioSource::Orbital`. Samples are spaced
+///    station configured in `ScenarioSource::Orbital`. The GMST-only
+///    Earth-fixing spin of this chain is exactly the **TEME → PEF**
+///    rotation of the IAU-76/FK5 chain (`thresh_core::frames`) — correct
+///    for SGP4's TEME output, and kept verbatim by `astro-time-and-frames`
+///    task 5.1 (GCRF-expressed states would instead route through the full
+///    reduction, `thresh_core::eci::gcrf_to_enu`). Samples are spaced
 ///    at `time_step_s` (falling back to `parameters.dt`) over `duration_s`
 ///    seconds starting at the TLE epoch.
 /// 3. Convert the visible (above-horizon) ENU positions to synthetic radar
 ///    measurements, add Gaussian noise with the configured sigmas, lift the
 ///    noisy detections **ENU → ECI** ([`enu_to_eci`] at the station
-///    geodetics + per-step GMST epoch), and feed them class-tagged as
+///    geodetics + per-step GMST epoch; the "ECI" of this chain is
+///    TEME-consistent — the lift inverts the same TEME → PEF spin), and
+///    feed them class-tagged as
 ///    [`TargetClass::Orbital`] so the tracker births 6D Kepler+J2 EKF
 ///    tracks (Decision 6 head dispatch). The tracker's `R` uses the
-///    [`effective_cartesian_sigma`] of the visible pass so the manifest's
+///    `effective_cartesian_sigma` of the visible pass so the manifest's
 ///    `gate_threshold` can be a Mahalanobis-consistent chi-squared value
 ///    instead of the historical `1e5` escape hatch.
 /// 4. Build `FrameData` per time step (ground truth converted to the same
@@ -1217,8 +1228,16 @@ pub fn run_orbital_benchmark(
     ))
 }
 
-/// One satellite's propagated truth: NORAD ID, TLE epoch (Julian Date, the
-/// zero of the scenario time base), and the station-ENU sample path.
+/// One satellite's propagated truth: NORAD ID, TLE epoch (Julian Date in
+/// the UTC scale, the zero of the scenario time base), and the station-ENU
+/// sample path.
+///
+/// The epoch stays a raw `f64` JD: the whole orbital benchmark chain plumbs
+/// `epoch_jd + t_min / 1440` into the GMST rotation (the TEME → PEF leg of
+/// the IAU-76/FK5 chain — correct for SGP4's TEME output), and its
+/// calibrated metrics must stay bitwise stable across the
+/// `astro-time-and-frames` migration (design Decision 6) — JD↔`Epoch`
+/// round trips are not guaranteed bit-exact.
 #[cfg(feature = "orbital")]
 struct OrbitalTruth {
     norad_id: u32,
@@ -1324,8 +1343,9 @@ fn collect_orbital_step_data(
 
 /// Time base + station context for one orbital benchmark step: scenario
 /// time (minutes since the satellite's TLE epoch), the corresponding
-/// Julian Date for the GMST rotation, and the station geodetics for the
-/// ENU → ECI lift.
+/// Julian Date (UTC scale, raw-JD plumbing — see [`OrbitalTruth`]) for the
+/// GMST (TEME → PEF) rotation, and the station geodetics for the
+/// ENU → ECI (TEME-consistent) lift.
 #[cfg(feature = "orbital")]
 struct StepFrame {
     t_min: f64,
@@ -1360,7 +1380,8 @@ fn collect_gt_for_step(
 
 /// Convert a radar measurement at the step's time to a noisy ECI detection:
 /// perturb RAE with the configured sigmas, reconstruct Cartesian ENU via
-/// [`rae_to_enu`], and lift into ECI with the step's GMST epoch.
+/// [`rae_to_enu`], and lift into ECI (TEME-consistent — the inverse of the
+/// GMST/TEME → PEF spin) with the step's GMST epoch.
 #[cfg(feature = "orbital")]
 fn collect_noisy_detection(
     measurements: &[thresh_core::measurement::Measurement],
