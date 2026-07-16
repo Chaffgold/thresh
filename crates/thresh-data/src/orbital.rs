@@ -96,9 +96,22 @@ pub struct Tle {
 }
 
 impl Tle {
-    /// Compute the Julian Date of this TLE's epoch.
+    /// Compute the Julian Date of this TLE's epoch **in the UTC scale**
+    /// (TLE epochs are UTC by convention).
+    ///
+    /// The raw-JD form stays because the SGP4 → ENU benchmark chain plumbs
+    /// `f64` Julian dates end-to-end for bitwise metric stability
+    /// (`astro-time-and-frames` design Decision 6); use [`Self::epoch`]
+    /// where a time-scale-aware epoch is wanted.
     pub fn epoch_jd(&self) -> f64 {
         tle_epoch_to_jd(self.epoch_year, self.epoch_day)
+    }
+
+    /// The TLE epoch as a time-scale-aware epoch
+    /// ([`thresh_core::time::Epoch`]), converted from [`Self::epoch_jd`]
+    /// (UTC scale).
+    pub fn epoch(&self) -> thresh_core::time::Epoch {
+        thresh_core::time::Epoch::from_jde_utc(self.epoch_jd())
     }
 
     /// Convert to `sgp4::Elements` for propagation.
@@ -330,6 +343,11 @@ pub fn parse_gp_json(json: &str) -> Result<Vec<Tle>> {
 // ---------------------------------------------------------------------------
 
 /// Position and velocity in the TEME frame from SGP4 propagation.
+///
+/// TEME is the frame SGP4 emits by definition; in the tagged-frame
+/// vocabulary this is [`Frame::Teme`](thresh_core::orbital::Frame::Teme) —
+/// the tag [`tle_to_cartesian`] stamps on the `OrbitalState` it returns
+/// (task 5.1 of `astro-time-and-frames`: SGP4 ingest tags its output TEME).
 #[derive(Debug, Clone)]
 pub struct TemeState {
     /// Position in km.
@@ -341,7 +359,7 @@ pub struct TemeState {
 }
 
 /// Convert a TLE-represented [`thresh_core::orbital::OrbitalState`] into a
-/// Cartesian one by propagating with SGP4 to the state's `epoch_jd`.
+/// Cartesian one by propagating with SGP4 to the state's `epoch`.
 ///
 /// `thresh-core`'s `as_cartesian()` deliberately returns
 /// [`ElementError::RequiresSgp4`](thresh_core::orbital::ElementError::RequiresSgp4)
@@ -349,16 +367,19 @@ pub struct TemeState {
 /// next to the rest of the TLE pipeline (design Decision 2 of the
 /// `orbital-ballistic-filter-models` change). The returned state carries
 /// Cartesian elements in metres / m/s and is tagged
-/// [`OrbitalFrame::Teme`](thresh_core::orbital::OrbitalFrame::Teme) — SGP4
-/// output is TEME by definition, whatever the input state was tagged with.
-/// `mu` and `epoch_jd` carry over from the input.
+/// [`Frame::Teme`](thresh_core::orbital::Frame::Teme) — SGP4 output is TEME
+/// by definition, whatever the input state was tagged with. `mu` and the
+/// epoch (time scale included) carry over from the input; the propagation
+/// offset is the state's epoch read back as a UTC Julian date
+/// (`to_jde_utc_days()`, ≤ 1 JD-ulp ≈ 40 µs of quantization) minus the
+/// TLE's own UTC epoch.
 ///
 /// Returns [`OrbitalError::InvalidInput`] when the input's elements are not
 /// the `Tle` variant.
 pub fn tle_to_cartesian(
     state: &thresh_core::orbital::OrbitalState,
 ) -> Result<thresh_core::orbital::OrbitalState> {
-    use thresh_core::orbital::{OrbitalElements, OrbitalFrame};
+    use thresh_core::orbital::{Frame, OrbitalElements};
 
     let OrbitalElements::Tle { line1, line2 } = &state.elements else {
         return Err(OrbitalError::InvalidInput(
@@ -369,7 +390,7 @@ pub fn tle_to_cartesian(
     // Minutes from the TLE's own epoch (encoded in line 1) to the state's.
     let (epoch_year, epoch_day) = parse_epoch_from_line1(line1)?;
     let tle_epoch_jd = tle_epoch_to_jd(epoch_year, epoch_day);
-    let minutes_since_epoch = (state.epoch_jd - tle_epoch_jd) * 1440.0;
+    let minutes_since_epoch = (state.epoch.to_jde_utc_days() - tle_epoch_jd) * 1440.0;
 
     let elements = sgp4::Elements::from_tle(None, line1.as_bytes(), line2.as_bytes())?;
     let constants = sgp4::Constants::from_elements(&elements)?;
@@ -389,8 +410,8 @@ pub fn tle_to_cartesian(
             ),
         },
         mu: state.mu,
-        frame: OrbitalFrame::Teme,
-        epoch_jd: state.epoch_jd,
+        frame: Frame::Teme,
+        epoch: state.epoch,
     })
 }
 
@@ -433,6 +454,24 @@ pub struct EnuPosition {
 
 /// Propagate a TLE and convert the resulting TEME states to ENU coordinates
 /// relative to a ground station.
+///
+/// Frame note (task 5.1 of `astro-time-and-frames`): the Earth-fixing
+/// rotation here is GMST-only ([`teme_to_ecef`]) — in the
+/// [`thresh_core::frames`] vocabulary that is exactly the **TEME → PEF**
+/// leg of the IAU-76/FK5 chain, which is the correct spin for SGP4's TEME
+/// output; the station ENU frame is anchored in PEF ≡ ITRF-with-zero-polar-
+/// motion. States expressed in **GCRF** must instead be projected with
+/// [`thresh_core::eci::gcrf_to_enu`], which routes through the full
+/// reduction — both routes land in the same ENU frame (spec scenario
+/// "TEME and GCRF states project consistently").
+///
+/// Time plumbing note (`astro-time-and-frames` design Decision 6): this
+/// chain deliberately carries raw `f64` UTC Julian dates
+/// (`epoch_jd + minutes / 1440`) into the GMST rotation rather than
+/// round-tripping through `thresh_core::time::Epoch` — the orbital
+/// benchmark metrics are calibrated against this exact arithmetic and must
+/// stay bitwise stable, and JD↔`Epoch` conversions are not guaranteed
+/// bit-exact.
 ///
 /// # Arguments
 /// * `tle` - The TLE to propagate.
@@ -1156,6 +1195,7 @@ ISS (ZARYA)
     #[test]
     fn tle_to_cartesian_matches_sgp4_pipeline() {
         use thresh_core::orbital::{GravityModel, OrbitalElements, OrbitalFrame, OrbitalState};
+        use thresh_core::time::Epoch;
 
         let tles = parse_tle(ISS_TLE_2LE).unwrap();
         let tle = &tles[0];
@@ -1168,13 +1208,13 @@ ISS (ZARYA)
             },
             mu: GravityModel::EARTH_WGS84.mu,
             frame: OrbitalFrame::Teme,
-            epoch_jd: tle.epoch_jd() + minutes / 1440.0,
+            epoch: Epoch::from_jde_utc(tle.epoch_jd() + minutes / 1440.0),
         };
 
         let cartesian = tle_to_cartesian(&state).unwrap();
         assert_eq!(cartesian.frame, OrbitalFrame::Teme, "SGP4 output is TEME");
         assert_eq!(cartesian.mu.to_bits(), state.mu.to_bits());
-        assert_eq!(cartesian.epoch_jd, state.epoch_jd);
+        assert_eq!(cartesian.epoch, state.epoch, "epoch carries over intact");
 
         // Must agree with the existing SGP4 pipeline at the same offset.
         // Tolerance covers only the JD→minutes float round trip: one ulp of
@@ -1196,6 +1236,7 @@ ISS (ZARYA)
     #[test]
     fn tle_to_cartesian_rejects_non_tle_elements() {
         use thresh_core::orbital::{GravityModel, OrbitalElements, OrbitalFrame, OrbitalState};
+        use thresh_core::time::Epoch;
 
         let state = OrbitalState {
             elements: OrbitalElements::Cartesian {
@@ -1204,7 +1245,7 @@ ISS (ZARYA)
             },
             mu: GravityModel::EARTH_WGS84.mu,
             frame: OrbitalFrame::Teme,
-            epoch_jd: 2_460_310.5,
+            epoch: Epoch::from_jde_utc(2_460_310.5),
         };
         assert!(matches!(
             tle_to_cartesian(&state),
@@ -1237,6 +1278,67 @@ ISS (ZARYA)
                 range > 100_000.0 && range < 20_000_000.0,
                 "ENU range {} m seems unreasonable",
                 range
+            );
+        }
+    }
+
+    /// Spec "TEME and GCRF states project consistently" (task 5.1 of
+    /// `astro-time-and-frames`), end-to-end through SGP4 ingest: the
+    /// TEME-tagged SGP4 output projected via the GMST path
+    /// ([`propagate_to_enu`], i.e. TEME → PEF → ENU) agrees with the same
+    /// physical state expressed in GCRF and projected via the full
+    /// reduction ([`thresh_core::eci::gcrf_to_enu`], GCRF → ITRF → ENU).
+    ///
+    /// Tolerance 0.5 m: both routes share the identical IAU-1982 GMST
+    /// polynomial (asserted bitwise in thresh-core's eci tests), leaving
+    /// only the f64-JD quantization of the `Epoch` accessors (≤ 1 JD ulp ≈
+    /// 40 µs ≈ 2 cm of Earth rotation at LEO radius) plus composition
+    /// round-off.
+    #[test]
+    fn teme_and_gcrf_projections_agree_in_enu() {
+        use thresh_core::eci::gcrf_to_enu;
+        use thresh_core::frames::teme_to_gcrf;
+        use thresh_core::time::Epoch;
+
+        let tles = parse_3le(ISS_TLE_3LE).unwrap();
+        let tle = &tles[0];
+
+        let station_lat = 38.9_f64.to_radians();
+        let station_lon = (-77.0_f64).to_radians();
+        let station_alt = 0.0;
+
+        let times = vec![0.0, 10.0, 30.0];
+        let via_teme_path =
+            propagate_to_enu(tle, &times, station_lat, station_lon, station_alt).unwrap();
+        let teme_states = propagate_tle(tle, &times).unwrap();
+
+        for (enu, teme) in via_teme_path.iter().zip(&teme_states) {
+            // Same raw-JD arithmetic as propagate_to_enu, then the Epoch
+            // form of the same instant for the full reduction.
+            let jd = tle.epoch_jd() + teme.time_since_epoch_min / 1440.0;
+            let epoch = Epoch::from_jde_utc(jd);
+
+            let pos_teme = nalgebra::Vector3::new(
+                teme.position_km[0] * 1000.0,
+                teme.position_km[1] * 1000.0,
+                teme.position_km[2] * 1000.0,
+            );
+            let vel_teme = nalgebra::Vector3::new(
+                teme.velocity_km_s[0] * 1000.0,
+                teme.velocity_km_s[1] * 1000.0,
+                teme.velocity_km_s[2] * 1000.0,
+            );
+
+            let (pos_gcrf, _) = teme_to_gcrf(&pos_teme, &vel_teme, &epoch);
+            let via_gcrf_route =
+                gcrf_to_enu(&pos_gcrf, &epoch, station_lat, station_lon, station_alt);
+
+            let via_gmst_route = nalgebra::Vector3::new(enu.east, enu.north, enu.up);
+            assert!(
+                (via_gcrf_route - via_gmst_route).norm() < 0.5,
+                "ENU disagreement {} m at t = {} min",
+                (via_gcrf_route - via_gmst_route).norm(),
+                teme.time_since_epoch_min
             );
         }
     }
@@ -1299,6 +1401,12 @@ ISS (ZARYA)
         assert!(
             (jd - 2_460_310.5).abs() < 1.0,
             "ISS TLE epoch JD {jd} not near expected 2460310.5"
+        );
+
+        // The Epoch-taking form is the same instant in the UTC scale.
+        assert_eq!(
+            tle.epoch(),
+            thresh_core::time::Epoch::from_jde_utc(tle.epoch_jd())
         );
     }
 

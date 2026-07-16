@@ -83,7 +83,14 @@ pub struct BallisticProfile {
     pub pitch_kick_rad: f64,
     /// Ballistic coefficient β = m/(C_d·A) (kg/m²) for the reentry drag.
     pub beta: f64,
-    /// Launch epoch as Julian Date.
+    /// Launch epoch as a Julian Date in the **UTC** scale.
+    ///
+    /// Kept as a raw `f64` (not `thresh_core::time::Epoch`) for the same
+    /// reason as [`OrbitalState::epoch_jd`](crate::orbital::OrbitalState):
+    /// this profile seeds the calibrated ballistic benchmark chain, whose
+    /// metrics must stay bitwise stable across the `astro-time-and-frames`
+    /// migration (design Decision 6), and JD↔`Epoch` round trips are not
+    /// guaranteed bit-exact.
     pub epoch_jd: f64,
 }
 

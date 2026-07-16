@@ -1,0 +1,87 @@
+{
+  "case": "zero-eop-2020-01-01",
+  "description": "Zero-EOP TEME/GCRF/ITRF golden vectors, astropy-computed (IAU-2006/2000A machinery) with UT1 = UTC and zero polar motion to match Iau76Fk5Provider defaults. Plain modern epoch.",
+  "epoch_utc": "2020-01-01T12:00:00.000000Z",
+  "eop": {
+    "dut1_s": 0.0,
+    "xp_arcsec": 0.0,
+    "yp_arcsec": 0.0,
+    "dat_s": 37,
+    "note": "UT1 = UTC and no polar motion: the Rust provider's documented zero defaults."
+  },
+  "states": {
+    "TEME": {
+      "r_m": [
+        -4743211.0,
+        4241734.0,
+        2500410.0
+      ],
+      "v_mps": [
+        -5530.0,
+        -4720.0,
+        1620.0
+      ],
+      "origin": "defined input (arbitrary LEO-magnitude state, not a published value)"
+    },
+    "GCRF": {
+      "r_m": [
+        -4719404.3686,
+        4262874.92,
+        2509487.5786
+      ],
+      "v_mps": [
+        -5547.9489827,
+        -4695.2394846,
+        1630.5482287
+      ],
+      "origin": "astropy TEME->GCRS (computed, not published)"
+    },
+    "ITRF": {
+      "r_m": [
+        -5042862.421,
+        -3880708.2498,
+        2500410.0
+      ],
+      "v_mps": [
+        3337.6067674,
+        -5937.0771031,
+        1620.0
+      ],
+      "origin": "astropy TEME->ITRS (computed, not published)"
+    }
+  },
+  "comparison_semantics": "For each comparison: input = states[from_frame], expected = states[to_frame]; assert |transform(input) - expected| <= tolerance. measured_iau76_vs_astropy_* was produced the same way with a reference pyerfa IAU-76/FK5 chain; skyfield_vs_astropy_* cross-checks the expected (target) state itself.",
+  "comparisons": [
+    {
+      "from_frame": "TEME",
+      "to_frame": "GCRF",
+      "tolerance_m": 2.523,
+      "tolerance_mps": 0.007,
+      "measured_iau76_vs_astropy_m": 1.0154,
+      "measured_iau76_vs_astropy_mps": 0.001358,
+      "skyfield_vs_astropy_m": 0.0003,
+      "skyfield_vs_astropy_mps": 5.2e-05
+    },
+    {
+      "from_frame": "GCRF",
+      "to_frame": "ITRF",
+      "tolerance_m": 2.523,
+      "tolerance_mps": 0.0071,
+      "measured_iau76_vs_astropy_m": 1.0154,
+      "measured_iau76_vs_astropy_mps": 0.001367,
+      "skyfield_vs_astropy_m": 0.0,
+      "skyfield_vs_astropy_mps": 5.4e-05
+    },
+    {
+      "from_frame": "TEME",
+      "to_frame": "ITRF",
+      "tolerance_m": 1.0,
+      "tolerance_mps": 0.0051,
+      "measured_iau76_vs_astropy_m": 0.0,
+      "measured_iau76_vs_astropy_mps": 4.5e-05,
+      "skyfield_vs_astropy_m": 0.0,
+      "skyfield_vs_astropy_mps": 5.4e-05
+    }
+  ],
+  "theory_note": "Targets are astropy's IAU-2006/2000A + frame-bias reduction; the Rust side implements equinox-based IAU-76/FK5 without EOP corrections. The measured_* fields give the actual disagreement of a reference IAU-76/FK5 (pyerfa) chain at this epoch; tolerance = 1.5 x measured + 1 m (or + 5 mm/s), so the envelope both passes a correct IAU-76 implementation and fails the kilometre-scale TEME/GCRF conflation this change removes."
+}

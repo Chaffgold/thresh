@@ -21,6 +21,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use thresh_core::time::Epoch;
 
 /// One SGP4-propagated TEME state sample at a fixed offset from the TLE
 /// epoch.
@@ -55,14 +56,27 @@ pub struct Sgp4Fixture {
     pub tle_line1: String,
     /// TLE line 2, verbatim.
     pub tle_line2: String,
-    /// Julian Date of the TLE epoch (offsets in `samples` count from here).
+    /// Julian Date of the TLE epoch **in the UTC scale** (offsets in
+    /// `samples` count from here).
+    ///
+    /// Deliberately kept as the raw `f64` the committed fixtures carry —
+    /// the `astro-time-and-frames` migration keeps every fixture under
+    /// `test-data/golden/orbital/` byte-identical (no regeneration), and
+    /// the loader converts on demand via [`Self::epoch`].
     pub epoch_jd: f64,
     /// Reference frame of the samples — always `"TEME"` (SGP4 output is
-    /// TEME by definition; the repo's GMST-only convention deliberately
-    /// conflates it with ECI until `astro-time-and-frames`).
+    /// TEME by definition).
     pub frame: String,
     /// State samples ordered by increasing `offset_s`, starting at 0.
     pub samples: Vec<Sgp4Sample>,
+}
+
+impl Sgp4Fixture {
+    /// The TLE epoch as a time-scale-aware [`Epoch`], converted from the
+    /// fixture's raw `epoch_jd` float (documented scale: **UTC**).
+    pub fn epoch(&self) -> Epoch {
+        Epoch::from_jde_utc(self.epoch_jd)
+    }
 }
 
 /// Directory holding the committed SGP4 golden fixtures:
@@ -111,5 +125,26 @@ mod tests {
     fn golden_dir_points_into_test_data() {
         let dir = golden_orbital_dir();
         assert!(dir.ends_with("test-data/golden/orbital"));
+    }
+
+    /// The loader-side epoch conversion (astro-time-and-frames task 4.2):
+    /// the committed fixtures keep their raw `epoch_jd` floats byte-for-byte
+    /// and `epoch()` interprets them in the documented UTC scale.
+    #[test]
+    fn epoch_accessor_converts_the_utc_jd_float() {
+        let epoch = Epoch::from_jde_utc(2_460_310.5);
+        let fixture = Sgp4Fixture {
+            object: "TEST".to_string(),
+            norad_id: 99999,
+            tle_line1: "1 ...".to_string(),
+            tle_line2: "2 ...".to_string(),
+            epoch_jd: 2_460_310.5,
+            frame: "TEME".to_string(),
+            samples: Vec::new(),
+        };
+        assert_eq!(fixture.epoch(), epoch);
+        // JD 2460310.5 UTC = 2024-01-01T00:00:00 UTC (the ISS fixture TLE
+        // epoch, day 24001.0 — consistent with the committed PROVENANCE).
+        assert_eq!(fixture.epoch().to_string(), "2024-01-01T00:00:00 UTC");
     }
 }

@@ -1,10 +1,20 @@
 //! ECI (Earth-Centered Inertial) and TEME coordinate transformations.
 //!
 //! Provides conversions between ECI/TEME, ECEF, and ENU coordinate frames
-//! using GMST-based rotation matrices.
+//! using GMST-based rotation matrices. In the tagged-frame vocabulary of
+//! [`crate::frames`], the GMST-only spin used throughout this module is the
+//! **TEME → PEF** rotation of the IAU-76/FK5 chain (design Decision 6 of
+//! `astro-time-and-frames`): the "ECEF" it produces is PEF, identical to
+//! ITRF while polar motion is neglected, so the chain is correct for TEME
+//! input — the frame SGP4 emits. States expressed in **GCRF** must instead
+//! route through the full reduction: see [`gcrf_to_enu`] for the
+//! ground-station projection and [`crate::frames`] for general transforms.
 
 use nalgebra::{Matrix3, Vector3};
 use serde::{Deserialize, Serialize};
+
+use crate::frames::{Frame, FrameError, FrameProvider, Iau76Fk5Provider};
+use crate::time::Epoch;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -30,8 +40,9 @@ pub struct EciState {
     pub position: Vector3<f64>,
     /// Velocity in m/s (ECI frame).
     pub velocity: Vector3<f64>,
-    /// Epoch as Julian Date.
-    pub epoch_jd: f64,
+    /// Time-scale-aware absolute epoch (was `epoch_jd: f64`; construct
+    /// from a UTC Julian date via [`Epoch::from_jde_utc`]).
+    pub epoch: Epoch,
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +87,24 @@ pub fn gmst_from_jd(jd: f64) -> f64 {
     gmst_rad.rem_euclid(TAU)
 }
 
+/// Epoch-taking form of [`gmst_from_jd`] (design Decision 5 of
+/// `astro-time-and-frames`): Greenwich Mean Sidereal Time (IAU 1982) in
+/// radians, `[0, 2π)`.
+///
+/// GMST is a function of **UT1**; this form approximates UT1 by the epoch's
+/// **UTC** reading (UT1 ≈ UTC: the |ΔUT1| ≤ 0.9 s bound kept by IERS
+/// leap-second scheduling corresponds to ≤ ~430 m of ECEF longitude at the
+/// equator). For an explicit ΔUT1, use
+/// [`crate::frames::legs::gmst_iau1982`].
+///
+/// Delegates to [`gmst_from_jd`] at `epoch.to_jde_utc_days()`, so for the
+/// same instant expressed as the same `f64` Julian date the two forms
+/// produce **identical** numbers — the epoch type changed in
+/// `astro-time-and-frames`, the rotation math did not (design Decision 6).
+pub fn gmst(epoch: &Epoch) -> f64 {
+    gmst_from_jd(epoch.to_jde_utc_days())
+}
+
 // ---------------------------------------------------------------------------
 // TEME → ECEF (Task 2.4)
 // ---------------------------------------------------------------------------
@@ -84,7 +113,10 @@ pub fn gmst_from_jd(jd: f64) -> f64 {
 /// the ECEF (Earth-Centered, Earth-Fixed) frame at the given Julian Date.
 ///
 /// The rotation uses GMST only (no polar-motion or equation-of-equinoxes
-/// corrections).
+/// corrections) — in the [`crate::frames`] vocabulary this is exactly the
+/// **TEME → PEF** leg of the IAU-76/FK5 chain, so the returned "ECEF" is
+/// PEF (identical to ITRF while polar motion is neglected) and the rotation
+/// is the correct Earth-fixing spin for TEME input such as SGP4 output.
 ///
 /// Returns `(position_ecef, velocity_ecef)` in metres and m/s.
 pub fn teme_to_ecef(
@@ -111,10 +143,15 @@ pub fn teme_to_ecef(
 
 /// Convert a state vector from ECI (J2000) to ECEF at the given Julian Date.
 ///
-/// **Note:** This currently uses the same GMST-only rotation as [`teme_to_ecef`].
-/// For the accuracy requirements of this project (~arcsecond level) the
-/// difference between J2000 and TEME is negligible. A full IAU-76/FK5
-/// precession-nutation model can be added later if needed.
+/// **Note:** This applies the same GMST-only rotation as [`teme_to_ecef`],
+/// i.e. the **TEME → PEF** leg of the IAU-76/FK5 chain — it is only correct
+/// when the input is TEME-consistent (the frame SGP4 emits, and the frame
+/// the benchmark's GMST-only chain is internally consistent in — design
+/// Decision 6 of `astro-time-and-frames`). Feeding a true GCRF/J2000 state
+/// through it mis-rotates by the accumulated precession/nutation:
+/// kilometre-scale at LEO radius for modern epochs. GCRF states should use
+/// the full reduction instead — [`gcrf_to_enu`] for the ground-station
+/// projection, or [`crate::frames`] transforms in general.
 pub fn eci_to_ecef(
     pos_eci: &Vector3<f64>,
     vel_eci: &Vector3<f64>,
@@ -212,6 +249,75 @@ pub fn enu_to_eci(
 }
 
 // ---------------------------------------------------------------------------
+// GCRF → ENU via the full reduction (astro-time-and-frames, task 5.1)
+// ---------------------------------------------------------------------------
+
+/// Convert a GCRF position to a local ENU (East-North-Up) vector relative to
+/// a reference point on the Earth's surface, routing through the **full
+/// IAU-76/FK5 reduction** (GCRF → ITRF via [`crate::frames`], default
+/// zero-EOP [`Iau76Fk5Provider`]) followed by
+/// [`crate::geodetic::ecef_to_enu`].
+///
+/// This is the GCRF-input counterpart of [`eci_to_enu`], whose GMST-only
+/// rotation is the TEME → PEF leg and therefore expects TEME-consistent
+/// input: the same physical state expressed in TEME and projected with
+/// [`eci_to_enu`], or expressed in GCRF and projected with this function,
+/// lands on the same ENU vector to within the transform-chain tolerance
+/// (spec scenario "TEME and GCRF states project consistently").
+///
+/// # Arguments
+/// * `pos_gcrf`    — position in GCRF (metres)
+/// * `epoch`       — epoch of the state (its TT drives precession/nutation;
+///   its UTC ≈ UT1 drives the sidereal rotation under the zero-EOP default)
+/// * `ref_lat_rad` — geodetic latitude of the reference point (radians)
+/// * `ref_lon_rad` — geodetic longitude of the reference point (radians)
+/// * `ref_alt_m`   — altitude of the reference point above the WGS-84 ellipsoid (metres)
+pub fn gcrf_to_enu(
+    pos_gcrf: &Vector3<f64>,
+    epoch: &Epoch,
+    ref_lat_rad: f64,
+    ref_lon_rad: f64,
+    ref_alt_m: f64,
+) -> Vector3<f64> {
+    gcrf_to_enu_with(
+        &Iau76Fk5Provider::default(),
+        pos_gcrf,
+        epoch,
+        ref_lat_rad,
+        ref_lon_rad,
+        ref_alt_m,
+    )
+    .expect("IAU-76/FK5 provider supports every Frame pair")
+}
+
+/// Provider-seam form of [`gcrf_to_enu`]: the GCRF → ITRF rotation comes
+/// from the supplied [`FrameProvider`], so an EOP-carrying
+/// [`Iau76Fk5Provider`] or a custom provider substitutes without call-site
+/// changes (design Decision 4 of `astro-time-and-frames`).
+///
+/// # Errors
+///
+/// Propagates [`FrameError`] from the provider (the default
+/// [`Iau76Fk5Provider`] never errors).
+pub fn gcrf_to_enu_with<P: FrameProvider + ?Sized>(
+    provider: &P,
+    pos_gcrf: &Vector3<f64>,
+    epoch: &Epoch,
+    ref_lat_rad: f64,
+    ref_lon_rad: f64,
+    ref_alt_m: f64,
+) -> Result<Vector3<f64>, FrameError> {
+    let rot = provider.rotation(Frame::Gcrf, Frame::Itrf, epoch)?;
+    let pos_itrf = rot.rotate_position(pos_gcrf);
+    Ok(crate::geodetic::ecef_to_enu(
+        &pos_itrf,
+        ref_lat_rad,
+        ref_lon_rad,
+        ref_alt_m,
+    ))
+}
+
+// ---------------------------------------------------------------------------
 // Tests (Tasks 2.11, 2.12)
 // ---------------------------------------------------------------------------
 
@@ -262,6 +368,27 @@ mod tests {
             "ECEF difference after sidereal day: {} m",
             (ecef1 - ecef2).norm()
         );
+    }
+
+    /// The epoch-taking `gmst` is the identical IAU-1982 polynomial: it
+    /// matches `gmst_from_jd` **bitwise** at the epoch's own UTC JD
+    /// (design Decision 6 of `astro-time-and-frames`: the epoch type
+    /// changed, the rotation math did not), and agrees with the frames
+    /// module's ΔUT1-taking form at ΔUT1 = 0.
+    #[test]
+    fn epoch_taking_gmst_is_bitwise_identical_to_jd_form() {
+        for &jd in &[2_460_310.5, 2_451_545.0, 2_453_101.5] {
+            let epoch = Epoch::from_jde_utc(jd);
+            let via_epoch = gmst(&epoch);
+            assert_eq!(
+                via_epoch.to_bits(),
+                gmst_from_jd(epoch.to_jde_utc_days()).to_bits()
+            );
+            assert_eq!(
+                via_epoch.to_bits(),
+                crate::frames::legs::gmst_iau1982(&epoch, 0.0).to_bits()
+            );
+        }
     }
 
     /// GMST at J2000 epoch should be approximately 280.46° (≈ 4.8949 rad).
@@ -381,6 +508,116 @@ mod tests {
             (back - pos_eci).norm() < TOL_MM,
             "ECI round-trip error {} m",
             (back - pos_eci).norm()
+        );
+    }
+
+    /// Spec "TEME and GCRF states project consistently" (task 5.1 of
+    /// `astro-time-and-frames`): the same physical LEO state expressed once
+    /// in TEME (projected via the GMST-based path — the TEME → PEF spin)
+    /// and once in GCRF (projected via the full reduction with
+    /// [`gcrf_to_enu`]) lands on the same ENU vector.
+    ///
+    /// Error budget for the 0.5 m tolerance: both routes evaluate the
+    /// identical IAU-1982 GMST polynomial (asserted bitwise in
+    /// `epoch_taking_gmst_is_bitwise_identical_to_jd_form`), so the residual
+    /// is only the f64-JD quantization of the `Epoch` accessors (≤ 1 JD ulp
+    /// ≈ 40 µs ≈ 2 cm of Earth rotation at LEO radius) plus
+    /// rotation-composition round-off.
+    #[test]
+    fn teme_and_gcrf_states_project_to_agreeing_enu() {
+        let station_lat = 38.8339_f64.to_radians(); // benchmark ground station
+        let station_lon = (-104.8214_f64).to_radians();
+        let station_alt = 1885.0;
+
+        // Benchmark TLE epoch (2024-01-01 00:00 UTC) + an odd offset.
+        let jd = 2_460_310.5 + 1234.0 / SECONDS_PER_DAY;
+        let epoch = Epoch::from_jde_utc(jd);
+
+        let pos_teme = Vector3::new(4_000_000.0, -3_500_000.0, 4_200_000.0);
+        let vel_teme = Vector3::new(1_500.0, 7_100.0, -2_300.0);
+
+        // Route 1: TEME through the GMST-based path (TEME → PEF → ENU).
+        let enu_from_teme = eci_to_enu(&pos_teme, jd, station_lat, station_lon, station_alt);
+
+        // Route 2: the same physical state expressed in GCRF, through the
+        // full reduction (GCRF → ITRF → ENU).
+        let (pos_gcrf, _) = crate::frames::teme_to_gcrf(&pos_teme, &vel_teme, &epoch);
+        let enu_from_gcrf = gcrf_to_enu(&pos_gcrf, &epoch, station_lat, station_lon, station_alt);
+
+        assert!(
+            (enu_from_gcrf - enu_from_teme).norm() < 0.5,
+            "TEME- and GCRF-expressed projections disagree by {} m",
+            (enu_from_gcrf - enu_from_teme).norm()
+        );
+
+        // Feeding the GCRF state through the GMST-only path instead would
+        // mis-rotate by the accumulated precession/nutation — the km-scale
+        // error the GCRF route exists to avoid.
+        let enu_mislabeled = eci_to_enu(&pos_gcrf, jd, station_lat, station_lon, station_alt);
+        assert!(
+            (enu_mislabeled - enu_from_teme).norm() > 1_000.0,
+            "expected km-scale error from the mislabeled route, got {} m",
+            (enu_mislabeled - enu_from_teme).norm()
+        );
+    }
+
+    /// A provider whose rotation is always the identity — a stand-in for
+    /// any externally sourced reduction.
+    struct IdentityProvider;
+
+    impl FrameProvider for IdentityProvider {
+        fn rotation(
+            &self,
+            _from: Frame,
+            _to: Frame,
+            _epoch: &Epoch,
+        ) -> Result<crate::frames::FrameRotation, FrameError> {
+            Ok(crate::frames::FrameRotation {
+                r: Matrix3::identity(),
+                r_dot: Matrix3::zeros(),
+            })
+        }
+    }
+
+    /// `gcrf_to_enu` is exactly the default-provider case of
+    /// [`gcrf_to_enu_with`], and a custom provider substitutes at the same
+    /// call site (design Decision 4 of `astro-time-and-frames`).
+    #[test]
+    fn gcrf_to_enu_with_substitutes_provider() {
+        let station_lat = 38.8339_f64.to_radians();
+        let station_lon = (-104.8214_f64).to_radians();
+        let epoch = Epoch::from_jde_utc(2_460_310.5);
+        let pos_gcrf = Vector3::new(4_000_000.0, -3_500_000.0, 4_200_000.0);
+
+        let via_default = gcrf_to_enu(&pos_gcrf, &epoch, station_lat, station_lon, 1885.0);
+        let via_explicit = gcrf_to_enu_with(
+            &Iau76Fk5Provider::default(),
+            &pos_gcrf,
+            &epoch,
+            station_lat,
+            station_lon,
+            1885.0,
+        )
+        .unwrap();
+        assert_eq!(via_default, via_explicit);
+
+        // The identity provider skips the reduction entirely: the result is
+        // the plain geodetic ENU projection of the unrotated vector, and it
+        // must differ from the real reduction.
+        let via_identity = gcrf_to_enu_with(
+            &IdentityProvider,
+            &pos_gcrf,
+            &epoch,
+            station_lat,
+            station_lon,
+            1885.0,
+        )
+        .unwrap();
+        let expected = crate::geodetic::ecef_to_enu(&pos_gcrf, station_lat, station_lon, 1885.0);
+        assert_eq!(via_identity, expected);
+        assert!(
+            (via_identity - via_default).norm() > 1_000.0,
+            "substituted provider must be used"
         );
     }
 

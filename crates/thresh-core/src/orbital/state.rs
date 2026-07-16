@@ -5,16 +5,28 @@
 //! `orbitalstate.py` — an element-representation enum plus a parameterized
 //! gravitational constant — without borrowing its code path (Stone Soup's
 //! orbital functionality is deprecated upstream), and improves on it with an
-//! explicit [`OrbitalFrame`] tag (design Decision 2 of the
-//! `orbital-ballistic-filter-models` change). Conversions are pure on-demand
-//! methods, not memoized: reading back the constructed representation
-//! performs no conversion at all.
+//! explicit [`Frame`] tag (design Decision 2 of the
+//! `orbital-ballistic-filter-models` change, hardened by
+//! `astro-time-and-frames`). Conversions are pure on-demand methods, not
+//! memoized: reading back the constructed representation performs no
+//! conversion at all.
+//!
+//! Frame discipline (design Decision 5 of `astro-time-and-frames`): the tag
+//! is the shared [`crate::frames::Frame`] vocabulary (re-exported here as
+//! [`OrbitalFrame`] during the migration), mixing frames in arithmetic
+//! helpers is a returned [`ElementError::FrameMismatch`] — a real error in
+//! release builds, not a debug-assert — and explicit conversions between
+//! tagged frames go through the IAU-76/FK5 transform chain
+//! ([`OrbitalState::to_frame`] / [`OrbitalState::to_frame_with`]).
 
 use std::f64::consts::TAU;
 use std::fmt;
 
 use nalgebra::{DVector, Vector3};
 use serde::{Deserialize, Serialize};
+
+use crate::frames::{FrameError, FrameProvider, Iau76Fk5Provider};
+use crate::time::Epoch;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -27,17 +39,22 @@ pub enum ElementError {
     /// by SGP4 theory, which lives behind `thresh-data`'s `orbital` feature
     /// (`tle_to_cartesian`) so this crate never grows the `sgp4` dependency.
     RequiresSgp4,
-    /// Two states carried different [`OrbitalFrame`] tags where identical
-    /// frames are required. Currently only debug-asserted in the arithmetic
-    /// helpers; this variant is plumbed so the `astro-time-and-frames`
-    /// change can promote the debug-asserts to hard errors without an API
-    /// break.
+    /// Two states carried different [`Frame`] tags where identical frames
+    /// are required. Returned by the arithmetic helpers
+    /// ([`OrbitalState::position_delta`] / [`OrbitalState::separation`]) in
+    /// **all** build profiles — release included — never coerced implicitly
+    /// (design Decision 5 of `astro-time-and-frames`). Convert explicitly
+    /// via [`OrbitalState::to_frame`] before combining states.
     FrameMismatch {
         /// Frame of the state the operation was called on.
-        expected: OrbitalFrame,
+        expected: Frame,
         /// Frame of the other state.
-        found: OrbitalFrame,
+        found: Frame,
     },
+    /// The frame provider had no rotation for a requested conversion
+    /// (never produced by the default [`Iau76Fk5Provider`], which supports
+    /// every [`Frame`] pair).
+    Frame(FrameError),
 }
 
 impl fmt::Display for ElementError {
@@ -48,8 +65,9 @@ impl fmt::Display for ElementError {
                 "TLE mean elements require SGP4 (see thresh-data's `orbital` feature)"
             ),
             ElementError::FrameMismatch { expected, found } => {
-                write!(f, "frame mismatch: expected {expected:?}, found {found:?}")
+                write!(f, "frame mismatch: expected {expected}, found {found}")
             }
+            ElementError::Frame(e) => write!(f, "frame conversion failed: {e}"),
         }
     }
 }
@@ -60,21 +78,17 @@ impl std::error::Error for ElementError {}
 // Reference frame tag
 // ---------------------------------------------------------------------------
 
-/// Reference frame an [`OrbitalState`] is expressed in.
-///
-/// Under today's GMST-only rotation (`crate::eci`) the two variants are
-/// numerically identical *by documented design*; the tag exists so
-/// TLE-derived states are honestly labeled [`OrbitalFrame::Teme`] and the
-/// later `astro-time-and-frames` change can make the distinction real
-/// without an API break.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum OrbitalFrame {
-    /// Earth-centered inertial under the repo's GMST-only rotation
-    /// convention (see `crate::eci`).
-    EciGmst,
-    /// True Equator, Mean Equinox — the frame of SGP4 output.
-    Teme,
-}
+/// Reference frame vocabulary shared with the transform chain: the tag on
+/// [`OrbitalState`] **is** [`crate::frames::Frame`] (design Decision 5 of
+/// `astro-time-and-frames`: one enum, single source of truth).
+pub use crate::frames::Frame;
+
+/// Transitional alias: the pre-`astro-time-and-frames` name for the frame
+/// tag. The former `OrbitalFrame::EciGmst` variant is gone — states produced
+/// by the repo's GMST-only rotation convention (`crate::eci`) are truthfully
+/// [`Frame::Teme`] (design Decision 6: that chain always was TEME-consistent;
+/// the type now says so).
+pub use crate::frames::Frame as OrbitalFrame;
 
 // ---------------------------------------------------------------------------
 // Element representations
@@ -153,8 +167,9 @@ pub enum OrbitalElements {
 /// on bare `DVector<f64>` via [`Self::to_filter_state`] /
 /// [`Self::from_filter_state`]. It coexists with
 /// `thresh_synth::OrbitalState`, the propagator's lightweight Cartesian
-/// sample type (`From`/`TryFrom` conversions live in `thresh-synth`);
-/// consolidating the two is owned by the `astro-time-and-frames` change.
+/// sample type (`From`/`TryFrom` conversions live in `thresh-synth`, and
+/// deliberately keep raw `f64` UTC Julian dates inside the propagation
+/// loops — see the benchmark-invariance rationale on that type).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OrbitalState {
     /// Element representation.
@@ -162,9 +177,12 @@ pub struct OrbitalState {
     /// Gravitational parameter μ = GM (m³/s²) — required, no default.
     pub mu: f64,
     /// Reference frame tag.
-    pub frame: OrbitalFrame,
-    /// Epoch as Julian Date.
-    pub epoch_jd: f64,
+    pub frame: Frame,
+    /// Time-scale-aware absolute epoch (design Decision 5 of
+    /// `astro-time-and-frames`; was `epoch_jd: f64` — construct from a
+    /// UTC Julian date via [`Epoch::from_jde_utc`]). Frame conversions
+    /// ([`Self::to_frame`]) evaluate their rotations at this epoch.
+    pub epoch: Epoch,
 }
 
 impl OrbitalState {
@@ -293,7 +311,7 @@ impl OrbitalState {
             elements: OrbitalElements::Cartesian { position, velocity },
             mu: self.mu,
             frame: self.frame,
-            epoch_jd: self.epoch_jd,
+            epoch: self.epoch,
         })
     }
 
@@ -312,7 +330,7 @@ impl OrbitalState {
             },
             mu: self.mu,
             frame: self.frame,
-            epoch_jd: self.epoch_jd,
+            epoch: self.epoch,
         })
     }
 
@@ -331,22 +349,25 @@ impl OrbitalState {
             },
             mu: self.mu,
             frame: self.frame,
-            epoch_jd: self.epoch_jd,
+            epoch: self.epoch,
         })
     }
 
     /// Position difference `self − other` (m), converting both states to
     /// Cartesian.
     ///
-    /// Frame discipline: combining states with different [`OrbitalFrame`]
-    /// tags is rejected with a debug-assert today; the
-    /// [`ElementError::FrameMismatch`] variant is plumbed so the
-    /// `astro-time-and-frames` change can promote this to a hard error.
+    /// Frame discipline: combining states with different [`Frame`] tags is
+    /// rejected with [`ElementError::FrameMismatch`] — a returned error in
+    /// **every** build profile, release included (design Decision 5 of
+    /// `astro-time-and-frames`), never a silent numeric answer in a mixed
+    /// frame. Convert explicitly via [`Self::to_frame`] first.
     pub fn position_delta(&self, other: &Self) -> Result<Vector3<f64>, ElementError> {
-        debug_assert_eq!(
-            self.frame, other.frame,
-            "mixed-frame operation: convert explicitly before combining states"
-        );
+        if self.frame != other.frame {
+            return Err(ElementError::FrameMismatch {
+                expected: self.frame,
+                found: other.frame,
+            });
+        }
         let (r_self, _) = self.as_cartesian()?;
         let (r_other, _) = other.as_cartesian()?;
         Ok(r_self - r_other)
@@ -371,14 +392,16 @@ impl OrbitalState {
     /// Construct from an interleaved 6D filter state `[x, vx, y, vy, z, vz]`
     /// (metres, m/s), the inverse of [`Self::to_filter_state`].
     ///
-    /// The result is tagged [`OrbitalFrame::EciGmst`] because filter states
-    /// are ECI (GMST convention) by the motion-model frame contract of
-    /// design Decision 3.
+    /// The result is tagged [`Frame::Teme`]: filter states follow the
+    /// motion-model frame contract of design Decision 3 of
+    /// `orbital-ballistic-filter-models` — the "ECI" of the repo's
+    /// GMST-only rotation convention — which `astro-time-and-frames`
+    /// (design Decision 6) relabels truthfully as TEME.
     ///
     /// # Panics
     ///
     /// Panics if `state` is not 6-dimensional.
-    pub fn from_filter_state(state: &DVector<f64>, mu: f64, epoch_jd: f64) -> Self {
+    pub fn from_filter_state(state: &DVector<f64>, mu: f64, epoch: Epoch) -> Self {
         assert_eq!(
             state.len(),
             6,
@@ -390,9 +413,52 @@ impl OrbitalState {
                 velocity: Vector3::new(state[1], state[3], state[5]),
             },
             mu,
-            frame: OrbitalFrame::EciGmst,
-            epoch_jd,
+            frame: Frame::Teme,
+            epoch,
         }
+    }
+
+    /// Explicitly convert this state into `target` through the IAU-76/FK5
+    /// transform chain (zero-EOP default provider), evaluating the rotation
+    /// at **this state's own epoch** and returning a `Cartesian`-represented
+    /// state tagged `target` — tag and numbers change together, never
+    /// separately (spec "Explicit conversion changes tag and elements
+    /// together"). `mu` and the epoch (time scale included) carry over
+    /// unchanged.
+    ///
+    /// # Errors
+    ///
+    /// [`ElementError::RequiresSgp4`] for `Tle`-represented states (convert
+    /// via `thresh-data`'s `tle_to_cartesian` first).
+    pub fn to_frame(&self, target: Frame) -> Result<Self, ElementError> {
+        self.to_frame_with(&Iau76Fk5Provider::default(), target)
+    }
+
+    /// [`Self::to_frame`] with an explicit [`FrameProvider`] (EOP-carrying
+    /// [`Iau76Fk5Provider`], custom reduction, test double, …).
+    ///
+    /// # Errors
+    ///
+    /// [`ElementError::RequiresSgp4`] for `Tle`-represented states, and
+    /// [`ElementError::Frame`] when the provider has no rotation for the
+    /// `self.frame` → `target` pair (the default provider supports every
+    /// pair).
+    pub fn to_frame_with<P: FrameProvider + ?Sized>(
+        &self,
+        provider: &P,
+        target: Frame,
+    ) -> Result<Self, ElementError> {
+        let (position, velocity) = self.as_cartesian()?;
+        let rotation = provider
+            .rotation(self.frame, target, &self.epoch)
+            .map_err(ElementError::Frame)?;
+        let (position, velocity) = rotation.rotate_state(&position, &velocity);
+        Ok(Self {
+            elements: OrbitalElements::Cartesian { position, velocity },
+            mu: self.mu,
+            frame: target,
+            epoch: self.epoch,
+        })
     }
 }
 
@@ -672,8 +738,8 @@ mod tests {
                 true_anomaly: 0.8,
             },
             mu: EARTH_MU,
-            frame: OrbitalFrame::EciGmst,
-            epoch_jd: 2_451_545.0,
+            frame: Frame::Teme,
+            epoch: Epoch::from_jde_utc(2_451_545.0),
         }
     }
 
@@ -712,8 +778,8 @@ mod tests {
         let cart = OrbitalState {
             elements: OrbitalElements::Cartesian { position, velocity },
             mu: EARTH_MU,
-            frame: OrbitalFrame::EciGmst,
-            epoch_jd: 2_451_545.0,
+            frame: Frame::Teme,
+            epoch: Epoch::from_jde_utc(2_451_545.0),
         };
         let (r, v) = cart.as_cartesian().unwrap();
         for i in 0..3 {
@@ -790,15 +856,33 @@ mod tests {
 
     // ── Frame discipline (spec: "Mixed-frame operation rejected") ───────
 
+    /// Combining GCRF- and TEME-tagged states without an explicit
+    /// conversion is a returned `FrameMismatch` — a plain `if` on the tags,
+    /// not a `debug_assert`, so the rejection holds identically in release
+    /// builds (verified by running this test under `--release` in the
+    /// change's gate).
     #[test]
-    #[should_panic(expected = "mixed-frame operation")]
     fn mixed_frame_position_delta_is_rejected() {
-        let eci = leo_keplerian_state();
+        let gcrf = OrbitalState {
+            frame: Frame::Gcrf,
+            ..leo_keplerian_state()
+        };
         let teme = OrbitalState {
             frame: OrbitalFrame::Teme,
             ..leo_keplerian_state()
         };
-        let _ = eci.position_delta(&teme);
+        let expected_err = ElementError::FrameMismatch {
+            expected: Frame::Gcrf,
+            found: Frame::Teme,
+        };
+        assert_eq!(gcrf.position_delta(&teme), Err(expected_err));
+        assert_eq!(gcrf.separation(&teme), Err(expected_err));
+        // The error names both frames for the caller.
+        let message = expected_err.to_string();
+        assert!(
+            message.contains("GCRF") && message.contains("TEME"),
+            "{message}"
+        );
     }
 
     #[test]
@@ -826,6 +910,151 @@ mod tests {
         );
     }
 
+    // ── Explicit frame conversion (spec: "Explicit conversion changes tag
+    //    and elements together") ──────────────────────────────────────────
+
+    /// TEME → GCRF via `to_frame`: the result carries the GCRF tag AND its
+    /// Cartesian elements are exactly the transform-chain rotation of the
+    /// originals — tag and numbers never disagree.
+    #[test]
+    fn explicit_teme_to_gcrf_conversion_changes_tag_and_elements_together() {
+        // Modern epoch: accumulated precession/nutation since J2000 makes
+        // the TEME/GCRF displacement km-scale at LEO radius.
+        let teme = OrbitalState {
+            epoch: Epoch::from_gregorian_utc(2024, 1, 1, 0, 0, 0, 0),
+            ..leo_keplerian_state().to_cartesian_state().unwrap()
+        };
+        assert_eq!(teme.frame, Frame::Teme);
+        let (r_teme, v_teme) = teme.as_cartesian().unwrap();
+
+        let gcrf = teme.to_frame(Frame::Gcrf).unwrap();
+        assert_eq!(gcrf.frame, Frame::Gcrf, "tag must change to the target");
+        assert_eq!(gcrf.mu.to_bits(), teme.mu.to_bits());
+
+        // Elements are the transform of the originals: identical to the
+        // frames-module free function at the state's own epoch…
+        let (r_expected, v_expected) = crate::frames::teme_to_gcrf(&r_teme, &v_teme, &teme.epoch);
+        let (r_gcrf, v_gcrf) = gcrf.as_cartesian().unwrap();
+        assert!((r_gcrf - r_expected).norm() < 1e-9);
+        assert!((v_gcrf - v_expected).norm() < 1e-12);
+
+        // …and visibly different from the input (precession/nutation is
+        // km-scale at LEO radius — the conflation this change removed).
+        let displacement = (r_gcrf - r_teme).norm();
+        assert!(
+            displacement > 1_000.0,
+            "TEME/GCRF displacement {displacement:.1} m"
+        );
+
+        // Round trip back to TEME recovers the input.
+        let back = gcrf.to_frame(Frame::Teme).unwrap();
+        assert_eq!(back.frame, Frame::Teme);
+        let (r_back, v_back) = back.as_cartesian().unwrap();
+        assert!((r_back - r_teme).norm() < 1e-6);
+        assert!((v_back - v_teme).norm() < 1e-9);
+    }
+
+    /// `to_frame_with` surfaces provider errors as `ElementError::Frame`,
+    /// and `to_frame` refuses TLE-represented states with `RequiresSgp4`.
+    #[test]
+    fn to_frame_error_paths() {
+        struct RefusingProvider;
+        impl FrameProvider for RefusingProvider {
+            fn rotation(
+                &self,
+                from: Frame,
+                to: Frame,
+                _epoch: &Epoch,
+            ) -> Result<crate::frames::FrameRotation, FrameError> {
+                Err(FrameError::UnsupportedPair { from, to })
+            }
+        }
+
+        let state = leo_keplerian_state();
+        assert_eq!(
+            state.to_frame_with(&RefusingProvider, Frame::Gcrf),
+            Err(ElementError::Frame(FrameError::UnsupportedPair {
+                from: Frame::Teme,
+                to: Frame::Gcrf,
+            }))
+        );
+
+        let tle = OrbitalState {
+            elements: OrbitalElements::Tle {
+                line1: "1".to_string(),
+                line2: "2".to_string(),
+            },
+            mu: EARTH_MU,
+            frame: Frame::Teme,
+            epoch: Epoch::from_jde_utc(2_460_310.5),
+        };
+        assert_eq!(
+            tle.to_frame(Frame::Gcrf),
+            Err(ElementError::RequiresSgp4),
+            "TLE states convert via thresh-data's tle_to_cartesian first"
+        );
+    }
+
+    // ── Epoch discipline (specs: "Epoch survives conversions with its
+    //    scale intact", "Frame conversion uses the state's own epoch") ────
+
+    /// The epoch — constructed in the UTC scale — survives every
+    /// representation conversion and every frame conversion **identically**
+    /// (`Epoch` is `Eq` on the underlying TAI instant, so equality means
+    /// the same absolute time with the same scale semantics; the
+    /// scale-explicit serialized form is asserted too).
+    #[test]
+    fn epoch_survives_conversions_with_scale_intact() {
+        let epoch = Epoch::from_gregorian_utc(2024, 1, 1, 0, 0, 0, 0);
+        let state = OrbitalState {
+            epoch,
+            ..leo_keplerian_state()
+        };
+
+        let through = [
+            state.to_cartesian_state().unwrap(),
+            state.to_keplerian_state().unwrap(),
+            state.to_equinoctial_state().unwrap(),
+            state.to_frame(Frame::Gcrf).unwrap(),
+            state.to_frame(Frame::Itrf).unwrap(),
+        ];
+        for converted in &through {
+            assert_eq!(converted.epoch, epoch, "epoch must be identical");
+            assert_eq!(
+                converted.epoch.to_string(),
+                "2024-01-01T00:00:00 UTC",
+                "scale-explicit UTC form must be preserved"
+            );
+        }
+    }
+
+    /// Same TEME elements under two states differing only in epoch by one
+    /// year: the two GCRF results differ, because the conversion evaluates
+    /// precession/nutation at each state's own epoch (~20″/yr of precession
+    /// is hundreds of metres at LEO radius).
+    #[test]
+    fn frame_conversion_uses_the_states_own_epoch() {
+        let base = leo_keplerian_state().to_cartesian_state().unwrap();
+        let one_year_later = OrbitalState {
+            epoch: Epoch::from_gregorian_utc(2001, 1, 1, 12, 0, 0, 0),
+            ..base.clone()
+        };
+        assert_eq!(base.elements, one_year_later.elements);
+
+        let (r_a, _) = base.to_frame(Frame::Gcrf).unwrap().as_cartesian().unwrap();
+        let (r_b, _) = one_year_later
+            .to_frame(Frame::Gcrf)
+            .unwrap()
+            .as_cartesian()
+            .unwrap();
+        let separation = (r_a - r_b).norm();
+        assert!(
+            separation > 100.0,
+            "one year of precession/nutation must move the GCRF result \
+             measurably, got {separation:.3} m"
+        );
+    }
+
     // ── Parameterized mu (spec: "Conversions honor the supplied mu") ────
 
     #[test]
@@ -843,8 +1072,8 @@ mod tests {
             let state = OrbitalState {
                 elements: OrbitalElements::Cartesian { position, velocity },
                 mu,
-                frame: OrbitalFrame::EciGmst,
-                epoch_jd: 2_451_545.0,
+                frame: Frame::Teme,
+                epoch: Epoch::from_jde_utc(2_451_545.0),
             };
             let (sma, ..) = state.as_keplerian().unwrap();
             let vis_viva = 1.0 / (2.0 / r - v2 / mu);
@@ -911,8 +1140,8 @@ mod tests {
                 velocity: Vector3::from_row_slice(&VALLADO_2_5_VELOCITY_M_S),
             },
             mu: EARTH_MU,
-            frame: OrbitalFrame::EciGmst,
-            epoch_jd: 2_451_545.0,
+            frame: Frame::Teme,
+            epoch: Epoch::from_jde_utc(2_451_545.0),
         }
     }
 
@@ -953,8 +1182,8 @@ mod tests {
                 true_anomaly: VALLADO_2_6_TRUE_ANOMALY_DEG.to_radians(),
             },
             mu: EARTH_MU,
-            frame: OrbitalFrame::EciGmst,
-            epoch_jd: 2_451_545.0,
+            frame: Frame::Teme,
+            epoch: Epoch::from_jde_utc(2_451_545.0),
         };
         let (r, v) = state.as_cartesian().unwrap();
 
@@ -1006,8 +1235,8 @@ mod tests {
                 velocity: Vector3::new(4.0, 5.0, 6.0),
             },
             mu: EARTH_MU,
-            frame: OrbitalFrame::EciGmst,
-            epoch_jd: 2_451_545.0,
+            frame: Frame::Teme,
+            epoch: Epoch::from_jde_utc(2_451_545.0),
         };
         let x = state.to_filter_state().unwrap();
         assert_eq!(x.as_slice(), &[1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
@@ -1017,9 +1246,10 @@ mod tests {
     fn filter_state_roundtrip() {
         let state = leo_keplerian_state();
         let x = state.to_filter_state().unwrap();
-        let back = OrbitalState::from_filter_state(&x, state.mu, state.epoch_jd);
+        let back = OrbitalState::from_filter_state(&x, state.mu, state.epoch);
 
-        assert_eq!(back.frame, OrbitalFrame::EciGmst);
+        assert_eq!(back.frame, Frame::Teme);
+        assert_eq!(back.epoch, state.epoch);
         assert_eq!(back.mu, state.mu);
         let (r0, v0) = state.as_cartesian().unwrap();
         let (r1, v1) = back.as_cartesian().unwrap();
@@ -1033,7 +1263,7 @@ mod tests {
     #[should_panic(expected = "interleaved 6D")]
     fn from_filter_state_rejects_wrong_dimension() {
         let x = DVector::from_row_slice(&[1.0, 2.0, 3.0]);
-        let _ = OrbitalState::from_filter_state(&x, EARTH_MU, 2_451_545.0);
+        let _ = OrbitalState::from_filter_state(&x, EARTH_MU, Epoch::from_jde_utc(2_451_545.0));
     }
 
     // ── TLE variant (task 2.7, core side) ────────────────────────────────
@@ -1049,7 +1279,7 @@ mod tests {
             },
             mu: EARTH_MU,
             frame: OrbitalFrame::Teme,
-            epoch_jd: 2_460_310.5,
+            epoch: Epoch::from_jde_utc(2_460_310.5),
         };
         assert_eq!(state.as_cartesian(), Err(ElementError::RequiresSgp4));
         assert_eq!(state.as_keplerian(), Err(ElementError::RequiresSgp4));
