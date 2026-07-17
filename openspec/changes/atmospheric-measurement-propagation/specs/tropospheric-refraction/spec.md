@@ -28,7 +28,7 @@ Refraction functions SHALL declare a minimum-elevation validity floor (default 1
 - **THEN** the result SHALL equal the floor evaluation (clamped) and the API documentation SHALL state this behavior
 
 ### Requirement: Refraction correction with bounded residual
-The system SHALL provide an inverse-model correction mapping an apparent (measured) elevation and range to refraction-corrected values, suitable for application before RAE→Cartesian conversion. A bias-then-correct round trip with true parameters SHALL recover the unbiased geometry within quadrature tolerance, and correcting with deliberately mismatched profile parameters SHALL leave a measured residual that is documented and asserted to be an order of magnitude smaller than the uncorrected bias.
+The system SHALL provide an inverse-model correction mapping an apparent (measured) elevation and range to refraction-corrected values, suitable for application before RAE→Cartesian conversion. A bias-then-correct round trip with true parameters SHALL recover the unbiased geometry within quadrature tolerance, and correcting with deliberately mismatched profile parameters SHALL leave a residual approximately equal to the mis-set fraction of the uncorrected bias — the bias is near-linear in surface refractivity, so a parameter mis-set by a given fraction leaves that fraction of the bias uncorrected — measured, documented, and recorded at the test.
 
 #### Scenario: Round trip with true parameters
 - **WHEN** a geometric measurement is biased by the model and then corrected using the same parameters
@@ -36,4 +36,4 @@ The system SHALL provide an inverse-model correction mapping an apparent (measur
 
 #### Scenario: Mismatched correction still helps
 - **WHEN** the correction runs with surface refractivity mis-set by ±10%
-- **THEN** the residual elevation and range errors SHALL be at least an order of magnitude smaller than the uncorrected bias, with the measured residuals recorded at the test
+- **THEN** the residual elevation and range errors SHALL be approximately the mis-set fraction (≈10%) of the uncorrected bias, with the measured residual ratios recorded at the test; the full bias is removed only when correcting with the true parameters
