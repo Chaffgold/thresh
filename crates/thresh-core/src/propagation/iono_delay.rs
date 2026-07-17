@@ -135,6 +135,29 @@ pub struct IonoDelayConfig {
 }
 
 impl IonoDelayConfig {
+    /// Panic with a clear message on physically invalid parameters —
+    /// serde-deserialized configs are not otherwise validated, and a
+    /// negative or non-finite VTEC/shell height/frequency silently
+    /// produces NaN or wrong-signed delays. Checked once at every public
+    /// evaluation entry point (the `DpConfig`/`ForceModelConfig` pattern).
+    pub(crate) fn validate(&self) {
+        assert!(
+            self.vtec_tecu.is_finite() && self.vtec_tecu >= 0.0,
+            "vertical TEC must be finite and >= 0, got {}",
+            self.vtec_tecu
+        );
+        assert!(
+            self.shell_height_m.is_finite() && self.shell_height_m > 0.0,
+            "shell height must be finite and > 0, got {}",
+            self.shell_height_m
+        );
+        assert!(
+            self.frequency_hz.is_finite() && self.frequency_hz > 0.0,
+            "carrier frequency must be finite and > 0, got {}",
+            self.frequency_hz
+        );
+    }
+
     /// Config with the published default shell height
     /// ([`DEFAULT_SHELL_HEIGHT_M`]).
     pub fn new(vtec_tecu: f64, frequency_hz: f64) -> Self {
@@ -179,6 +202,7 @@ pub fn thin_shell_obliquity(elevation_rad: f64, shell_height_m: f64) -> f64 {
 /// mapping [`thin_shell_obliquity`]. Deterministic pure function; see the
 /// module docs for constants, sign convention, and magnitude regimes.
 pub fn iono_range_delay_m(config: &IonoDelayConfig, elevation_rad: f64) -> f64 {
+    config.validate();
     let stec_el_per_m2 = config.vtec_tecu
         * TECU_ELECTRONS_PER_M2
         * thin_shell_obliquity(elevation_rad, config.shell_height_m);
@@ -473,5 +497,20 @@ mod tests {
         let json = serde_json::to_string(&full).unwrap();
         let back: IonoDelayConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back, full);
+    }
+    /// Serde-boundary validation: physically invalid parameters panic
+    /// loudly at the first evaluation instead of producing NaN delays.
+    #[test]
+    #[should_panic(expected = "vertical TEC")]
+    fn negative_vtec_panics() {
+        let cfg = IonoDelayConfig::new(-5.0, 1.3e9);
+        iono_range_delay_m(&cfg, 0.5);
+    }
+
+    #[test]
+    #[should_panic(expected = "carrier frequency")]
+    fn zero_frequency_panics() {
+        let cfg = IonoDelayConfig::new(10.0, 0.0);
+        iono_range_delay_m(&cfg, 0.5);
     }
 }

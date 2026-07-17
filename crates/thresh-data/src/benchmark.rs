@@ -2575,6 +2575,23 @@ mod tests {
         assert_eq!(uncorrected.mota.to_bits(), honest.mota.to_bits());
         assert_eq!(corrected.mota.to_bits(), honest.mota.to_bits());
         assert_eq!(uncorrected.idf1.to_bits(), honest.idf1.to_bits());
+        assert_eq!(corrected.idf1.to_bits(), honest.idf1.to_bits());
+
+        // ANIS stays effectively unchanged in all three runs (design record:
+        // the smoothly-varying bias is absorbed into the CV filter's state,
+        // so innovation self-consistency is structurally blind to it —
+        // measured 1.5947 → 1.5948 → 1.5947).
+        let h_anis = honest.anis.unwrap();
+        assert!(
+            (uncorrected.anis.unwrap() - h_anis).abs() < 0.01,
+            "uncorrected ANIS {:.4} must stay within 0.01 of honest {h_anis:.4}",
+            uncorrected.anis.unwrap()
+        );
+        assert!(
+            (corrected.anis.unwrap() - h_anis).abs() < 0.01,
+            "corrected ANIS {:.4} must stay within 0.01 of honest {h_anis:.4}",
+            corrected.anis.unwrap()
+        );
 
         // Scenario "Correction recovers near-honest statistics": with the same
         // parameters inverted at the seam, MOTP and ANEES return to within
@@ -3085,6 +3102,10 @@ mod tests {
                 gate_threshold: 500.0,
                 tracker_variant: None,
                 scenario_type: None,
+                measurement_model: MeasurementModel::RadarRae,
+                tracker_noise_sigma: None,
+                atmosphere_bias: None,
+                atmosphere_correction: false,
             },
             baselines: Some(Baselines {
                 mota: Some(-1.0),
@@ -3560,6 +3581,10 @@ mod tests {
                 gate_threshold: 50.0,
                 tracker_variant: None,
                 scenario_type: None,
+                measurement_model: MeasurementModel::RadarRae,
+                tracker_noise_sigma: None,
+                atmosphere_bias: None,
+                atmosphere_correction: false,
             },
             baselines: Some(Baselines {
                 mota: Some(-2.0),

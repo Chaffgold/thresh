@@ -185,6 +185,29 @@ impl RefractionConfig {
             min_elevation_rad: default_min_elevation_rad(),
         }
     }
+
+    /// Panic with a clear message on physically invalid parameters —
+    /// serde-deserialized configs are not otherwise validated, and a
+    /// negative or non-finite refractivity/scale height silently produces
+    /// NaN or wrong-signed biases. Checked once at every public
+    /// evaluation entry point (the `DpConfig`/`ForceModelConfig` pattern).
+    pub(crate) fn validate(&self) {
+        assert!(
+            self.n_s.is_finite() && self.n_s >= 0.0,
+            "surface refractivity N_s must be finite and >= 0, got {}",
+            self.n_s
+        );
+        assert!(
+            self.scale_height_m.is_finite() && self.scale_height_m > 0.0,
+            "scale height must be finite and > 0, got {}",
+            self.scale_height_m
+        );
+        assert!(
+            self.min_elevation_rad > 0.0 && self.min_elevation_rad <= std::f64::consts::FRAC_PI_2,
+            "minimum elevation must be in (0, pi/2], got {}",
+            self.min_elevation_rad
+        );
+    }
 }
 
 impl Default for RefractionConfig {
@@ -308,6 +331,7 @@ pub fn refraction_bending_and_excess(
     station_alt_m: f64,
     target_alt_m: f64,
 ) -> (f64, f64) {
+    config.validate();
     if target_alt_m.min(ATMOSPHERE_TOP_M) <= station_alt_m {
         return (0.0, 0.0);
     }
@@ -382,6 +406,7 @@ pub fn effective_earth_bending(
     station_alt_m: f64,
     target_alt_m: f64,
 ) -> f64 {
+    config.validate();
     let elevation = elevation_rad.max(config.min_elevation_rad);
     let top = target_alt_m.min(ATMOSPHERE_TOP_M);
     if top <= station_alt_m {
@@ -709,5 +734,21 @@ mod tests {
         let json = serde_json::to_string(&full).unwrap();
         let back: RefractionConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back, full);
+    }
+    /// Serde-boundary validation: physically invalid parameters panic
+    /// loudly at the first evaluation instead of producing NaN or
+    /// wrong-signed biases.
+    #[test]
+    #[should_panic(expected = "surface refractivity")]
+    fn negative_refractivity_panics() {
+        let cfg = RefractionConfig::new(-1.0, 7000.0);
+        refraction_bending_and_excess(&cfg, 0.2, 0.0, 10_000.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "scale height")]
+    fn non_finite_scale_height_panics() {
+        let cfg = RefractionConfig::new(313.0, f64::NAN);
+        refraction_bending_and_excess(&cfg, 0.2, 0.0, 10_000.0);
     }
 }
