@@ -6,4 +6,5 @@ pub mod ca;
 pub mod coordinated_turn;
 pub mod ctrv;
 pub mod cv;
+pub mod equinoctial;
 pub mod kepler_j2;
