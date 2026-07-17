@@ -24,6 +24,7 @@ pub mod egm96;
 pub mod ephemeris;
 pub mod force_config;
 pub mod gravity;
+pub mod gve;
 pub mod integrate;
 pub mod srp;
 pub mod state;
