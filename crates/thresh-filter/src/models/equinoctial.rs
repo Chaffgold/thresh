@@ -92,6 +92,7 @@ const ELEMENT_6D_SCALES: [f64; 6] = [1.0, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3];
 /// hardcoded Earth constant, like `KeplerJ2`. `predict` sub-steps the interval
 /// with fixed RK4 over the Gauss variational element rates (`max_step_s`
 /// ceiling). The mean longitude is unwrapped (see the module docs).
+#[derive(Debug, Clone, Copy)]
 pub struct EquinoctialModel {
     /// Central-body gravitational parameters (µ, J2, equatorial radius).
     pub gravity: GravityModel,
@@ -119,6 +120,20 @@ impl EquinoctialModel {
             sigma_accel: 1e-3,
             reference_elements,
         }
+    }
+
+    /// A copy of this model re-anchored at `state` (the current filter
+    /// mean): the process-noise input matrix Γ depends on orbital phase, so
+    /// evaluating it at a fixed [`Self::reference_elements`] is a
+    /// small-interval approximation (the cited SNC model's own framing).
+    /// Long-arc consumers SHOULD re-anchor per predict step so Q's
+    /// element-space orientation tracks the orbit.
+    pub fn re_anchored(&self, state: &DVector<f64>) -> Self {
+        let mut m = *self;
+        for (slot, value) in m.reference_elements.iter_mut().zip(state.iter()) {
+            *slot = *value;
+        }
+        m
     }
 
     /// The J2-only inertial perturbation closure the GVE consume (design

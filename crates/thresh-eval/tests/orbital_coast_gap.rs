@@ -340,7 +340,11 @@ fn coast_run(
     for c in 0..=max_coast {
         if c > 0 {
             ekf.predict(&kepler, DT_STEP);
-            ukf.predict(&equinoctial, DT_STEP);
+            // Re-anchor the SNC input matrix at the current mean so Q's
+            // element-space orientation tracks orbital phase through the
+            // multi-revolution coast (see EquinoctialModel::re_anchored).
+            let step_model = equinoctial.re_anchored(&ukf.x);
+            ukf.predict(&step_model, DT_STEP);
         }
         if CHECKPOINTS.contains(&c) {
             let truth_pos = &truth[WARMUP_STEPS + c].0;
@@ -442,6 +446,28 @@ fn coast_gap_element_filter_outlasts_cartesian() {
         ukf_mean >= lo && ukf_mean <= hi,
         "equinoctial ANEES {ukf_mean} must be inside [{lo}, {hi}]"
     );
+
+    // The stated result is stronger than one crossover: the equinoctial UKF
+    // stays inside the band at EVERY swept gap — assert the whole sweep so a
+    // regression at any other checkpoint cannot hide behind the crossover.
+    for (i, acc) in equi_accs.iter().enumerate() {
+        assert_eq!(
+            acc.verdict(chi2::DEFAULT_ALPHA).unwrap(),
+            ConsistencyVerdict::Consistent,
+            "equinoctial ANEES must be in band at checkpoint {i} (gap {} s), got {:?}",
+            CHECKPOINTS[i] as f64 * DT_STEP,
+            acc.mean()
+        );
+    }
+    // Both recorded Cartesian excursions (the once-per-revolution banana
+    // rotation) are part of the recorded, bitwise-deterministic result.
+    for &idx in &[5usize, 7usize] {
+        assert_ne!(
+            cart_accs[idx].verdict(chi2::DEFAULT_ALPHA).unwrap(),
+            ConsistencyVerdict::Consistent,
+            "Cartesian ANEES expected out of band at checkpoint {idx}"
+        );
+    }
 
     // Spec "Demonstration is deterministic": a second seeded sweep reproduces
     // every accumulated ANEES bit-for-bit.

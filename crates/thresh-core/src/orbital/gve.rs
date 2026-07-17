@@ -347,12 +347,14 @@ where
     ]
 }
 
-/// Number of equal RK4 sub-steps covering `dt`: `ceil(dt / max_step_s)`, at
-/// least 1 (so `dt = 0` degenerates to a single identity step). Mirrors the
-/// `KeplerJ2` Cartesian model's sub-stepping so the two formulations share a
-/// step convention.
+/// Number of equal RK4 sub-steps covering `dt`: `ceil(|dt| / max_step_s)`,
+/// at least 1 (so `dt = 0` degenerates to a single identity step, and a
+/// negative `dt` — backward propagation — is split into the same
+/// ceiling-sized substeps instead of one large step). Mirrors the
+/// `KeplerJ2` Cartesian model's sub-stepping so the two formulations share
+/// a step convention.
 fn substep_count(dt: f64, max_step_s: f64) -> usize {
-    (dt / max_step_s).ceil().max(1.0) as usize
+    (dt.abs() / max_step_s).ceil().max(1.0) as usize
 }
 
 /// `x + a·y` element-wise for the 6-vector of elements (RK4 stage state).
@@ -401,6 +403,10 @@ pub fn propagate_equinoctial<F>(
 where
     F: Fn(f64, &Vector3<f64>, &Vector3<f64>) -> Vector3<f64>,
 {
+    assert!(
+        max_step_s.is_finite() && max_step_s > 0.0,
+        "max_step_s must be finite and > 0, got {max_step_s}"
+    );
     let steps = substep_count(dt, max_step_s);
     let sub_dt = dt / steps as f64;
     let mut x = elements;
@@ -707,6 +713,37 @@ mod tests {
         (r_gve - r_cart).norm()
     }
 
+    /// The genuinely Cartesian-born direction: `(r0, v0)` come straight from
+    /// `keplerian_to_cartesian` (a third conversion path), and the GVE side
+    /// receives elements converted FROM that Cartesian state — so the two
+    /// propagations do not share an elements-first initialization, and a
+    /// defect in the equinoctial→Cartesian conversion cannot cancel.
+    fn gve_vs_cartesian_gap_cartesian_born(case: &EquivCase) -> f64 {
+        let [sma, ecc, inc, raan, argp, true_anomaly] = case.kep;
+        let (r0, v0) = crate::orbital::keplerian_to_cartesian(
+            sma,
+            ecc,
+            inc,
+            raan,
+            argp,
+            true_anomaly,
+            EARTH_MU,
+        );
+        // Round-trip the CARTESIAN state back through cartesian_to_keplerian
+        // so the GVE side's elements are born from (r0, v0), not from the
+        // Keplerian inputs both sides would otherwise share.
+        let (k_sma, k_ecc, k_inc, k_raan, k_argp, k_nu) =
+            crate::orbital::cartesian_to_keplerian(&r0, &v0, EARTH_MU);
+        let el = elements_from_keplerian(k_sma, k_ecc, k_inc, k_raan, k_argp, k_nu, EARTH_MU);
+
+        let el_end =
+            propagate_equinoctial(el, EARTH_MU, 0.0, case.arc, case.step, &j2_closure(EARTH));
+        let r_gve = elements_to_position(&el_end, EARTH_MU);
+
+        let (r_cart, _) = propagate_cartesian(r0, v0, EARTH, case.arc, case.step);
+        (r_gve - r_cart).norm()
+    }
+
     #[test]
     fn leo_equivalence_both_directions() {
         // Near-circular LEO, ~3 revolutions (period ≈ 5560 s), 5 s steps.
@@ -720,6 +757,28 @@ mod tests {
         // (dominated by the Cartesian RK4 two-body truncation — the GVE
         // two-body part is analytic). Tolerance 0.1 m.
         assert!(gap < 0.1, "LEO GVE vs Cartesian gap = {gap:.4e} m");
+
+        // The genuinely Cartesian-born direction (spec: "LEO equivalence
+        // both directions"): (r0, v0) from keplerian_to_cartesian, the GVE
+        // elements born FROM that Cartesian state via cartesian_to_keplerian
+        // — no shared elements-first initialization, so a conversion defect
+        // cannot cancel between the two sides.
+        let gap_cb = gve_vs_cartesian_gap_cartesian_born(&EquivCase {
+            kep: [7_000_000.0, 0.01, 0.9, 1.2, 0.4, 0.0],
+            arc: 3.0 * period,
+            step: 5.0,
+        });
+        // MEASURED: gap ≈ 1.38e-1 m — 50× the element-born case, and that is
+        // initial-condition conditioning, not propagation error: the
+        // keplerian↔cartesian round trip at e = 0.01 reproduces the state
+        // to ~mm (near-circular argp/ν conditioning), and an initial δa
+        // drifts along-track by ≈ 3π·δa per revolution (5 mm × 3 rev × 3π
+        // ≈ 0.14 m). A genuine conversion or GVE defect would be km-scale;
+        // the element-born case above isolates propagation truth at 2.75e-3 m.
+        assert!(
+            gap_cb < 1.0,
+            "LEO Cartesian-born GVE vs Cartesian gap = {gap_cb:.4e} m"
+        );
     }
 
     #[test]
