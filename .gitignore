@@ -28,6 +28,13 @@ __pycache__/
 .venv/
 venv/
 
+# Secrets (OpenSky OAuth2 client credentials, ADSBx API keys, ...)
+# Never commit these; see TRAINING.md § Acquisition.
+credentials.json
+.env
+.env.*
+!.env.example
+
 # OS
 .DS_Store
 Thumbs.db

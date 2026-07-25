@@ -160,7 +160,7 @@ def fetch_state_vectors(
     bbox: BoundingBox,
     time_range: TimeRange,
     *,
-    credentials: tuple[str, str] | None = None,
+    auth: httpx.Auth | None = None,
     poll_interval_s: float = DEFAULT_POLL_INTERVAL_S,
     client: httpx.Client | None = None,
     retries: int = DEFAULT_RETRIES,
@@ -174,9 +174,13 @@ def fetch_state_vectors(
     failures are retried up to ``retries`` times with exponential
     backoff. Non-recoverable errors raise :class:`OpenSkyError` with
     the response body included.
+
+    Historical windows require authentication: pass ``auth`` from
+    :func:`acquisition.opensky_auth.build_auth`. Anonymous callers are
+    limited to the current snapshot (:func:`fetch_current_states`).
     """
     owns_client = client is None
-    http = client or httpx.Client(base_url=OPENSKY_BASE_URL, timeout=30.0, auth=credentials)
+    http = client or httpx.Client(base_url=OPENSKY_BASE_URL, timeout=30.0, auth=auth)
     try:
         for t in range(time_range.start_s, time_range.end_s, max(int(poll_interval_s), 1)):
             payload = _fetch_one_snapshot(http, bbox, t, retries=retries, backoff_s=backoff_s)
@@ -194,7 +198,7 @@ def fetch_state_vectors(
 def fetch_current_states(
     bbox: BoundingBox,
     *,
-    credentials: tuple[str, str] | None = None,
+    auth: httpx.Auth | None = None,
     client: httpx.Client | None = None,
     retries: int = DEFAULT_RETRIES,
     backoff_s: float = DEFAULT_BACKOFF_S,
@@ -208,7 +212,7 @@ def fetch_current_states(
     use this instead of :func:`fetch_state_vectors`.
     """
     owns_client = client is None
-    http = client or httpx.Client(base_url=OPENSKY_BASE_URL, timeout=30.0, auth=credentials)
+    http = client or httpx.Client(base_url=OPENSKY_BASE_URL, timeout=30.0, auth=auth)
     try:
         payload = _fetch_one_snapshot(http, bbox, None, retries=retries, backoff_s=backoff_s)
     finally:
