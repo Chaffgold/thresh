@@ -1,7 +1,8 @@
 # cognitive-complexity Specification
 
 ## Purpose
-TBD - created by archiving change code-maintainability. Update Purpose after archive.
+Maintainability constraint on specific functions in `thresh-association`, `thresh-data`, `thresh-synth`, and the `thresh-tracker` stereographic tracker tests: each must stay at a cognitive complexity of at most 15 under SonarCloud rule `rust:S3776`, reached by extracting named helpers. Each refactor must preserve behavior: the existing tests pass unchanged and results are equivalent to those of the previous implementation.
+
 ## Requirements
 ### Requirement: Hungarian algorithm cognitive complexity
 The `hungarian_assignment` function in `crates/thresh-association/src/hungarian.rs` SHALL have a cognitive complexity of at most 15 as measured by SonarCloud rule `rust:S3776`, decomposed into named phase helpers (cost-matrix reduction, augmenting-path search, label/slack update). The system MUST support this.

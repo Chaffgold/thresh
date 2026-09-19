@@ -1,7 +1,8 @@
 # radar-scene-sim Specification
 
 ## Purpose
-TBD - created by archiving change hifi-sensor-simulation. Update Purpose after archive.
+Optional scene-level radar simulation in `thresh-synth`, gated behind the `radar-scene` Cargo feature so that default builds need no Python; when enabled it links through PyO3 to RadarSimPy or mpar-sim. It covers multi-target scenes with ground clutter, volume clutter, and jamming, beam scheduling across search, track, and confirmation dwells, pulse-Doppler processing to a range-Doppler map, and CA-CFAR detection, and it outputs detections (range, azimuth, elevation, Doppler, SNR, timestamp, beam index) with noise consistent with the radar equation, in a form compatible with thresh measurement ingest for tracker evaluation.
+
 ## Requirements
 ### Requirement: Feature-gated radar scene simulation module
 The system MUST gate all radar scene simulation functionality behind the `radar-scene` Cargo feature flag. When the feature is not enabled, no Python, PyO3, or RadarSimPy/mpar-sim dependencies MUST be compiled or required. When enabled, the module MUST link against PyO3 and require a Python environment with RadarSimPy or mpar-sim installed.
