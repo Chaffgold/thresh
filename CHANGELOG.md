@@ -50,6 +50,7 @@ JPDA and MHT data association, SafeTensors weight loading, Rust-native DETR dete
 
 ### Changed
 - All 19 SonarCloud `rust:S3776` cognitive complexity violations resolved via phase-helper decomposition (see CLAUDE.md style guide). Touched: `hungarian.rs`, `adsb.rs::extract_ground_truth`, `orbital.rs` (RK4 stages, `extract_passes`, `trajectory step`), and stereographic tracker tests. `bin_adsb_detections` argument list grouped into an `EnuRef` struct.
+- Two further `rust:S3776` violations (17 → ≤ 15) resolved the same way, with no behaviour change: `jpda.rs::cluster_tracks` (union-find helpers hoisted to module level plus three phase helpers) and `thresh-viz`'s `app.rs::render_track_list` (per-row helper). `ThreshVizApp::selected_track()` accessor added for the new headless row-click test.
 - `MultiObjectTracker` integration: `step_detections` now dispatches through the configured `AssociationStrategy`.
 
 ### Notes

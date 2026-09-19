@@ -230,6 +230,11 @@ impl ThreshVizApp {
         self.show_event_log
     }
 
+    /// ID of the track currently selected in the sidebar track list, if any.
+    pub fn selected_track(&self) -> Option<u64> {
+        self.selected_track
+    }
+
     /// Total number of frames currently available in the source.
     fn total_frames(&self) -> usize {
         match &self.source {
@@ -577,29 +582,39 @@ impl ThreshVizApp {
             .max_height(160.0)
             .show(ui, |ui| {
                 for (id, pos, confirmed, class) in &tracks {
-                    let selected = self.selected_track == Some(*id);
-                    let status = if *confirmed { "\u{2713}" } else { "\u{25CB}" };
-                    let class_str = class
-                        .as_ref()
-                        .map(|c| format!(" ({c})"))
-                        .unwrap_or_default();
-                    let dot_color = id_to_color(*id);
-                    let row = ui.selectable_label(
-                        selected,
-                        format!("  ID {id}    [{:.0}, {:.0}]{class_str}", pos[0], pos[1]),
-                    );
-                    // Paint a colored dot at the start of the row to match the plot.
-                    if ui.is_rect_visible(row.rect) {
-                        let center = egui::pos2(row.rect.left() + 8.0, row.rect.center().y);
-                        ui.painter().circle_filled(center, 4.0, dot_color);
-                    }
-                    if row.clicked() {
-                        self.selected_track = if selected { None } else { Some(*id) };
-                    }
-                    // Confirmation status icon at the end of the row.
-                    let _ = status;
+                    self.render_track_row(ui, *id, pos, *confirmed, class.as_deref());
                 }
             });
+    }
+
+    /// Render one selectable row of the track list. Clicking a row selects
+    /// its track; clicking the selected row clears the selection.
+    fn render_track_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: u64,
+        pos: &[f64; 3],
+        confirmed: bool,
+        class: Option<&str>,
+    ) {
+        let selected = self.selected_track == Some(id);
+        let status = if confirmed { "\u{2713}" } else { "\u{25CB}" };
+        let class_str = class.map(|c| format!(" ({c})")).unwrap_or_default();
+        let dot_color = id_to_color(id);
+        let row = ui.selectable_label(
+            selected,
+            format!("  ID {id}    [{:.0}, {:.0}]{class_str}", pos[0], pos[1]),
+        );
+        // Paint a colored dot at the start of the row to match the plot.
+        if ui.is_rect_visible(row.rect) {
+            let center = egui::pos2(row.rect.left() + 8.0, row.rect.center().y);
+            ui.painter().circle_filled(center, 4.0, dot_color);
+        }
+        if row.clicked() {
+            self.selected_track = if selected { None } else { Some(id) };
+        }
+        // Confirmation status icon at the end of the row.
+        let _ = status;
     }
 
     fn render_plot(&self, ui: &mut egui::Ui) {

@@ -16,6 +16,8 @@
 //!
 //! Bar-Shalom, Y. & Li, X.-R. (2009). *Multitarget-Multisensor Tracking*.
 
+use std::collections::HashMap;
+
 use nalgebra::{DMatrix, DVector};
 
 use crate::gating::mahalanobis_squared;
@@ -300,46 +302,70 @@ pub fn cluster_tracks(
 ) -> Vec<(Vec<usize>, Vec<usize>)> {
     // Union-find on tracks: merge tracks that share a detection.
     let mut parent: Vec<usize> = (0..n_tracks).collect();
+    union_tracks_sharing_detections(&mut parent, n_tracks, n_dets, gated);
 
-    fn find(parent: &mut [usize], mut x: usize) -> usize {
-        while parent[x] != x {
-            parent[x] = parent[parent[x]]; // path compression
-            x = parent[x];
-        }
-        x
+    let cluster_map = group_tracks_by_root(&mut parent, n_tracks);
+    collect_cluster_detections(cluster_map, n_dets, gated)
+}
+
+/// Find the root of `x` in the union-find forest, compressing the path.
+fn find_root(parent: &mut [usize], mut x: usize) -> usize {
+    while parent[x] != x {
+        parent[x] = parent[parent[x]]; // path compression
+        x = parent[x];
     }
+    x
+}
 
-    fn union(parent: &mut [usize], a: usize, b: usize) {
-        let ra = find(parent, a);
-        let rb = find(parent, b);
-        if ra != rb {
-            parent[rb] = ra;
-        }
+/// Merge the sets holding `a` and `b`; the root of `a` becomes the joint root.
+fn union_sets(parent: &mut [usize], a: usize, b: usize) {
+    let ra = find_root(parent, a);
+    let rb = find_root(parent, b);
+    if ra != rb {
+        parent[rb] = ra;
     }
+}
 
-    // For each detection, find all tracks that gate on it and union them.
+/// For each detection, find all tracks that gate on it and union them.
+///
+/// `parent` must hold one entry per track (`n_tracks` of them); rows of
+/// `gated` beyond `n_tracks` are ignored.
+fn union_tracks_sharing_detections(
+    parent: &mut [usize],
+    n_tracks: usize,
+    n_dets: usize,
+    gated: &[Vec<bool>],
+) {
     for j in 0..n_dets {
         let mut first_track: Option<usize> = None;
         for (i, gated_row) in gated.iter().enumerate().take(n_tracks) {
             if gated_row[j] {
                 if let Some(ft) = first_track {
-                    union(&mut parent, ft, i);
+                    union_sets(parent, ft, i);
                 } else {
                     first_track = Some(i);
                 }
             }
         }
     }
+}
 
-    // Group tracks by their root.
-    let mut cluster_map: std::collections::HashMap<usize, Vec<usize>> =
-        std::collections::HashMap::new();
+/// Group track indices by their union-find root, ascending within a group.
+fn group_tracks_by_root(parent: &mut [usize], n_tracks: usize) -> HashMap<usize, Vec<usize>> {
+    let mut cluster_map: HashMap<usize, Vec<usize>> = HashMap::new();
     for i in 0..n_tracks {
-        let root = find(&mut parent, i);
+        let root = find_root(parent, i);
         cluster_map.entry(root).or_default().push(i);
     }
+    cluster_map
+}
 
-    // For each cluster, collect the corresponding detections.
+/// For each cluster, collect the detections gated by any of its tracks.
+fn collect_cluster_detections(
+    cluster_map: HashMap<usize, Vec<usize>>,
+    n_dets: usize,
+    gated: &[Vec<bool>],
+) -> Vec<(Vec<usize>, Vec<usize>)> {
     let mut clusters: Vec<(Vec<usize>, Vec<usize>)> = Vec::new();
     for (_, track_indices) in cluster_map {
         let det_indices: Vec<usize> = (0..n_dets)
@@ -713,5 +739,132 @@ mod tests {
         ];
         let clusters = cluster_tracks(4, 4, &gated);
         assert_eq!(clusters.len(), 2, "should have 2 clusters");
+    }
+
+    /// `cluster_tracks` groups through a `HashMap`, so the order of the
+    /// returned clusters varies from run to run. Order them by their lowest
+    /// track index so the whole result can be compared exactly.
+    fn sorted_clusters(
+        mut clusters: Vec<(Vec<usize>, Vec<usize>)>,
+    ) -> Vec<(Vec<usize>, Vec<usize>)> {
+        clusters.sort_by_key(|(tracks, _)| tracks[0]);
+        clusters
+    }
+
+    /// Pins the complete output on a fixed case: a transitive chain
+    /// (0-2 share det 1, 2-4 share det 3), a pair (1-5 share det 0), a track
+    /// that gates nothing (singleton with no detections) and a detection
+    /// nobody gates (det 2, in no cluster). Track and detection indices are
+    /// ascending within each cluster.
+    #[test]
+    fn test_cluster_tracks_pins_full_output() {
+        let t = true;
+        let f = false;
+        let gated = vec![
+            vec![f, t, f, f, f, f],
+            vec![t, f, f, f, f, f],
+            vec![f, t, f, t, f, f],
+            vec![f, f, f, f, f, f],
+            vec![f, f, f, t, t, f],
+            vec![t, f, f, f, f, t],
+        ];
+
+        let clusters = sorted_clusters(cluster_tracks(6, 6, &gated));
+
+        assert_eq!(
+            clusters,
+            vec![
+                (vec![0, 2, 4], vec![1, 3, 4]),
+                (vec![1, 5], vec![0, 5]),
+                (vec![3], vec![]),
+            ]
+        );
+    }
+
+    /// Rows of `gated` beyond `n_tracks` are ignored: here the extra row is
+    /// the only link between tracks 0 and 1, and they stay separate.
+    #[test]
+    fn test_cluster_tracks_ignores_rows_beyond_n_tracks() {
+        let gated = vec![vec![true, false], vec![false, true], vec![true, true]];
+
+        let clusters = sorted_clusters(cluster_tracks(2, 2, &gated));
+
+        assert_eq!(clusters, vec![(vec![0], vec![0]), (vec![1], vec![1])]);
+    }
+
+    /// A non-square case (3 tracks, 2 detections) whose union phase leaves a
+    /// forest two levels deep: det 0 joins tracks 1 and 2, then det 1 roots
+    /// track 1 under track 0, so track 2 reaches its root only through
+    /// `find_root`. Swapping the two counts, or grouping by `parent[i]`
+    /// instead of the root, both fail here and in no square, flat case.
+    #[test]
+    fn test_cluster_tracks_non_square_two_level_forest() {
+        let gated = vec![vec![false, true], vec![true, true], vec![true, false]];
+
+        let clusters = sorted_clusters(cluster_tracks(3, 2, &gated));
+
+        assert_eq!(clusters, vec![(vec![0, 1, 2], vec![0, 1])]);
+    }
+
+    #[test]
+    fn test_cluster_tracks_no_tracks() {
+        assert!(cluster_tracks(0, 3, &[]).is_empty());
+    }
+
+    #[test]
+    fn test_union_sets_roots_under_first_argument() {
+        let mut parent = vec![0, 1, 2];
+
+        union_sets(&mut parent, 0, 1);
+        assert_eq!(parent, vec![0, 0, 2]);
+
+        // Track 1's root is 0, so it is root 0 that goes under root 2.
+        union_sets(&mut parent, 2, 1);
+        assert_eq!(parent, vec![2, 0, 2]);
+
+        // Lookup compresses the path from 1 straight to the root.
+        assert_eq!(find_root(&mut parent, 1), 2);
+        assert_eq!(parent, vec![2, 2, 2]);
+    }
+
+    /// Same gating matrix as `test_cluster_tracks_pins_full_output`.
+    #[test]
+    fn test_union_tracks_sharing_detections_pins_forest() {
+        let t = true;
+        let f = false;
+        let gated = vec![
+            vec![f, t, f, f, f, f],
+            vec![t, f, f, f, f, f],
+            vec![f, t, f, t, f, f],
+            vec![f, f, f, f, f, f],
+            vec![f, f, f, t, t, f],
+            vec![t, f, f, f, f, t],
+        ];
+        let mut parent: Vec<usize> = (0..6).collect();
+
+        union_tracks_sharing_detections(&mut parent, 6, 6, &gated);
+
+        assert_eq!(parent, vec![0, 1, 0, 3, 0, 1]);
+    }
+
+    #[test]
+    fn test_group_tracks_by_root() {
+        let mut parent = vec![0, 1, 0, 3, 0, 1];
+
+        let groups = group_tracks_by_root(&mut parent, 6);
+
+        let expected: HashMap<usize, Vec<usize>> =
+            HashMap::from([(0, vec![0, 2, 4]), (1, vec![1, 5]), (3, vec![3])]);
+        assert_eq!(groups, expected);
+    }
+
+    #[test]
+    fn test_collect_cluster_detections() {
+        let gated = vec![vec![true, false, true], vec![false, false, true]];
+        let cluster_map = HashMap::from([(0, vec![0, 1])]);
+
+        let clusters = collect_cluster_detections(cluster_map, 3, &gated);
+
+        assert_eq!(clusters, vec![(vec![0, 1], vec![0, 2])]);
     }
 }
