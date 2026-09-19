@@ -104,6 +104,7 @@ The trained detector ONNX checkpoint MUST replace `test-data/models/test_detecto
 **THEN** the trained checkpoint is committed at `test-data/models/test_detector.onnx`, the corresponding model card at `test-data/models/MODEL_CARD.md` is updated with the metric values, and the change's `design.md` Open Questions section is annotated with any decisions made during training
 
 **SHALL** include the OpenSky attribution string in the model card.
+**SHALL** record in the model card the checkpoint's data-lineage class and release terms as defined under "Trained models" in `LICENSING.md`.
 
 #### Scenario: Failure to meet exit criteria
 

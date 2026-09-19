@@ -166,3 +166,5 @@ The end-to-end MOTA/MOTP/IDF1 A/B harness (`python/eval/run_tracker.py`, with `-
 ## License posture
 
 OpenSky-derived data ships with the repository under the OpenSky Network terms with attribution. ADS-B Exchange data is **not** redistributed; an acquisition script is provided and reproduction requires a developer-supplied ADSBx API key. See [`LICENSING.md`](LICENSING.md) for the full attribution and redistribution posture.
+
+A trained checkpoint takes its terms from its **data lineage**, not from the code license alone: a checkpoint trained only on synthetic truth carries the code license, and one trained with OpenSky-derived truth - which is what the recipe above produces - is released for research and evaluation only. Record the lineage and terms in [`test-data/models/MODEL_CARD.md`](test-data/models/MODEL_CARD.md) when you export one. See "Trained models" in `LICENSING.md`.

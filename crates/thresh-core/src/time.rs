@@ -5,7 +5,7 @@
 //!
 //! [`Epoch`] is a newtype over [`hifitime::Epoch`] (pure Rust, MPL-2.0).
 //! MPL-2.0 is a file-level copyleft: consuming the crate unmodified does not
-//! encumber this Apache-2.0 workspace, so the dependency is acceptable.
+//! encumber this `MIT OR Apache-2.0` workspace, so the dependency is acceptable.
 //! nyx-space (same author, AGPL-3.0) remains rejected — AGPL's copyleft is
 //! incompatible with this project's distribution terms. The newtype also
 //! keeps `hifitime` out of thresh's public API, so the epoch backbone stays

@@ -100,6 +100,7 @@ The IMM mode classifier ONNX checkpoint MUST be checked into `test-data/models/i
 **THEN** the trained classifier is committed at `test-data/models/imm_mode_classifier.onnx`, the model card is updated, and the `learned-imm` feature is documented as ready in `crates/thresh-filter/README.md`
 
 **SHALL** include benchmark numbers and the training-data provenance in the model card.
+**SHALL** record in the model card the checkpoint's data-lineage class and release terms as defined under "Trained models" in `LICENSING.md`.
 
 #### Scenario: MOTA regression — ship with feature off by default
 

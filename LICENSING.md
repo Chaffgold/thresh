@@ -3,7 +3,10 @@
 The `flight-data-training-pipeline` consumes two external flight-data sources
 with different redistribution terms. This document records the project's posture
 (design Decision 13). The thresh source code itself is licensed under
-`MIT OR Apache-2.0` (see the workspace manifest).
+`MIT OR Apache-2.0` (see the workspace manifest, `LICENSE-MIT` and
+`LICENSE-APACHE`). That license covers the code. It does not, by itself, settle
+the terms of data obtained from others, or of models trained on that data: those
+are below.
 
 ## OpenSky Network — primary training source (redistributable)
 
@@ -45,6 +48,23 @@ aligned with deployment.
 
 ## Trained models
 
-Trained checkpoints (when produced) are released under the repository's license
-(`MIT OR Apache-2.0`); their data lineage and OpenSky attribution are recorded
-in `test-data/models/MODEL_CARD.md`.
+No trained checkpoint ships today: the artifacts under `test-data/models/` are
+random-weight stubs (see `test-data/models/MODEL_CARD.md`) and are covered by
+the code license.
+
+When trained checkpoints are produced, their terms follow their **data lineage**,
+which the model card records for each one:
+
+- **Trained only on synthetic truth** (`thresh-synth`, JSBSim, orbital
+  propagation): released under the repository's license, `MIT OR Apache-2.0`.
+- **Trained with OpenSky-derived truth:** released for **research and evaluation
+  only**, with the OpenSky attribution above. The project treats such a
+  checkpoint as carrying OpenSky's academic / non-commercial terms, and it
+  **must not be bundled in a commercial product** unless whoever ships it has
+  separately obtained the right to that use from OpenSky. This is the project's cautious posture, not a legal
+  opinion: check OpenSky's current terms of use at
+  <https://opensky-network.org/> before relying on it either way.
+- **Trained with ADS-B Exchange data:** not released.
+
+A downstream product that needs commercially usable checkpoints retrains them
+from synthetic truth, or from data licensed for that purpose.
