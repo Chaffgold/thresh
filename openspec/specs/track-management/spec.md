@@ -1,7 +1,8 @@
 # track-management Specification
 
 ## Purpose
-TBD - created by archiving change transformer-fusion-tracker. Update Purpose after archive.
+Management of tracks from birth to deletion: a Tentative → Confirmed → Coasting → Deleted lifecycle governed by configurable M-of-N confirmation and max-coast-age deletion policies, creation of tentative tracks from unassigned detections, and globally unique track IDs that persist through occlusions and are never reused within a session. Class-specific track heads let different target classes (for example aerodynamic, ballistic, or orbital) use different motion models, process noise parameters, and track management policies, with the ballistic head using the 7D ballistic reentry model and the orbital head the Kepler+J2 orbital model.
+
 ## Requirements
 ### Requirement: Track lifecycle state machine
 The system SHALL manage tracks through a lifecycle: Tentative → Confirmed → Coasting → Deleted. Transitions SHALL be governed by configurable policies (M-of-N for confirmation, max-coast-age for deletion).

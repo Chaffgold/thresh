@@ -1,7 +1,8 @@
 # radar-equation Specification
 
 ## Purpose
-TBD - created by archiving change hifi-sensor-simulation. Update Purpose after archive.
+Radar-equation detection and measurement-noise modeling for synthetic radar measurements: signal-to-noise ratio from the monostatic radar range equation over a configurable radar parameter set with derived wavelength and system noise temperature, detection probability against a configurable false alarm probability via the Albersheim approximation for non-fluctuating targets and the Shnidman equation (or an equivalent numerical method) for Swerling I-IV targets, two-way gaseous attenuation from ITU-R P.676 as an additional loss, and range and angle measurement noise that grows with range as SNR falls.
+
 ## Requirements
 ### Requirement: Monostatic radar range equation SNR computation
 The system MUST compute received signal-to-noise ratio using the monostatic radar range equation: SNR = (Pt * G^2 * lambda^2 * sigma) / ((4*pi)^3 * R^4 * k * T * B * L), where Pt is peak transmit power (W), G is antenna gain (linear), lambda is wavelength (m), sigma is target RCS (m^2), R is range (m), k is Boltzmann's constant, T is system noise temperature (K), B is receiver bandwidth (Hz), and L is total system losses (linear). The computation MUST correctly handle all units and produce SNR in linear scale and dB.

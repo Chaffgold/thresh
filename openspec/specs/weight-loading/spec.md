@@ -1,7 +1,8 @@
 # weight-loading Specification
 
 ## Purpose
-TBD - created by archiving change safetensors-weights. Update Purpose after archive.
+Loading of detector model weights from SafeTensors files: a `WeightLoader` trait that abstracts the serialization format and yields named tensors as `DMatrix<f32>`, validation of tensor shapes against a manifest of expected names and shapes before the weights are used in the detection pipeline, and all-or-nothing replacement of the weights of an existing detector.
+
 ## Requirements
 ### Requirement: WeightLoader trait abstraction
 
