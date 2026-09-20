@@ -193,6 +193,10 @@ class OAuth2ClientCredentialsAuth(httpx.Auth):
             payload = response.json()
         except ValueError as exc:
             raise OpenSkyAuthError(f"OpenSky token response was not JSON: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise OpenSkyAuthError(
+                f"OpenSky token response must be a JSON object, got {type(payload).__name__}"
+            )
         token = payload.get("access_token")
         if not token:
             raise OpenSkyAuthError(

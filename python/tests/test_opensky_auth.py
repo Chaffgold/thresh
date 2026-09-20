@@ -220,3 +220,20 @@ def test_token_response_without_access_token_raises() -> None:
     with build_client(httpx.MockTransport(handler), auth) as client:  # noqa: SIM117
         with pytest.raises(OpenSkyAuthError, match="no access_token"):
             client.get(API_URL)
+
+
+@pytest.mark.parametrize("payload", [[], ["token"], "token", 42, 1.5, True, None])
+def test_non_object_token_response_raises_auth_error(payload: object) -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, content=json.dumps(payload))
+
+    auth = OAuth2ClientCredentialsAuth(CREDS, token_url=TOKEN_URL)
+    with build_client(httpx.MockTransport(handler), auth) as client:  # noqa: SIM117
+        with pytest.raises(OpenSkyAuthError, match="must be a JSON object"):
+            client.get(API_URL)
+
+    assert [str(request.url) for request in calls] == [TOKEN_URL]
+    assert auth.token is None
