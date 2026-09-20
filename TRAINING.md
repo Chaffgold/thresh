@@ -53,6 +53,11 @@ uv run ruff check . --fix
 
 ## Acquisition
 
+Real-data acquisition and training remain pending confirmation of the applicable
+OpenSky access and use rights, including any required written permission. The
+clients remain available for authorized local work; the checked-in acquisition
+fixture is wholly synthetic and does not complete real-data validation.
+
 ### OpenSky Network (historical; verify use and distribution rights)
 
 The OpenSky public REST endpoint is rate-limited but credential-free. For larger pulls, register at <https://opensky-network.org/> and pass `(username, password)` as the `credentials` argument to `fetch_state_vectors`.
@@ -78,18 +83,18 @@ verify that the intended use is permitted under the terms in
 
 ```sh
 uv run python -m acquisition.opensky_cli --bbox 49.0 51.0 7.0 10.0 --duration-s 300 \
-  --out data/opensky-capture.parquet
+  --out ../data/opensky-capture.parquet
 ```
 
 Anonymous access always returns the *current* snapshot, so the CLI paces
 itself against the wall clock (one poll per `--poll-interval-s`, default 10 s)
 and dedups on `(icao24, timestamp_us)`.
 
-Always specify `--out`: the CLI currently defaults to the tracked
-`test-data/trajectories/opensky-sample.parquet` fixture. That existing fixture's
-redistribution authorization is unverified; see its
-[`README`](test-data/trajectories/README.md). Do not commit or publish new captures
-without documented distribution rights.
+The CLI defaults to `data/opensky-capture.parquet` at the repository root.
+Do not commit or publish captures without documented distribution rights.
+For offline schema checks, regenerate the synthetic CI fixture from `python/`
+with `uv run python -m acquisition.synthetic_fixture`; its provenance is in
+[`test-data/trajectories/README.md`](test-data/trajectories/README.md).
 
 ### ADS-B Exchange v2 (live, edge cases, military targets)
 
@@ -172,6 +177,6 @@ The end-to-end MOTA/MOTP/IDF1 A/B harness (`python/eval/run_tracker.py`, with `-
 
 ## License posture
 
-OpenSky API access and attribution do not establish permission to redistribute data. Verify and document the applicable dataset license or written authorization before sharing captures or derived datasets. The existing API fixture's authorization remains unverified. ADS-B Exchange data is **not** redistributed; an acquisition script is provided and reproduction requires a developer-supplied ADSBx API key. See [`LICENSING.md`](LICENSING.md) for the full attribution and redistribution posture.
+OpenSky API access and attribution do not establish permission to redistribute data. Verify and document the applicable dataset license or written authorization before sharing captures or derived datasets. The earlier API fixture is replaced with a wholly synthetic sample; no redistribution permission is known for the historical capture. ADS-B Exchange data is **not** redistributed; an acquisition script is provided and reproduction requires a developer-supplied ADSBx API key. See [`LICENSING.md`](LICENSING.md) for the full attribution and redistribution posture.
 
 A trained checkpoint's release depends on its **data lineage** and documented rights. A checkpoint trained only on synthetic truth carries the code license. Before committing or publishing one trained with OpenSky-derived truth, document the terms or authorization permitting its intended training and distribution in [`test-data/models/MODEL_CARD.md`](test-data/models/MODEL_CARD.md). Meeting the evaluation thresholds does not satisfy this separate release requirement. See "Trained models" in `LICENSING.md`.

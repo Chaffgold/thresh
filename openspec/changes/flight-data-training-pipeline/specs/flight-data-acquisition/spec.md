@@ -108,6 +108,10 @@ The acquisition layer MUST provide a Python utility that maps ADS-B emitter cate
 
 The acquisition layer MUST document the redistribution posture of each source in a top-level `LICENSING.md` file. OpenSky API terms MUST be distinguished from dataset-specific licenses or written authorization; public distribution of OpenSky-derived data requires a documented applicable grant, and attribution alone is insufficient. ADSBx-derived data is documented as not redistributable, with the acquisition script shipped and an API-key bootstrap procedure provided.
 
+External captures MUST be excluded from git and release artifacts. CI fixtures
+MUST be wholly synthetic; real-data acquisition and validation require
+confirmation of the applicable access/use rights.
+
 #### Scenario: Reviewing licensing posture
 
 **WHEN** a contributor opens `LICENSING.md`
@@ -118,12 +122,12 @@ The acquisition layer MUST document the redistribution posture of each source in
 
 ### Requirement: CI dry-run for acquisition layer
 
-The acquisition layer MUST be exercised by a PR-time CI job that performs a tiny live query against OpenSky's free REST tier and asserts the response parses into the canonical schema without error.
+The acquisition layer MUST be exercised by a PR-time CI job using mocked provider responses and a wholly synthetic trajectory fixture, asserting canonical-schema parsing without live data access. A synthetic fixture MUST be identified as synthetic in its provenance and metadata and MUST NOT be described as completing real-data validation.
 
 #### Scenario: PR-time schema parity check
 
 **WHEN** a pull request modifies any file under `python/acquisition/`
 
-**THEN** the CI workflow runs a small OpenSky query (e.g. a 5-minute window over a 50 nm box) and asserts at least one canonical trajectory record is produced
+**THEN** the CI workflow exercises OpenSky parsing against mocked responses and loads the synthetic fixture as canonical trajectory records
 
-**SHALL** skip the job if no `python/acquisition/` files are touched, and SHALL NOT call ADSBx in CI (no shared API key).
+**SHALL NOT** call live OpenSky or ADSBx endpoints in these CI checks.

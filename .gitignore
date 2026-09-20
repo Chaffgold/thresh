@@ -28,6 +28,11 @@ __pycache__/
 .venv/
 venv/
 
+# Developer-local external flight-data captures (never commit)
+/data/
+/python/data/
+/python/data-acquisition/
+
 # OS
 .DS_Store
 Thumbs.db

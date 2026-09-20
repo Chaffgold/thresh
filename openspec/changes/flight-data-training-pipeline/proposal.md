@@ -15,7 +15,7 @@ Build an end-to-end pipeline that ingests real flight data (ADS-B trajectories f
 
 This change is the natural successor: it closes the loop from "we can run inference" to "we can train a model on real flight data and run inference on it." Track A validates that the synth → detector → tracker chain works end-to-end with non-random weights. Track B opens a complementary direction — using the same trajectory data, fed through the classical tracker, to add learned components to the classical Bayesian pipeline, which currently has no learned parts at all.
 
-The pipeline ships reproducible acquisition and training scripts with a pinned lockfile, and CI continues to verify the ONNX export shape contract via the existing `onnx-tests` workflow. Distribution of OpenSky-derived training data requires a verified dataset-specific license or written authorization, as documented in `LICENSING.md`.
+The pipeline ships reproducible acquisition and training scripts with a pinned lockfile, and CI continues to verify the ONNX export shape contract via the existing `onnx-tests` workflow. External captures are excluded from git and release artifacts; future real-data work requires confirmation of applicable access/use rights, as documented in `LICENSING.md`.
 
 ## How
 
@@ -59,7 +59,7 @@ The pipeline ships reproducible acquisition and training scripts with a pinned l
 - `python/training/` (new) — PyTorch training scripts, dataset adapters, ONNX export utilities.
 - `python/acquisition/` (new) — OpenSky and ADSBx clients, trajectory schema, ingestion pipeline.
 - `test-data/models/` — `test_detector.onnx` replaced with a trained checkpoint once Track A passes exit criteria; new `imm_mode_classifier.onnx` once Track B passes.
-- `test-data/trajectories/` (new) — small (< 5 MB) OpenSky trajectory sample for CI dry-runs and smoke tests. The existing API fixture's redistribution authorization remains unverified; see its README and `LICENSING.md`.
+- `test-data/trajectories/` — small (< 5 MB), wholly synthetic trajectory sample for offline CI schema checks. The real-data validation task is reopened pending confirmation of applicable access/use rights; see its README and `LICENSING.md`.
 - `TRAINING.md`, `LICENSING.md` (new) — reproducibility and licensing documentation.
 - `pyproject.toml`, `uv.lock` (new at repo root or under `python/`) — Python toolchain pinning.
 

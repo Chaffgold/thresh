@@ -21,7 +21,7 @@ This is a 3D point-cloud → oriented-3D-bounding-box detector — a DETR family
 **Goals:**
 
 - Produce two ONNX checkpoints trained on real flight data — one for the detector (slot ①) and one for an IMM mode classifier (slot ②) — and check them into `test-data/models/` to replace the random-weights stubs.
-- Build a reproducible trajectory dataset from OpenSky; publish it only when the exact dataset's terms or written authorization permit redistribution.
+- Support reproducible acquisition and training with authorized OpenSky data, while keeping external captures out of git and release artifacts and using wholly synthetic fixtures in CI.
 - Build an ADSBx v2 live-acquisition client for evaluation and edge-case targets (military / unfiltered).
 - Ship the training scripts with pinned Python tooling so a developer can reproduce a checkpoint with `uv sync && uv run python scripts/train_detector.py` (or equivalent).
 - Keep the classical pipeline fully functional with the learned components disabled — every learned model is opt-in.
@@ -47,7 +47,7 @@ This is a 3D point-cloud → oriented-3D-bounding-box detector — a DETR family
 
 **Decision:** Use OpenSky Network historical data (Impala REST + Zenodo trajectory dump) as the primary training-set source; use ADS-B Exchange v2 (`/api/aircraft/v2/airport/{icao}`) as a real-time acquisition source for evaluation and edge cases only.
 
-**Rationale:** OpenSky provides historical trajectories for training, but API access does not grant public redistribution rights. Any repository subset or publicly hosted dataset requires a verified dataset-specific license or written authorization; see `LICENSING.md`. ADSBx's terms of service forbid redistribution of the raw feed but the data quality is excellent and the "unfiltered" feed exposes military and blocked aircraft that OpenSky filters out. By using both — OpenSky for training and ADSBx for the live evaluation harness — we get reproducible acquisition and edge-case coverage. The ADSBx `/airport/{icao}` endpoint specifically matches a "notional sensor at airport X" framing that lines up cleanly with `thresh-synth`'s sensor model.
+**Rationale:** OpenSky provides historical trajectories for training, but API access does not grant public redistribution rights. The project ships acquisition tools and synthetic fixtures, with external captures excluded from git and release artifacts; see `LICENSING.md`. ADSBx's terms of service forbid redistribution of the raw feed but the data quality is excellent and the "unfiltered" feed exposes military and blocked aircraft that OpenSky filters out. By using both — OpenSky for training and ADSBx for the live evaluation harness — we get reproducible acquisition and edge-case coverage. The ADSBx `/airport/{icao}` endpoint specifically matches a "notional sensor at airport X" framing that lines up cleanly with `thresh-synth`'s sensor model.
 
 ### 3. Synthetic perception driven by real truth (Track A)
 
@@ -78,7 +78,7 @@ This is a 3D point-cloud → oriented-3D-bounding-box detector — a DETR family
 
 ### 7. Training storage: external, not checked in
 
-**Decision:** Full training datasets (multi-GB OpenSky dumps) live outside the repository. Only a small (< 5 MB) trajectory sample is checked in under `test-data/trajectories/` for CI dry-runs and smoke tests. The full reproduction recipe is documented in `TRAINING.md`.
+**Decision:** Full training datasets (multi-GB OpenSky dumps) live outside the repository. Only a small (< 5 MB), wholly synthetic trajectory sample is checked in under `test-data/trajectories/` for offline CI schema checks (see Decision 28). The full reproduction recipe is documented in `TRAINING.md`.
 
 **Rationale:** Multi-gigabyte parquet files in git would break CI checkout times and bloat git-lfs costs. Checked-in samples are sized to fit comfortably in CI caches.
 
@@ -142,7 +142,7 @@ If the third bullet fails, ship the model only when the distribution rights in D
 - ADSBx data: not redistributed. The acquisition client is shipped; reproduction requires a developer-supplied ADSBx API key.
 - Trained models: release terms and authorization depend on data lineage under Decision 27. Record the supporting terms or authorization in `test-data/models/MODEL_CARD.md` before distribution.
 
-**Rationale:** Code licensing, permission to use external data, and permission to distribute data or checkpoints are separate. Verify the applicable rights before release. The existing API-derived CI fixture's redistribution authorization remains unverified; see `test-data/trajectories/README.md` for the outstanding maintainer decision.
+**Rationale:** Code licensing, permission to use external data, and permission to distribute data or checkpoints are separate. Verify the applicable rights before release. Decision 28 replaces the earlier API-derived CI fixture because no redistribution permission is known to the maintainer.
 
 ## Risks
 
@@ -296,9 +296,29 @@ question for the radar-scene spec.
 
 **Rationale:** A research/evaluation label alone does not authorize model distribution. This is a project release requirement; it does not assume that data licenses automatically transfer to model weights. See the verified source terms and distinction between API data and dataset-specific grants in `LICENSING.md`. The artifacts in `test-data/models/` remain random-weight stubs. Downstream products can train from synthetic truth or from data licensed for the intended purpose. The repository license itself changes from Apache-2.0 to `MIT OR Apache-2.0`, applying the choice listed in the archived, deferred `crates-io-publishing` change.
 
+### 28. Synthetic acquisition fixture; real-data rights remain pending
+
+**Decision (2026-09-20):** Replace the tracked API capture with
+`test-data/trajectories/synthetic-sample.parquet`, generated offline by
+`python -m acquisition.synthetic_fixture` from fabricated trajectories. Mark
+its provenance as synthetic and keep schema/loader coverage in CI. OpenSky
+captures default to developer-local `data/opensky-capture.parquet` at the
+repository root; the acquisition clients remain available for authorized use.
+
+**Rationale:** The maintainer knows of no permission to redistribute the earlier
+API capture. The raw London holdout under `python/data-acquisition/` is also
+removed from the current tree. Historical git objects and the recorded July experiments remain
+unchanged; this replacement neither removes that history nor grants rights to
+it. Reopen task 2.7 because a synthetic fixture does not satisfy the original
+real-data validation requirement; external captures are excluded from git and
+release artifacts. Further real-data acquisition and training remain
+pending confirmation of applicable access/use rights, including any required
+written permission. Dataset or checkpoint distribution additionally requires
+the documented rights in Decisions 13 and 27.
+
 ## Implementation status & deferrals (Phase 11 wrap-up)
 
-As of this change, **Phases 1–10 are implemented**; the two learned tracks are fully scaffolded end-to-end (acquisition → synth → train → export → Rust load/decode → eval), with CI-verified ONNX contracts, a real analytic-tracker MOTA baseline, and Python↔Rust ONNX parity. The following are **deliberately deferred**, all gated on data/hardware rather than on missing design:
+At the original wrap-up, **Phases 1–10 were implemented**; the two learned tracks were fully scaffolded end-to-end (acquisition → synth → train → export → Rust load/decode → eval), with CI-verified ONNX contracts, a real analytic-tracker MOTA baseline, and Python↔Rust ONNX parity. **2026-09-20 amendment:** Decision 28 reopens the real-data sample task and adds access/use-rights verification to further real-data work. The original technical deferrals below and subsequent experiment logs are preserved:
 
 - **Real GPU training runs and the trained checkpoints** (tasks 6.8, 7.5, 7.9, 8.4, 8.5). Training is a non-CI goal (Decision 7); only a small synthetic sample is checked in, and the committed models are random-weight stubs. The full pipeline runs end-to-end on synthetic data; the exit-criteria numbers (IMM accuracy ≥ 0.70; detector mAP@0.5 ≥ 0.30 + MOTA gain) await a run on the full external dataset.
 - **Tracker-level learned-IMM integration.** Phase 6's `LearnedImmFilter` is a *filter-level* wrapper; `MultiObjectTracker` has no learned-IMM constructor, so the eval's learned-vs-analytic A/B (9.3) can't run yet. Adding `MultiObjectTracker::new_imm_position_learned(...)` is the missing seam — a small follow-on, independent of training.

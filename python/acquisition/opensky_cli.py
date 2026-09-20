@@ -1,9 +1,9 @@
-"""Small CLI for capturing an OpenSky-derived trajectory sample.
+"""Small CLI for capturing developer-local OpenSky trajectories.
 
 Live-polls the public ``/api/states/all`` endpoint over a bounding box
 and writes a single flat Parquet file in the canonical trajectory
-schema (task 2.7: the checked-in CI dry-run sample under
-``test-data/trajectories/opensky-sample.parquet``).
+schema under ``data/opensky-capture.parquet`` by default. Captures are not
+repository fixtures; the checked-in schema fixture is wholly synthetic.
 
 Run from the ``python/`` directory::
 
@@ -17,8 +17,7 @@ historical range for authenticated replay) this CLI paces itself
 against the wall clock: one snapshot per ``--poll-interval-s``,
 deduplicated on ``(icao24, timestamp_us)``.
 
-The output records attribution obligations documented in
-``LICENSING.md`` — "This work uses data from the OpenSky Network".
+See ``LICENSING.md`` for the applicable data-use and redistribution requirements.
 """
 
 from __future__ import annotations
@@ -44,12 +43,10 @@ from acquisition.opensky import (
 from acquisition.schema import TrajectoryRecord
 from acquisition.storage import records_to_table
 
-DEFAULT_OUT = (
-    Path(__file__).resolve().parents[2] / "test-data" / "trajectories" / "opensky-sample.parquet"
-)
+DEFAULT_OUT = Path(__file__).resolve().parents[2] / "data" / "opensky-capture.parquet"
 """Anchored to the repo layout, not the caller's CWD."""
-SAMPLE_BUDGET_BYTES = 5 * 1024 * 1024
-"""Design Decision 7: checked-in samples stay under 5 MB."""
+CAPTURE_WARNING_BYTES = 5 * 1024 * 1024
+"""Warn when a small developer capture exceeds 5 MB."""
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -219,10 +216,10 @@ def main(argv: list[str] | None = None) -> None:
         flush=True,
     )
     print(f"size: {size_bytes} bytes, sha256: {digest}", flush=True)
-    if size_bytes > SAMPLE_BUDGET_BYTES:
+    if size_bytes > CAPTURE_WARNING_BYTES:
         print(
-            f"warning: exceeds the {SAMPLE_BUDGET_BYTES} byte checked-in sample budget "
-            "(design Decision 7); narrow the bbox or window before committing",
+            f"warning: exceeds the {CAPTURE_WARNING_BYTES} byte small-capture budget; "
+            "narrow the bbox or window if a smaller capture is needed",
             file=sys.stderr,
         )
 
