@@ -1,7 +1,8 @@
 # othr-measurement-type Specification
 
 ## Purpose
-TBD - created by archiving change othr-sensor-model. Update Purpose after archive.
+The `Othr` variant of the `Measurement` enum, which carries an over-the-horizon radar (OTHR) detection as ground range, azimuth, Doppler velocity, and the ionospheric propagation mode (E-layer, F-layer, or multi-hop with hop count), and serializes through serde consistently with the existing measurement variants.
+
 ## Requirements
 ### Requirement: OTHR measurement variant
 The system SHALL support an `Othr` variant in the `Measurement` enum with ground range, azimuth, Doppler velocity, and propagation mode. The system MUST support this.

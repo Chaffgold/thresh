@@ -1,7 +1,8 @@
 # data-association Specification
 
 ## Purpose
-TBD - created by archiving change transformer-fusion-tracker. Update Purpose after archive.
+One-to-one assignment of detections to tracks: an optimal linear-assignment solver (Hungarian or Jonker-Volgenant) that handles rectangular cost matrices and reports unmatched tracks and detections, Mahalanobis chi-squared gating that adapts to each sensor's measurement dimension, 2D and 3D (axis-aligned and rotated) IoU costs, and a configurable fused motion-and-appearance cost matrix with a motion-only fallback and cascaded multi-stage matching.
+
 ## Requirements
 ### Requirement: Hungarian algorithm for optimal assignment
 The system SHALL implement the Hungarian algorithm (or Jonker-Volgenant variant) solving the linear assignment problem on an N x M cost matrix in O(n^3) time, returning the optimal one-to-one assignment minimizing total cost.

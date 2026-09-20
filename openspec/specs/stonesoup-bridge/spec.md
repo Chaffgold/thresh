@@ -1,7 +1,8 @@
 # stonesoup-bridge Specification
 
 ## Purpose
-TBD - created by archiving change transformer-fusion-tracker. Update Purpose after archive.
+Optional Rust-to-Python bridge, built on PyO3, for instantiating and calling Stone Soup tracking components from Rust, including GIL management and conversion between Rust (nalgebra) types and Stone Soup's numpy/State objects. It exposes Stone Soup's JPDA, MHT, IMM, and Gaussian Mixture PHD algorithms as reference implementations and operational fallbacks, and sits behind the `stonesoup` Cargo feature so that the Rust-native tracking algorithms compile and run without Python or Stone Soup installed.
+
 ## Requirements
 ### Requirement: PyO3 bridge to Stone Soup
 The system SHALL provide a Rust-to-Python bridge via PyO3 that can instantiate and call Stone Soup tracking components (filters, data associators, hypothesisers, trackers) from Rust code. The bridge SHALL handle Python GIL management and type conversion between Rust types and Stone Soup's numpy/State objects.

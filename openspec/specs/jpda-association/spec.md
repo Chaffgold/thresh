@@ -1,7 +1,8 @@
 # jpda-association Specification
 
 ## Purpose
-TBD - created by archiving change jpda-mht-association. Update Purpose after archive.
+Joint Probabilistic Data Association (JPDA): marginal association probabilities for each track-detection pair, computed by enumerating the feasible joint association events within the gates; a missed-detection hypothesis per track derived from the detection probability and the false-alarm spatial density; and a probability-weighted state and covariance update that includes the spread-of-innovations term, so that the covariance reflects association uncertainty.
+
 ## Requirements
 ### Requirement: Association probability computation
 

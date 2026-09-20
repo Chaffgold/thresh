@@ -1,7 +1,8 @@
 # eoir-physics Specification
 
 ## Purpose
-TBD - created by archiving change hifi-sensor-simulation. Update Purpose after archive.
+Physics-based model of electro-optical/infrared (EO/IR) sensor detection: target infrared signatures from Planck blackbody emission of engine exhaust, aerodynamically heated skin, and exhaust plume; atmospheric transmission with molecular absorption bands and Beer-Lambert aerosol extinction along slant paths; an NETD-based sensor noise model; and maximum detection range and detection probability derived from the resulting SNR, in a selectable MWIR (3-5 micrometer) or LWIR (8-12 micrometer) band.
+
 ## Requirements
 ### Requirement: Target IR signature from thermal emission
 The system MUST compute target infrared spectral radiance using Planck's blackbody radiation law for configurable thermal source components: engine exhaust (afterburner ~1800-2200 K, military power ~900-1200 K, cruise ~600-900 K), skin heating from aerodynamic friction (function of Mach number and altitude), and exhaust plume emission (CO2 and H2O band emission at 4.3 and 2.7 micrometers). The total in-band irradiance at the sensor MUST be computed by integrating spectral radiance over the sensor's spectral band and projecting through the target's emitting area and range.
