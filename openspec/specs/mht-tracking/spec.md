@@ -1,7 +1,8 @@
 # mht-tracking Specification
 
 ## Purpose
-TBD - created by archiving change jpda-mht-association. Update Purpose after archive.
+Multi-hypothesis tracking (MHT): a tree of global track-detection association hypotheses, expanded at each scan with new-track and false-alarm options and scored by cumulative log-likelihood; N-scan pruning that merges hypotheses agreeing on older associations while preserving recent ambiguity; k-best pruning that keeps only the top-scoring hypotheses; and extraction of track states, covariances, and consistent track IDs from the highest-scoring hypothesis.
+
 ## Requirements
 ### Requirement: Hypothesis tree maintenance
 

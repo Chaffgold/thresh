@@ -1,7 +1,8 @@
 # othr-synthetic-data Specification
 
 ## Purpose
-TBD - created by archiving change othr-sensor-model. Update Purpose after archive.
+Synthetic over-the-horizon radar (OTHR) measurement generation from target waypoints through the ionospheric propagation path, with configurable noise on ground range, azimuth, and Doppler. It produces no measurement inside the skip zone, models detection probability as a function of Doppler separation from ground and sea clutter, can return both E-layer and F-layer paths for one target, and provides preset configurations for representative OTHR systems.
+
 ## Requirements
 ### Requirement: Synthetic OTHR measurement generation
 The system SHALL generate OTHR measurements from target waypoints through the full ionospheric propagation path. The system MUST support this.

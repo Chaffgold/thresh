@@ -1,7 +1,8 @@
 # evaluation-metrics Specification
 
 ## Purpose
-TBD - created by archiving change transformer-fusion-tracker. Update Purpose after archive.
+Multi-object tracking evaluation of tracker output against ground truth: MOTA, IDF1, HOTA with independently reportable DetA and AssA across IoU thresholds, and, for 3D tracking, AMOTA as defined by the nuScenes tracking benchmark together with AMOTP, delivered as a structured report (JSON and human-readable table) with per-class breakdowns and aggregate values.
+
 ## Requirements
 ### Requirement: MOTA computation
 The system SHALL compute Multi-Object Tracking Accuracy: MOTA = 1 - (sum_t FN_t + FP_t + IDSW_t) / (sum_t GT_t), where FN = false negatives, FP = false positives, IDSW = identity switches, GT = ground truth objects. MOTA can be negative.

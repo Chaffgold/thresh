@@ -1,7 +1,8 @@
 # track-dashboard Specification
 
 ## Purpose
-TBD - created by archiving change track-visualization. Update Purpose after archive.
+Track visualization dashboard in `thresh-viz` for viewing tracker output live or from a recording: a 2D bird's-eye-view plot of track trails, measurements, association lines, and covariance ellipses, a sidebar of per-frame MOT metrics and track lifecycle events, and playback controls over JSON recordings of `TrackSnapshot` data. It also covers the `TrackSnapshot` type in `thresh-tracker` that captures tracker state at one timestep and serializes to JSON, the streaming connection-status indicator, PNG screenshot export, the keyboard-shortcut help overlay, and CI verification that the GUI builds on Ubuntu, macOS, and Windows.
+
 ## Requirements
 ### Requirement: 2D bird's-eye-view track plot
 
