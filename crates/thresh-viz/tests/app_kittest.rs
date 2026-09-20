@@ -114,3 +114,28 @@ fn pressing_l_toggles_event_log_panel() {
     harness.run();
     assert_ne!(harness.state().event_log_visible(), initial);
 }
+
+#[test]
+fn clicking_track_row_toggles_selection() {
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = build_harness();
+    harness.run();
+    assert_eq!(harness.state().selected_track(), None);
+
+    harness.get_by_label_contains("ID 1").click();
+    harness.run();
+    assert_eq!(
+        harness.state().selected_track(),
+        Some(1),
+        "clicking a row should select its track"
+    );
+
+    harness.get_by_label_contains("ID 1").click();
+    harness.run();
+    assert_eq!(
+        harness.state().selected_track(),
+        None,
+        "clicking the selected row should deselect it"
+    );
+}
