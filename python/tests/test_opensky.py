@@ -102,6 +102,15 @@ class TestStateRowTranslation:
         rec = state_row_to_record(row, FIXTURE_TIME)
         assert rec is not None and rec.timestamp_us == FIXTURE_TIME * 1_000_000
 
+    def test_timestamp_is_time_position_not_last_contact(self) -> None:
+        # The shared fixture gives both columns the same value, so it cannot
+        # tell them apart; here they (and the fetch-time fallback) all differ.
+        row = list(FIXTURE_STATE_ROW)
+        row[3] = FIXTURE_TIME - 5  # time_position
+        row[4] = FIXTURE_TIME - 1  # last_contact
+        rec = state_row_to_record(row, FIXTURE_TIME)
+        assert rec is not None and rec.timestamp_us == (FIXTURE_TIME - 5) * 1_000_000
+
 
 def _mock_transport(payloads: Sequence[Mapping[str, Any]]) -> httpx.MockTransport:
     """Return a transport that serves ``payloads`` in order, then 404s."""
