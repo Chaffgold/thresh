@@ -75,10 +75,11 @@ class OpenSkyError(RuntimeError):
     """Non-recoverable error talking to the OpenSky API."""
 
 
-# OpenSky /api/states/all response columns (per the OpenSky-Network REST docs).
-# Index → (name, semantic). Used by :func:`_state_row_to_record` to translate
-# a single state-vector row.
-_STATE_COLUMNS_NEW = (
+# OpenSky /api/states/all response columns, in response order (per the
+# OpenSky-Network REST docs: https://openskynetwork.github.io/opensky-api/rest.html).
+# Observed: rows have 17 columns without ``extended=1`` and 18, ending in
+# ``category``, with it.
+_STATE_COLUMNS = (
     "icao24",
     "callsign",
     "origin_country",
@@ -99,6 +100,10 @@ _STATE_COLUMNS_NEW = (
     "category",
 )
 
+# Column name → row index. :func:`state_row_to_record` reads a state-vector
+# row through this, so the column order is written once, in ``_STATE_COLUMNS``.
+_COL = {name: index for index, name in enumerate(_STATE_COLUMNS)}
+
 
 def state_row_to_record(row: list[Any], fetch_time_s: int) -> TrajectoryRecord | None:
     """Translate one OpenSky state-vector row to a canonical record.
@@ -107,19 +112,19 @@ def state_row_to_record(row: list[Any], fetch_time_s: int) -> TrajectoryRecord |
     can emit aircraft with no lat/lon — they have a Mode-S contact
     but no ADS-B position).
     """
-    icao24 = cast("str | None", row[0])
-    longitude = cast("float | None", row[5])
-    latitude = cast("float | None", row[6])
+    icao24 = cast("str | None", row[_COL["icao24"]])
+    longitude = cast("float | None", row[_COL["longitude"]])
+    latitude = cast("float | None", row[_COL["latitude"]])
     if icao24 is None or longitude is None or latitude is None:
         return None
 
-    time_position = cast("int | None", row[3])
+    time_position = cast("int | None", row[_COL["time_position"]])
     timestamp_s = time_position if time_position is not None else fetch_time_s
 
-    callsign_raw = cast("str | None", row[1])
+    callsign_raw = cast("str | None", row[_COL["callsign"]])
     callsign = callsign_raw.strip() if callsign_raw else None
 
-    category_raw: Any = row[17] if len(row) > 17 else None
+    category_raw: Any = row[_COL["category"]] if len(row) > _COL["category"] else None
     category: str | None
     if category_raw is None or category_raw == 0:
         category = None
@@ -142,11 +147,11 @@ def state_row_to_record(row: list[Any], fetch_time_s: int) -> TrajectoryRecord |
         timestamp_us=timestamp_s * 1_000_000,
         lat=latitude,
         lon=longitude,
-        alt_geom_m=cast("float | None", row[13]),
-        alt_baro_m=cast("float | None", row[7]),
-        vel_ground_mps=cast("float | None", row[9]),
-        track_deg=cast("float | None", row[10]),
-        vrate_mps=cast("float | None", row[11]),
+        alt_geom_m=cast("float | None", row[_COL["geo_altitude"]]),
+        alt_baro_m=cast("float | None", row[_COL["baro_altitude"]]),
+        vel_ground_mps=cast("float | None", row[_COL["velocity"]]),
+        track_deg=cast("float | None", row[_COL["true_track"]]),
+        vrate_mps=cast("float | None", row[_COL["vertical_rate"]]),
         category=category,
         callsign=callsign,
         quality_nic=None,
