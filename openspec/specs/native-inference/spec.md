@@ -1,7 +1,8 @@
 # native-inference Specification
 
 ## Purpose
-TBD - created by archiving change rust-native-detector. Update Purpose after archive.
+Native transformer detection inference in `thresh-inference`: a `NativeDetector` that implements multi-head scaled dot-product self-attention and a complete decoder-stack forward pass on nalgebra matrices, turning object queries into class logits and bounding-box coordinates, with all parameters loaded and shape-checked from a SafeTensors file through the `WeightLoader` trait. The detector is feature-gated so that builds which do not need it, and the ONNX-based detector, are unaffected.
+
 ## Requirements
 ### Requirement: Multi-head self-attention
 

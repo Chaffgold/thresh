@@ -1,7 +1,8 @@
 # synthetic-data Specification
 
 ## Purpose
-TBD - created by archiving change transformer-fusion-tracker. Update Purpose after archive.
+Synthetic ground truth and sensor data for tracker evaluation. Covers target trajectories with configurable dynamics (constant velocity, constant acceleration, CTRV maneuvers, three-phase ballistic flight over a round rotating Earth, and orbital mechanics); radar, EO/IR, and ADS-B measurement generation with configurable noise, detection, and message-loss parameters; and composition of multi-target scenarios into a time-ordered stream of ground-truth states and sensor measurements.
+
 ## Requirements
 ### Requirement: Configurable target trajectory generation
 The system SHALL generate synthetic target trajectories with configurable dynamics: constant velocity, constant acceleration, CTRV maneuvers, phased ballistic trajectories, and orbital mechanics. Trajectories SHALL be parameterized by initial state, duration, time step, and maneuver profiles. Ballistic trajectories SHALL be generated in three phases over a round rotating Earth: boost (constant thrust with a gravity turn), midcourse (exoatmospheric propagation using the same two-body + J2 propagator as orbital truth generation), and reentry (atmospheric drag parameterized by ballistic coefficient beta with altitude-dependent exponential density). The flat-Earth ballistic segment parameterized by a bare drag coefficient is replaced by this phased model.

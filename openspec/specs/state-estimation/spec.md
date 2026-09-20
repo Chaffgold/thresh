@@ -1,7 +1,8 @@
 # state-estimation Specification
 
 ## Purpose
-TBD - created by archiving change transformer-fusion-tracker. Update Purpose after archive.
+Kalman filtering for target state estimation: a linear Kalman filter with Joseph-form covariance updates, an extended Kalman filter with user-supplied nonlinear functions and Jacobians, and an unscented Kalman filter with scaled sigma points, together with a motion-model trait implemented for constant velocity, constant acceleration, CTRV, and Cartesian coordinated turn and open to custom models. The three filters also expose the innovation and innovation covariance used in each update, and the predicted state and covariance, for NEES/NIS consistency evaluation without changing existing `predict`/`update` call sites.
+
 ## Requirements
 ### Requirement: Linear Kalman Filter implementation
 The system SHALL implement a linear Kalman filter with configurable state transition matrix **F**, observation matrix **H**, process noise covariance **Q**, and measurement noise covariance **R**. The filter SHALL use the Joseph form for covariance updates to ensure numerical stability: P_{k|k} = (I - K_k H_k) P_{k|k-1} (I - K_k H_k)^T + K_k R_k K_k^T.

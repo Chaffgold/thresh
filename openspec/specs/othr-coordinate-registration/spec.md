@@ -1,7 +1,8 @@
 # othr-coordinate-registration Specification
 
 ## Purpose
-TBD - created by archiving change othr-sensor-model. Update Purpose after archive.
+Coordinate registration for over-the-horizon radar (OTHR): Vincenty's direct and inverse geodetic formulas, conversion of OTHR ground-range/azimuth measurements to ENU coordinates through the geodetic→ECEF→ENU chain, and target altitude estimated from the ionospheric propagation geometry where elevation is unobservable.
+
 ## Requirements
 ### Requirement: Vincenty's direct formula
 The system SHALL implement Vincenty's direct geodetic formula to compute the endpoint (lat, lon) given a start point, azimuth, and geodesic distance. The system MUST support this.

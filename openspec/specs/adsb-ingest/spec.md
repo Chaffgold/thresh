@@ -1,7 +1,8 @@
 # adsb-ingest Specification
 
 ## Purpose
-TBD - created by archiving change test-data-pipeline. Update Purpose after archive.
+Ingest of historical ADS-B flight data as measurements and as ground truth for cooperative targets. Covers download by time range, bounding box, and optional ICAO24 filter with local caching and backoff under OpenSky API rate limits; parsing of SBS BaseStation messages and OpenSky JSON state vectors; and conversion to `Measurement::AdsB`, regularly sampled ground-truth trajectories, and ENU coordinates relative to a configurable reference point.
+
 ## Requirements
 ### Requirement: Download ADS-B data
 Fetch historical flight data by time range, bounding box, and optional ICAO24 filter. The system MUST support this.
