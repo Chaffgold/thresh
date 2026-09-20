@@ -1,7 +1,8 @@
 # othr-tracker-integration Specification
 
 ## Purpose
-TBD - created by archiving change othr-sensor-model. Update Purpose after archive.
+Use of over-the-horizon radar (OTHR) measurements in track filtering: an observation model from the track state to ground range, azimuth, and Doppler, its Jacobian for EKF updates, Mahalanobis gating that accounts for OTHR's coarse resolution, and fusion of OTHR with conventional radar measurements on the same track.
+
 ## Requirements
 ### Requirement: OTHR observation model
 The system SHALL implement an observation matrix mapping the track state to OTHR observables (ground range, azimuth, Doppler). The system MUST support this.
