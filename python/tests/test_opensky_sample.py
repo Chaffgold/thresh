@@ -102,7 +102,7 @@ class TestCaptureAgainstMockTransport:
             self.BBOX,
             3,
             poll_interval_s=1.0,
-            credentials=None,
+            auth=None,
             client=self._mock_client(params_seen),
         )
         assert len(params_seen) == 3
@@ -131,7 +131,7 @@ class TestCaptureAgainstMockTransport:
             self.BBOX,
             5,
             poll_interval_s=1.0,
-            credentials=None,
+            auth=None,
             client=client,
             retries=0,
             backoff_s=0.0,
@@ -140,10 +140,35 @@ class TestCaptureAgainstMockTransport:
         assert polls == 3, "capture stops polling after the fatal error"
 
 
-class TestCredentialParsing:
-    def test_malformed_credentials_exit_before_any_fetch(self) -> None:
-        with pytest.raises(SystemExit, match="USER:PASS"):
-            main(["--bbox", "0", "1", "0", "1", "--credentials", "no-colon"])
+class TestCredentialResolution:
+    """OAuth2 credential resolution happens before any network call."""
+
+    def test_missing_credentials_file_exits_before_any_fetch(self, tmp_path: Path) -> None:
+        with pytest.raises(SystemExit, match="not found"):
+            main(
+                [
+                    "--bbox", "0", "1", "0", "1",
+                    "--credentials-file", str(tmp_path / "absent.json"),
+                ]
+            )
+
+    def test_historical_window_requires_authentication(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--time is authenticated-only; anonymous callers must be told, not silently
+        handed the current snapshot."""
+        monkeypatch.delenv("OPENSKY_CLIENT_ID", raising=False)
+        monkeypatch.delenv("OPENSKY_CLIENT_SECRET", raising=False)
+        monkeypatch.setattr(
+            "acquisition.opensky_cli.load_credentials", lambda **_kwargs: None
+        )
+        with pytest.raises(SystemExit, match="requires authentication"):
+            main(["--bbox", "0", "1", "0", "1", "--time", "100", "200"])
+
+    def test_secrets_are_not_accepted_as_flags(self) -> None:
+        """argv is world-readable via `ps`, so there must be no secret-bearing flag."""
+        with pytest.raises(SystemExit):
+            parse_args(["--bbox", "0", "1", "0", "1", "--credentials", "user:pass"])
 
 
 class TestCheckedInSample:

@@ -41,6 +41,14 @@ from acquisition.opensky import (
     fetch_current_states,
     fetch_state_vectors,
 )
+from acquisition.opensky_auth import (
+    DEFAULT_CREDENTIALS_PATH,
+    ENV_CLIENT_ID,
+    ENV_CLIENT_SECRET,
+    OpenSkyAuthError,
+    build_auth,
+    load_credentials,
+)
 from acquisition.schema import TrajectoryRecord
 from acquisition.storage import records_to_table
 
@@ -90,8 +98,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--credentials",
         type=str,
         default=None,
-        metavar="USER:PASS",
-        help="Optional OpenSky basic-auth credentials.",
+        help=argparse.SUPPRESS,  # removed; kept only to give a migration error
+    )
+    parser.add_argument(
+        "--credentials-file",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=f"OpenSky OAuth2 credentials JSON (default: {DEFAULT_CREDENTIALS_PATH} "
+        f"if present). Overridden by the {ENV_CLIENT_ID}/{ENV_CLIENT_SECRET} "
+        "environment variables. Secrets are never accepted as flags — argv is "
+        "visible to other users via `ps`.",
     )
     parser.add_argument(
         "--out",
@@ -99,7 +116,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_OUT,
         help="Output Parquet path (default: %(default)s).",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.credentials is not None:
+        parser.error(
+            "--credentials (basic auth) was removed: OpenSky's REST API now requires "
+            f"OAuth2. Set {ENV_CLIENT_ID}/{ENV_CLIENT_SECRET} in the environment, or "
+            "pass --credentials-file with a credentials.json from "
+            "https://opensky-network.org/my-opensky/api-client . "
+            "Do not pass secrets as flags — argv is visible to other users via `ps`."
+        )
+    return args
 
 
 def resolve_window(args: argparse.Namespace, now_s: int) -> TimeRange:
@@ -115,7 +141,7 @@ def capture(
     duration_s: int,
     *,
     poll_interval_s: float,
-    credentials: tuple[str, str] | None,
+    auth: httpx.Auth | None = None,
     client: httpx.Client | None = None,
     retries: int = 3,
     backoff_s: float = 1.0,
@@ -129,7 +155,7 @@ def capture(
     losing the whole capture.
     """
     owns_client = client is None
-    http = client or httpx.Client(base_url=OPENSKY_BASE_URL, timeout=30.0, auth=credentials)
+    http = client or httpx.Client(base_url=OPENSKY_BASE_URL, timeout=30.0, auth=auth)
     records: list[TrajectoryRecord] = []
     step_s = max(poll_interval_s, 1.0)
     polls = max(int(duration_s / step_s), 1)
@@ -183,22 +209,33 @@ def main(argv: list[str] | None = None) -> None:
     lat_min, lat_max, lon_min, lon_max = args.bbox
     bbox = BoundingBox(lat_min=lat_min, lat_max=lat_max, lon_min=lon_min, lon_max=lon_max)
 
-    credentials: tuple[str, str] | None = None
-    if args.credentials is not None:
-        user, _, password = args.credentials.partition(":")
-        if not user or not password:
-            raise SystemExit("--credentials must be USER:PASS")
-        credentials = (user, password)
+    try:
+        credentials = load_credentials(path=args.credentials_file)
+    except OpenSkyAuthError as exc:
+        raise SystemExit(str(exc)) from exc
+    auth = build_auth(credentials)
+    if credentials is None:
+        print(
+            "note: no OpenSky credentials found — polling anonymously "
+            f"(~400 credits/day). Set {ENV_CLIENT_ID}/{ENV_CLIENT_SECRET} or place "
+            f"credentials.json at {DEFAULT_CREDENTIALS_PATH} for 4,000/day.",
+            file=sys.stderr,
+        )
 
     if args.time is not None:
         # Historical replay of an explicit window (needs authenticated access).
+        if auth is None:
+            raise SystemExit(
+                "--time requires authentication: anonymous access always returns the "
+                f"current snapshot. Set {ENV_CLIENT_ID}/{ENV_CLIENT_SECRET} first."
+            )
         window = resolve_window(args, now_s=int(time.time()))
         raw = list(
             fetch_state_vectors(
                 bbox,
                 window,
                 poll_interval_s=args.poll_interval_s,
-                credentials=credentials,
+                auth=auth,
             )
         )
     else:
@@ -206,7 +243,7 @@ def main(argv: list[str] | None = None) -> None:
             bbox,
             args.duration_s,
             poll_interval_s=args.poll_interval_s,
-            credentials=credentials,
+            auth=auth,
         )
     records = dedup_sort(raw)
     if not records:

@@ -55,15 +55,30 @@ uv run ruff check . --fix
 
 ### OpenSky Network (historical, redistributable)
 
-The OpenSky public REST endpoint is rate-limited but credential-free. For larger pulls, register at <https://opensky-network.org/> and pass `(username, password)` as the `credentials` argument to `fetch_state_vectors`.
+The OpenSky REST endpoint is usable anonymously but heavily quota-limited — nominally 400 credits/day, in practice ~55 bounding-box polls/day/IP. Anonymous access also **cannot** replay a historical window: the `time` parameter is rejected, so you only ever see the current snapshot.
+
+OpenSky has **removed HTTP Basic authentication**. The API now accepts only OAuth2 bearer tokens minted through the `client_credentials` grant. Register at <https://opensky-network.org/>, create an API client under <https://opensky-network.org/my-opensky/api-client>, and supply the pair via environment variables (matching the `ADSBX_API_KEY` convention below):
+
+```sh
+export OPENSKY_CLIENT_ID="your-client-id"
+export OPENSKY_CLIENT_SECRET="your-client-secret"
+```
+
+Alternatively, drop the `credentials.json` the web UI gives you at `~/.config/opensky/credentials.json` (mode `0600`); it is read unmodified. Environment variables win when both are present.
+
+Authenticating raises the budget to 4,000 credits/day, or 8,000 for an active feeder (≥30% uptime) — the difference between a ~23-minute capture and a usable training set. Secrets are deliberately **not** accepted as CLI flags, since `argv` is readable by other users through `ps`.
 
 ```python
 from acquisition.opensky import fetch_state_vectors, BoundingBox, TimeRange
+from acquisition.opensky_auth import build_auth, load_credentials
 
 bbox = BoundingBox(lat_min=47.0, lat_max=48.0, lon_min=-123.0, lon_max=-122.0)  # KSEA-ish
 time_range = TimeRange(start_s=..., end_s=...)
-records = list(fetch_state_vectors(bbox, time_range))
+auth = build_auth(load_credentials())  # None when no credentials are configured
+records = list(fetch_state_vectors(bbox, time_range, auth=auth))
 ```
+
+Tokens live 30 minutes; the auth flow caches one, refreshes a minute before expiry, and transparently re-mints and replays on a `401`, so long captures need no special handling.
 
 For bulk historical use the published Zenodo trajectory dumps; SHA-256 verification is built in:
 
