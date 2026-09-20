@@ -1,7 +1,8 @@
 # transformer-inference Specification
 
 ## Purpose
-TBD - created by archiving change transformer-fusion-tracker. Update Purpose after archive.
+ONNX Runtime inference (via the `ort` crate) for modular transformer detection pipelines: each component — sensor encoders, fusion module, detection head — is loaded as a separate session with a configurable execution provider and precision, and the pipeline runs the stages in order, passing intermediate tensors between them, for both BEV-concatenation (BEVFusion-style) and query-based (TransFusion/CMT-style) architectures. The capability also covers dynamic input and output shapes and reporting of per-component latency, total pipeline latency, and throughput.
+
 ## Requirements
 ### Requirement: ONNX model loading and session management
 The system SHALL load ONNX model files using ONNX Runtime (via the `ort` Rust crate), creating inference sessions with configurable execution providers (CPU, CUDA, TensorRT). Each pipeline component (encoder, fusion module, detection head) SHALL be loaded as a separate ONNX session.

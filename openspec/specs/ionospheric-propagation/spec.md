@@ -1,7 +1,8 @@
 # ionospheric-propagation Specification
 
 ## Purpose
-TBD - created by archiving change othr-sensor-model. Update Purpose after archive.
+Ionospheric propagation model for signals that travel by reflection from the ionosphere, as in over-the-horizon radar (OTHR): a Chapman-layer electron density profile parameterized by NmF2, hmF2, and scale height; maximum usable frequency from foF2 and incidence angle; skip-zone minimum ground range; E-layer and F-layer virtual reflection heights; a vertical-incidence sounder model that yields foF2 and hmF2; and diurnal variation of the ionospheric parameters with solar local time.
+
 ## Requirements
 ### Requirement: Chapman-layer electron density
 The system SHALL implement a Chapman-layer electron density profile parameterized by peak density (NmF2), peak height (hmF2), and scale height (H). The system MUST support this.

@@ -1,7 +1,8 @@
 # rcs-computation Specification
 
 ## Purpose
-TBD - created by archiving change hifi-sensor-simulation. Update Purpose after archive.
+Optional computation of target radar cross section (RCS) tables from 3D geometry in `thresh-synth`, gated behind the `rcs-compute` Cargo feature so that default builds need no Python; when enabled it links through PyO3 to PyPOFacets or Open RCS. It loads and validates STL or faceted meshes, computes monostatic RCS over an azimuth-elevation grid at a given frequency using the physical optics approximation with shadowed facets excluded, and exports the result as a JSON table that the swerling-rcs RCS lookup table loads directly.
+
 ## Requirements
 ### Requirement: Feature-gated RCS computation module
 The system MUST gate all RCS computation functionality behind the `rcs-compute` Cargo feature flag. When the feature is not enabled, no Python or PyO3 dependencies MUST be compiled or required. When enabled, the module MUST link against PyO3 and require a Python environment with PyPOFacets or Open RCS installed.

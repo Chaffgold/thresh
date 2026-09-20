@@ -1,7 +1,8 @@
 # sensor-fusion Specification
 
 ## Purpose
-TBD - created by archiving change transformer-fusion-tracker. Update Purpose after archive.
+Multi-sensor fusion: centralized measurement-level fusion that stacks measurements from several sensors into a single filter update, with asynchronous per-sensor updates when sensors report at different rates; an information filter whose additive update lets a fusion center sum per-sensor information contributions; covariance intersection for fusing two estimates with unknown cross-correlations; and sensor registration that transforms sensor-local measurements into a common tracking frame before fusion.
+
 ## Requirements
 ### Requirement: Centralized measurement-level fusion
 The system SHALL support stacking measurements from multiple sensors into a centralized measurement vector z_stacked = [z_1; z_2; ...; z_N] with block-diagonal measurement noise R_stacked = blkdiag(R_1, R_2, ..., R_N) and stacked observation matrix H_stacked = [H_1; H_2; ...; H_N], enabling a single filter update with all sensor data.

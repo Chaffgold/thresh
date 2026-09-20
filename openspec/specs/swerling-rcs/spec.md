@@ -1,7 +1,8 @@
 # swerling-rcs Specification
 
 ## Purpose
-TBD - created by archiving change hifi-sensor-simulation. Update Purpose after archive.
+Target radar cross section (RCS) modeling in `thresh-synth`: Swerling I-IV fluctuation models (chi-squared with 2 or 4 degrees of freedom, decorrelating scan to scan or pulse to pulse), aspect-angle RCS lookup tables loaded from JSON with bilinear interpolation, and built-in tables for fighter, airliner, cruise missile, UAV, and satellite archetypes. It is pure Rust with no C, C++, or Python dependencies, so it builds with default features on the standard Rust toolchain.
+
 ## Requirements
 ### Requirement: Swerling I slow fluctuation model
 The system MUST implement Swerling I RCS fluctuation following a chi-squared distribution with 2 degrees of freedom (exponential distribution), where the RCS value is constant within a single scan (dwell) but fluctuates independently from scan to scan (slow fluctuation). The probability density function MUST be p(sigma) = (1/sigma_avg) * exp(-sigma/sigma_avg) where sigma_avg is the mean RCS.
