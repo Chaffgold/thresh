@@ -1,11 +1,10 @@
-"""Tests for the OpenSky sample CLI and the checked-in CI dry-run sample.
+"""Tests for the OpenSky capture CLI and wholly synthetic schema fixture.
 
 The CLI's fetch path is exercised against ``httpx.MockTransport`` (no
 live OpenSky calls, matching ``test_opensky.py``). The checked-in
-``test-data/trajectories/opensky-sample.parquet`` is validated
-end-to-end through :func:`acquisition.opensky.load_zenodo_dump` — this
-is the CI dry-run for the acquisition schema against real OpenSky-derived
-data (flight-data-training-pipeline task 2.7).
+``test-data/trajectories/synthetic-sample.parquet`` exercises the canonical
+loader without external data. It does not establish live API parity or satisfy
+the real OpenSky-derived sample criterion in task 2.7.
 """
 
 from __future__ import annotations
@@ -15,14 +14,16 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import pyarrow.parquet as pq
 import pytest
 
 from acquisition.opensky import OPENSKY_BASE_URL, BoundingBox, load_zenodo_dump
 from acquisition.opensky_cli import capture, dedup_sort, main, parse_args, resolve_window
-from acquisition.schema import TrajectoryRecord
+from acquisition.schema import TRAJECTORY_PARQUET_SCHEMA, TrajectoryRecord
+from acquisition.synthetic_fixture import FIXTURE_METADATA, synthetic_records, write_fixture
 
 SAMPLE_PATH = (
-    Path(__file__).resolve().parents[2] / "test-data" / "trajectories" / "opensky-sample.parquet"
+    Path(__file__).resolve().parents[2] / "test-data" / "trajectories" / "synthetic-sample.parquet"
 )
 SAMPLE_BUDGET_BYTES = 5 * 1024 * 1024
 
@@ -60,6 +61,11 @@ def _record(icao24: str, timestamp_us: int) -> TrajectoryRecord:
 
 
 class TestWindowResolution:
+    def test_capture_defaults_to_developer_local_data(self) -> None:
+        args = parse_args(["--bbox", "0", "1", "0", "1"])
+        repo_root = Path(__file__).resolve().parents[2]
+        assert args.out == repo_root / "data" / "opensky-capture.parquet"
+
     def test_explicit_time_window(self) -> None:
         args = parse_args(["--bbox", "0", "1", "0", "1", "--time", "100", "200"])
         window = resolve_window(args, now_s=999)
@@ -172,7 +178,7 @@ class TestCredentialResolution:
 
 
 class TestCheckedInSample:
-    """CI dry-run over the real OpenSky-derived sample (task 2.7)."""
+    """Canonical schema checks over invented data, independent of task 2.7."""
 
     def test_sample_exists_within_budget(self) -> None:
         assert SAMPLE_PATH.is_file(), f"missing checked-in sample: {SAMPLE_PATH}"
@@ -180,8 +186,21 @@ class TestCheckedInSample:
 
     def test_sample_loads_as_canonical_records(self) -> None:
         records = list(load_zenodo_dump(SAMPLE_PATH))
-        assert len(records) >= 50, "sample should contain a meaningful capture"
+        assert records == synthetic_records()
         assert all(r.source == "opensky" for r in records)
+        assert all(r.provenance == {"synthetic": True} for r in records)
+
+    def test_sample_preserves_schema_and_synthetic_provenance(self) -> None:
+        schema = pq.ParquetFile(SAMPLE_PATH).schema_arrow
+        assert schema.equals(TRAJECTORY_PARQUET_SCHEMA, check_metadata=False)
+        assert schema.metadata == FIXTURE_METADATA
+
+    def test_generator_is_reproducible_without_external_data(self, tmp_path: Path) -> None:
+        first = tmp_path / "first.parquet"
+        second = tmp_path / "second.parquet"
+        assert write_fixture(first) == write_fixture(second)
+        assert first.read_bytes() == second.read_bytes()
+        assert list(load_zenodo_dump(first)) == list(load_zenodo_dump(SAMPLE_PATH))
 
     def test_sample_is_deduplicated_and_sorted(self) -> None:
         records = list(load_zenodo_dump(SAMPLE_PATH))

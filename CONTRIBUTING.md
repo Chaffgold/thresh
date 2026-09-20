@@ -79,4 +79,8 @@ Open an issue at https://github.com/Chaffgold/thresh/issues with:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the Apache License 2.0.
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in
+the work by you, as defined in the Apache-2.0 license, shall be dual licensed under the MIT license
+([LICENSE-MIT](LICENSE-MIT)) and the Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE)),
+without any additional terms or conditions. This is the same statement as in the
+[README](README.md#contribution).

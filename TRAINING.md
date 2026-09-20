@@ -53,7 +53,12 @@ uv run ruff check . --fix
 
 ## Acquisition
 
-### OpenSky Network (historical, redistributable)
+Real-data acquisition and training remain pending confirmation of the applicable
+OpenSky access and use rights, including any required written permission. The
+clients remain available for authorized local work; the checked-in acquisition
+fixture is wholly synthetic and does not complete real-data validation.
+
+### OpenSky Network (historical; verify use and distribution rights)
 
 The OpenSky REST endpoint is usable anonymously but heavily quota-limited — nominally 400 credits/day, in practice ~55 bounding-box polls/day/IP. Anonymous access also **cannot** replay a historical window: the `time` parameter is rejected, so you only ever see the current snapshot.
 
@@ -80,24 +85,31 @@ records = list(fetch_state_vectors(bbox, time_range, auth=auth))
 
 Tokens live 30 minutes; the auth flow caches one, refreshes a minute before expiry, and transparently re-mints and replays on a `401`, so long captures need no special handling.
 
-For bulk historical use the published Zenodo trajectory dumps; SHA-256 verification is built in:
+For bulk historical use the published Zenodo trajectory dumps; check the exact dataset's license and any supplemental terms before use or redistribution. SHA-256 verification is built in:
 
 ```python
 from acquisition.opensky import load_zenodo_dump
 records = list(load_zenodo_dump("opensky-traffic-2024.parquet", sha256="abc..."))
 ```
 
-For a quick live capture into a single canonical-schema Parquet file (this is
-how the checked-in `test-data/trajectories/opensky-sample.parquet` CI dry-run
-sample was produced — provenance in `test-data/trajectories/README.md`):
+For a live capture into a developer-local canonical-schema Parquet file, first
+verify that the intended use is permitted under the terms in
+[`LICENSING.md`](LICENSING.md), then pass an explicit output path:
 
 ```sh
-uv run python -m acquisition.opensky_cli --bbox 49.0 51.0 7.0 10.0 --duration-s 300
+uv run python -m acquisition.opensky_cli --bbox 49.0 51.0 7.0 10.0 --duration-s 300 \
+  --out ../data/opensky-capture.parquet
 ```
 
 Anonymous access always returns the *current* snapshot, so the CLI paces
 itself against the wall clock (one poll per `--poll-interval-s`, default 10 s)
 and dedups on `(icao24, timestamp_us)`.
+
+The CLI defaults to `data/opensky-capture.parquet` at the repository root.
+Do not commit or publish captures without documented distribution rights.
+For offline schema checks, regenerate the synthetic CI fixture from `python/`
+with `uv run python -m acquisition.synthetic_fixture`; its provenance is in
+[`test-data/trajectories/README.md`](test-data/trajectories/README.md).
 
 ### ADS-B Exchange v2 (live, edge cases, military targets)
 
@@ -180,4 +192,6 @@ The end-to-end MOTA/MOTP/IDF1 A/B harness (`python/eval/run_tracker.py`, with `-
 
 ## License posture
 
-OpenSky-derived data ships with the repository under the OpenSky Network terms with attribution. ADS-B Exchange data is **not** redistributed; an acquisition script is provided and reproduction requires a developer-supplied ADSBx API key. See [`LICENSING.md`](LICENSING.md) for the full attribution and redistribution posture.
+OpenSky API access and attribution do not establish permission to redistribute data. Verify and document the applicable dataset license or written authorization before sharing captures or derived datasets. The earlier API fixture is replaced with a wholly synthetic sample; no redistribution permission is known for the historical capture. ADS-B Exchange data is **not** redistributed; an acquisition script is provided and reproduction requires a developer-supplied ADSBx API key. See [`LICENSING.md`](LICENSING.md) for the full attribution and redistribution posture.
+
+A trained checkpoint's release depends on its **data lineage** and documented rights. A checkpoint trained only on synthetic truth carries the code license. Before committing or publishing one trained with OpenSky-derived truth, document the terms or authorization permitting its intended training and distribution in [`test-data/models/MODEL_CARD.md`](test-data/models/MODEL_CARD.md). Meeting the evaluation thresholds does not satisfy this separate release requirement. See "Trained models" in `LICENSING.md`.

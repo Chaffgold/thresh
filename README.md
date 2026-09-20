@@ -6,7 +6,7 @@
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=Chaffgold_thresh&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=Chaffgold_thresh)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=Chaffgold_thresh&metric=coverage)](https://sonarcloud.io/summary/new_code?id=Chaffgold_thresh)
 [![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=Chaffgold_thresh&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=Chaffgold_thresh)
-[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
 Multi-sensor fusion multi-object tracking framework in Rust.
 
@@ -78,4 +78,21 @@ Run them with `cargo test -p thresh --test hifi_integration`.
 
 ## License
 
-Apache-2.0
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <https://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or <https://opensource.org/licenses/MIT>)
+
+at your option.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
+dual licensed as above, without any additional terms or conditions.
+
+### Data and trained models
+
+The license above covers the source code. It does not by itself settle the terms
+of external flight data or of models trained on such data; the project's posture
+on those is in [LICENSING.md](LICENSING.md).

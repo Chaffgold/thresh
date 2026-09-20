@@ -97,13 +97,22 @@ The trained detector ONNX checkpoint MUST replace `test-data/models/test_detecto
 - Per-detection class accuracy ≥ 0.50.
 - Downstream tracker MOTA strictly better than the current random-stub baseline on `thresh-eval`'s ADS-B scenario.
 
+Distribution MUST also satisfy the documented rights requirement in `LICENSING.md`.
+
 #### Scenario: Decision to replace the stub
 
-**WHEN** a developer runs the evaluation harness and the three exit-criterion metrics meet the thresholds above
+**WHEN** a developer runs the evaluation harness, the three exit-criterion metrics meet the thresholds above, and the intended training and checkpoint distribution rights are documented
 
 **THEN** the trained checkpoint is committed at `test-data/models/test_detector.onnx`, the corresponding model card at `test-data/models/MODEL_CARD.md` is updated with the metric values, and the change's `design.md` Open Questions section is annotated with any decisions made during training
 
 **SHALL** include the OpenSky attribution string in the model card.
+**SHALL** record in the model card the checkpoint's data lineage, release terms, and the basis for its intended training and distribution rights as defined under "Trained models" in `LICENSING.md`.
+
+#### Scenario: Distribution rights remain unverified
+
+**WHEN** the metric thresholds are met but the intended training or checkpoint distribution rights remain unverified
+
+**THEN** the random stub remains in place and the trained checkpoint is not committed or published until the applicable rights are documented
 
 #### Scenario: Failure to meet exit criteria
 
