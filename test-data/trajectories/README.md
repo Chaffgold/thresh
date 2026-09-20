@@ -32,5 +32,12 @@ This work uses data from the OpenSky Network. See <https://opensky-network.org/>
 > Matthias Wilhelm. "Bringing up OpenSky: A large-scale ADS-B sensor network
 > for research." IPSN 2014.
 
-OpenSky data is used under its academic / non-commercial terms; redistribution
-posture for this repository is recorded in `LICENSING.md`.
+This fixture was captured through the API; it is not a separately licensed
+Zenodo dataset. A redistribution grant for it is not documented in this
+repository, so its authorization remains unverified. The maintainer must
+establish the applicable grant or decide how to replace or remove the fixture.
+Attribution alone does not authorize redistribution. See
+[`LICENSING.md`](../../LICENSING.md) and the
+[OpenSky terms](https://opensky-network.org/about/terms-of-use). Keep new captures
+in developer-local `data/` pending verification of the intended use and any
+distribution rights.

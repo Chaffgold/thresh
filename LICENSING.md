@@ -2,19 +2,25 @@
 
 The `flight-data-training-pipeline` consumes two external flight-data sources
 with different redistribution terms. This document records the project's posture
-(design Decision 13). The thresh source code itself is licensed under
+(design Decisions 13 and 27). The thresh source code itself is licensed under
 `MIT OR Apache-2.0` (see the workspace manifest, `LICENSE-MIT` and
 `LICENSE-APACHE`). That license covers the code. It does not, by itself, settle
 the terms of data obtained from others, or of models trained on that data: those
 are below.
 
-## OpenSky Network — primary training source (redistributable)
+## OpenSky Network — primary training source (distribution requires verified rights)
 
 - **Use:** historical state vectors via the public REST endpoint and the
   published Zenodo trajectory dumps (`python/acquisition/opensky.py`).
-- **Terms:** the OpenSky Network data is available for academic / non-commercial
-  use. A redistributable subset **may** ship with this repository and a fuller
-  dataset on a public dataset host, with attribution.
+- **API terms:** the [OpenSky General Terms of Use & Data License Agreement](https://opensky-network.org/about/terms-of-use)
+  (checked 2026-09-20), sections 1 and 3, limits ordinary use to non-profit
+  research and education and restricts sharing outside the recipient institute.
+  Any use by a commercial entity, and any operational REST API use, requires
+  a written license. Attribution alone does not authorize public redistribution.
+- **Dataset-specific grants:** a published Zenodo dataset may have supplemental
+  terms. Check the exact dataset/version and record its license or written
+  authorization before distributing it or derived datasets. Do not assume
+  that an API capture has the same permissions as a separately licensed dump.
 - **Attribution:** *"This work uses data from the OpenSky Network"* — cite
   Schäfer et al., "Bringing up OpenSky: A large-scale ADS-B sensor network for
   research," IPSN 2014. See <https://opensky-network.org/>.
@@ -23,8 +29,13 @@ are below.
   not raw OpenSky records. The one real OpenSky-derived artifact is
   `test-data/trajectories/opensky-sample.parquet` (a small CI dry-run sample
   captured with `python -m acquisition.opensky_cli`); the attribution above
-  applies to it and is recorded in its dataset metadata,
-  `test-data/trajectories/README.md`.
+  applies to it and its provenance is recorded in
+  `test-data/trajectories/README.md`. A redistribution grant for this existing
+  API-derived fixture is not documented in the repository. Its authorization
+  remains unverified; the maintainer must establish the applicable grant or
+  decide how to replace or remove it. Its presence is not permission to publish
+  further captures. Keep new captures in developer-local `data/` until the
+  intended use and any distribution rights have been verified.
 
 ## ADS-B Exchange v2 — live evaluation / edge cases (NOT redistributable)
 
@@ -52,18 +63,18 @@ No trained checkpoint ships today: the artifacts under `test-data/models/` are
 random-weight stubs (see `test-data/models/MODEL_CARD.md`) and are covered by
 the code license.
 
-When trained checkpoints are produced, their terms follow their **data lineage**,
-which the model card records for each one:
+Before releasing a trained checkpoint, record its **data lineage**, applicable
+terms, and the basis for its training and distribution rights in the model card.
+The project's release policy is:
 
 - **Trained only on synthetic truth** (`thresh-synth`, JSBSim, orbital
   propagation): released under the repository's license, `MIT OR Apache-2.0`.
-- **Trained with OpenSky-derived truth:** released for **research and evaluation
-  only**, with the OpenSky attribution above. The project treats such a
-  checkpoint as carrying OpenSky's academic / non-commercial terms, and it
-  **must not be bundled in a commercial product** unless whoever ships it has
-  separately obtained the right to that use from OpenSky. This is the project's cautious posture, not a legal
-  opinion: check OpenSky's current terms of use at
-  <https://opensky-network.org/> before relying on it either way.
+- **Trained with OpenSky-derived truth:** release only after the applicable
+  dataset terms or written authorization have been reviewed and documented as
+  permitting the intended training and checkpoint distribution. Include the
+  OpenSky attribution and any applicable restrictions. Neither the code license
+  nor a research/evaluation label establishes permission to distribute a model;
+  do not commit or publish the checkpoint while those rights remain unverified.
 - **Trained with ADS-B Exchange data:** not released.
 
 A downstream product that needs commercially usable checkpoints retrains them

@@ -53,7 +53,7 @@ uv run ruff check . --fix
 
 ## Acquisition
 
-### OpenSky Network (historical, redistributable)
+### OpenSky Network (historical; verify use and distribution rights)
 
 The OpenSky public REST endpoint is rate-limited but credential-free. For larger pulls, register at <https://opensky-network.org/> and pass `(username, password)` as the `credentials` argument to `fetch_state_vectors`.
 
@@ -65,24 +65,31 @@ time_range = TimeRange(start_s=..., end_s=...)
 records = list(fetch_state_vectors(bbox, time_range))
 ```
 
-For bulk historical use the published Zenodo trajectory dumps; SHA-256 verification is built in:
+For bulk historical use the published Zenodo trajectory dumps; check the exact dataset's license and any supplemental terms before use or redistribution. SHA-256 verification is built in:
 
 ```python
 from acquisition.opensky import load_zenodo_dump
 records = list(load_zenodo_dump("opensky-traffic-2024.parquet", sha256="abc..."))
 ```
 
-For a quick live capture into a single canonical-schema Parquet file (this is
-how the checked-in `test-data/trajectories/opensky-sample.parquet` CI dry-run
-sample was produced — provenance in `test-data/trajectories/README.md`):
+For a live capture into a developer-local canonical-schema Parquet file, first
+verify that the intended use is permitted under the terms in
+[`LICENSING.md`](LICENSING.md), then pass an explicit output path:
 
 ```sh
-uv run python -m acquisition.opensky_cli --bbox 49.0 51.0 7.0 10.0 --duration-s 300
+uv run python -m acquisition.opensky_cli --bbox 49.0 51.0 7.0 10.0 --duration-s 300 \
+  --out data/opensky-capture.parquet
 ```
 
 Anonymous access always returns the *current* snapshot, so the CLI paces
 itself against the wall clock (one poll per `--poll-interval-s`, default 10 s)
 and dedups on `(icao24, timestamp_us)`.
+
+Always specify `--out`: the CLI currently defaults to the tracked
+`test-data/trajectories/opensky-sample.parquet` fixture. That existing fixture's
+redistribution authorization is unverified; see its
+[`README`](test-data/trajectories/README.md). Do not commit or publish new captures
+without documented distribution rights.
 
 ### ADS-B Exchange v2 (live, edge cases, military targets)
 
@@ -165,6 +172,6 @@ The end-to-end MOTA/MOTP/IDF1 A/B harness (`python/eval/run_tracker.py`, with `-
 
 ## License posture
 
-OpenSky-derived data ships with the repository under the OpenSky Network terms with attribution. ADS-B Exchange data is **not** redistributed; an acquisition script is provided and reproduction requires a developer-supplied ADSBx API key. See [`LICENSING.md`](LICENSING.md) for the full attribution and redistribution posture.
+OpenSky API access and attribution do not establish permission to redistribute data. Verify and document the applicable dataset license or written authorization before sharing captures or derived datasets. The existing API fixture's authorization remains unverified. ADS-B Exchange data is **not** redistributed; an acquisition script is provided and reproduction requires a developer-supplied ADSBx API key. See [`LICENSING.md`](LICENSING.md) for the full attribution and redistribution posture.
 
-A trained checkpoint takes its terms from its **data lineage**, not from the code license alone: a checkpoint trained only on synthetic truth carries the code license, and one trained with OpenSky-derived truth - which is what the recipe above produces - is released for research and evaluation only. Record the lineage and terms in [`test-data/models/MODEL_CARD.md`](test-data/models/MODEL_CARD.md) when you export one. See "Trained models" in `LICENSING.md`.
+A trained checkpoint's release depends on its **data lineage** and documented rights. A checkpoint trained only on synthetic truth carries the code license. Before committing or publishing one trained with OpenSky-derived truth, document the terms or authorization permitting its intended training and distribution in [`test-data/models/MODEL_CARD.md`](test-data/models/MODEL_CARD.md). Meeting the evaluation thresholds does not satisfy this separate release requirement. See "Trained models" in `LICENSING.md`.

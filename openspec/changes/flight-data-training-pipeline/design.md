@@ -21,7 +21,7 @@ This is a 3D point-cloud → oriented-3D-bounding-box detector — a DETR family
 **Goals:**
 
 - Produce two ONNX checkpoints trained on real flight data — one for the detector (slot ①) and one for an IMM mode classifier (slot ②) — and check them into `test-data/models/` to replace the random-weights stubs.
-- Build a redistributable trajectory dataset from OpenSky that can ship with the repository for full reproducibility.
+- Build a reproducible trajectory dataset from OpenSky; publish it only when the exact dataset's terms or written authorization permit redistribution.
 - Build an ADSBx v2 live-acquisition client for evaluation and edge-case targets (military / unfiltered).
 - Ship the training scripts with pinned Python tooling so a developer can reproduce a checkpoint with `uv sync && uv run python scripts/train_detector.py` (or equivalent).
 - Keep the classical pipeline fully functional with the learned components disabled — every learned model is opt-in.
@@ -47,7 +47,7 @@ This is a 3D point-cloud → oriented-3D-bounding-box detector — a DETR family
 
 **Decision:** Use OpenSky Network historical data (Impala REST + Zenodo trajectory dump) as the primary training-set source; use ADS-B Exchange v2 (`/api/aircraft/v2/airport/{icao}`) as a real-time acquisition source for evaluation and edge cases only.
 
-**Rationale:** OpenSky's data is redistributable under academic / non-commercial terms, so the training set can ship with the repository (subset) and on a public dataset host (full). ADSBx's terms of service forbid redistribution of the raw feed but the data quality is excellent and the "unfiltered" feed exposes military and blocked aircraft that OpenSky filters out. By using both — OpenSky for the redistributable training-set and ADSBx for the live evaluation harness — we get reproducibility and edge-case coverage. The ADSBx `/airport/{icao}` endpoint specifically matches a "notional sensor at airport X" framing that lines up cleanly with `thresh-synth`'s sensor model.
+**Rationale:** OpenSky provides historical trajectories for training, but API access does not grant public redistribution rights. Any repository subset or publicly hosted dataset requires a verified dataset-specific license or written authorization; see `LICENSING.md`. ADSBx's terms of service forbid redistribution of the raw feed but the data quality is excellent and the "unfiltered" feed exposes military and blocked aircraft that OpenSky filters out. By using both — OpenSky for training and ADSBx for the live evaluation harness — we get reproducible acquisition and edge-case coverage. The ADSBx `/airport/{icao}` endpoint specifically matches a "notional sensor at airport X" framing that lines up cleanly with `thresh-synth`'s sensor model.
 
 ### 3. Synthetic perception driven by real truth (Track A)
 
@@ -118,6 +118,8 @@ This is a 3D point-cloud → oriented-3D-bounding-box detector — a DETR family
 
 If after one full training run none of these are hit, document findings in the change's design.md and either iterate or abandon Track A without blocking Track B.
 
+Checkpoint distribution also requires the documented rights in Decision 27.
+
 **Rationale:** These are intentionally modest. We are not chasing benchmark numbers — we are validating that the pipeline produces a model meaningfully better than random.
 
 ### 12. Exit criteria (Track B)
@@ -128,7 +130,7 @@ If after one full training run none of these are hit, document findings in the c
 - With the `learned-imm` feature gate enabled, the existing `thresh-filter` IMM test suite still passes.
 - The downstream tracker's MOTA on the synthetic ADS-B scenario in `thresh-synth` is no worse than with analytic mode probabilities.
 
-If the third bullet fails, ship the model but keep the feature gate off by default and document the regression.
+If the third bullet fails, ship the model only when the distribution rights in Decision 27 are documented, keep the feature gate off by default, and document the regression.
 
 **Rationale:** Tracker-level MOTA is the only metric that matters for "does this help"; the first two bullets are sanity checks that the model isn't garbage.
 
@@ -136,11 +138,11 @@ If the third bullet fails, ship the model but keep the feature gate off by defau
 
 **Decision:**
 
-- OpenSky data: redistributed under the OpenSky Network terms (academic / non-commercial). Attribution string in `LICENSING.md` and in the dataset metadata file.
+- OpenSky data: public redistribution requires a verified grant for the exact dataset, as documented in `LICENSING.md`; attribution alone is insufficient. Include attribution in any authorized dataset release.
 - ADSBx data: not redistributed. The acquisition client is shipped; reproduction requires a developer-supplied ADSBx API key.
-- Trained models: released under the repository's existing license (MIT OR Apache-2.0). Model card in `test-data/models/MODEL_CARD.md` documents the training data lineage and OpenSky attribution. _Amended by Decision 27._
+- Trained models: release terms and authorization depend on data lineage under Decision 27. Record the supporting terms or authorization in `test-data/models/MODEL_CARD.md` before distribution.
 
-**Rationale:** This is the strictest reading of both providers' terms and keeps the project safely redistributable.
+**Rationale:** Code licensing, permission to use external data, and permission to distribute data or checkpoints are separate. Verify the applicable rights before release. The existing API-derived CI fixture's redistribution authorization remains unverified; see `test-data/trajectories/README.md` for the outstanding maintainer decision.
 
 ## Risks
 
@@ -284,15 +286,15 @@ radar?) is deliberately **not** changed here — revisiting the synth radar
 config to fit the metric would invert the relationship; it stays an open
 question for the radar-scene spec.
 
-### 27. Trained-model terms follow data lineage (amends Decision 13)
+### 27. Trained-model release requires documented rights (amends Decision 13)
 
-**Decision (2026-09-19):** Decision 13 said every trained checkpoint is released under the repository's license. That does not follow from the rest of Decision 13: both tracks train against real OpenSky trajectories as truth, and this project describes OpenSky's terms as academic / non-commercial. A checkpoint's terms therefore follow its data lineage, recorded per checkpoint in `test-data/models/MODEL_CARD.md`:
+**Decision (2026-09-19, clarified 2026-09-20):** The original Decision 13 said every trained checkpoint is released under the repository's license. The code license does not establish rights to external data or to distribute a model trained on it. Record each checkpoint's data lineage, applicable terms, and the basis for its intended training and distribution rights in `test-data/models/MODEL_CARD.md`:
 
 - trained only on synthetic truth (`thresh-synth`, JSBSim, orbital propagation): the repository's license, `MIT OR Apache-2.0`;
-- trained with OpenSky-derived truth: released for research and evaluation only, with OpenSky attribution, and not to be bundled in a commercial product unless whoever ships it has separately obtained that right from OpenSky;
+- trained with OpenSky-derived truth: release only after documenting the dataset terms or written authorization permitting the intended training and checkpoint distribution, with attribution and applicable restrictions; retain the stub while those rights remain unverified;
 - trained with ADSBx data: not released.
 
-**Rationale:** the same "strictest reading" that Decision 13 applies to the data, applied to what is trained on it. It is the project's cautious posture and not a legal opinion. Nothing already published changes: the artifacts in `test-data/models/` are random-weight stubs. It also keeps a commercially usable path open - retrain from synthetic truth - for downstream products built on thresh. The repository license itself changed in the same commit from Apache-2.0 to `MIT OR Apache-2.0`, applying the choice listed in the archived, deferred `crates-io-publishing` change.
+**Rationale:** A research/evaluation label alone does not authorize model distribution. This is a project release requirement; it does not assume that data licenses automatically transfer to model weights. See the verified source terms and distinction between API data and dataset-specific grants in `LICENSING.md`. The artifacts in `test-data/models/` remain random-weight stubs. Downstream products can train from synthetic truth or from data licensed for the intended purpose. The repository license itself changes from Apache-2.0 to `MIT OR Apache-2.0`, applying the choice listed in the archived, deferred `crates-io-publishing` change.
 
 ## Implementation status & deferrals (Phase 11 wrap-up)
 

@@ -93,18 +93,26 @@ The IMM mode classifier ONNX checkpoint MUST be checked into `test-data/models/i
 - With `learned-imm` enabled, the existing `thresh-filter` IMM test suite still passes.
 - With `learned-imm` enabled, the downstream tracker MOTA on `thresh-eval`'s ADS-B scenario is no worse than with analytic mode probabilities.
 
+Distribution MUST also satisfy the documented rights requirement in `LICENSING.md`.
+
 #### Scenario: Shipping with no MOTA regression
 
-**WHEN** the three exit criteria are met
+**WHEN** the three exit criteria are met and the intended training and checkpoint distribution rights are documented
 
 **THEN** the trained classifier is committed at `test-data/models/imm_mode_classifier.onnx`, the model card is updated, and the `learned-imm` feature is documented as ready in `crates/thresh-filter/README.md`
 
 **SHALL** include benchmark numbers and the training-data provenance in the model card.
-**SHALL** record in the model card the checkpoint's data-lineage class and release terms as defined under "Trained models" in `LICENSING.md`.
+**SHALL** record in the model card the checkpoint's data lineage, release terms, and the basis for its intended training and distribution rights as defined under "Trained models" in `LICENSING.md`.
+
+#### Scenario: Distribution rights remain unverified
+
+**WHEN** the metric thresholds are met but the intended training or checkpoint distribution rights remain unverified
+
+**THEN** the random stub remains in place and the trained checkpoint is not committed or published until the applicable rights are documented
 
 #### Scenario: MOTA regression — ship with feature off by default
 
-**WHEN** the first two exit criteria are met but downstream MOTA regresses
+**WHEN** the first two exit criteria are met, downstream MOTA regresses, and the intended training and checkpoint distribution rights are documented
 
 **THEN** the classifier is still committed at `test-data/models/imm_mode_classifier.onnx`, but the `learned-imm` feature is documented as experimental, defaults to off, and the regression is documented in `design.md`'s Open Questions section
 

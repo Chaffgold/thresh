@@ -2,7 +2,7 @@
 
 ### Overview
 
-A unified Python ingestion layer that pulls real flight-data trajectories from two providers — OpenSky Network (primary, historical, redistributable) and ADS-B Exchange v2 (live, geographically scoped, edge cases) — into a single canonical Parquet/Arrow schema. The acquisition layer is the shared foundation for both Track A (learned detector) and Track B (learned tracker components).
+A unified Python ingestion layer that pulls real flight-data trajectories from two providers — OpenSky Network (primary, historical) and ADS-B Exchange v2 (live, geographically scoped, edge cases) — into a single canonical Parquet/Arrow schema. The acquisition layer is the shared foundation for both Track A (learned detector) and Track B (learned tracker components). Data use and redistribution depend on the source's applicable terms and documented grants.
 
 **Data semantics.** Records produced by this layer are **system-level / track-level truth**: aircraft self-reports of GPS-derived state, identity-tagged by ICAO address, with quality encoded as NIC/NAC flags rather than a measurement covariance. They are consumed downstream as ground-truth target trajectories and are never used directly as sensor measurements. All measurement-level data in this pipeline is synthesised downstream by `thresh-synth` from these trajectories — see `specs/learned-detector/spec.md` and `specs/learned-tracker-components/spec.md` for the consumption contracts.
 
@@ -106,13 +106,13 @@ The acquisition layer MUST provide a Python utility that maps ADS-B emitter cate
 
 ### Requirement: License posture documentation
 
-The acquisition layer MUST document the redistribution posture of each source in a top-level `LICENSING.md` file. OpenSky-derived data is documented as redistributable under the OpenSky terms with attribution; ADSBx-derived data is documented as not redistributable, with the acquisition script shipped and an API-key bootstrap procedure provided.
+The acquisition layer MUST document the redistribution posture of each source in a top-level `LICENSING.md` file. OpenSky API terms MUST be distinguished from dataset-specific licenses or written authorization; public distribution of OpenSky-derived data requires a documented applicable grant, and attribution alone is insufficient. ADSBx-derived data is documented as not redistributable, with the acquisition script shipped and an API-key bootstrap procedure provided.
 
 #### Scenario: Reviewing licensing posture
 
 **WHEN** a contributor opens `LICENSING.md`
 
-**THEN** they find a section per source listing: license name, attribution requirement, redistribution permission, and the exact attribution string to include in derived artefacts
+**THEN** they find a section per source listing: applicable terms, attribution requirement, verified redistribution rights or unresolved authorization, and the exact attribution string to include in authorized derived artefacts
 
 **SHALL** include the OpenSky attribution string verbatim in any redistributed dataset metadata file.
 

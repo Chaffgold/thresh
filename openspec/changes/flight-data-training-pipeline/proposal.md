@@ -15,12 +15,12 @@ Build an end-to-end pipeline that ingests real flight data (ADS-B trajectories f
 
 This change is the natural successor: it closes the loop from "we can run inference" to "we can train a model on real flight data and run inference on it." Track A validates that the synth → detector → tracker chain works end-to-end with non-random weights. Track B opens a complementary direction — using the same trajectory data, fed through the classical tracker, to add learned components to the classical Bayesian pipeline, which currently has no learned parts at all.
 
-The pipeline is explicitly **open and reproducible**: the OpenSky-derived training set is redistributable, the training script is shipped with a pinned lockfile, and CI continues to verify the ONNX export shape contract via the existing `onnx-tests` workflow.
+The pipeline ships reproducible acquisition and training scripts with a pinned lockfile, and CI continues to verify the ONNX export shape contract via the existing `onnx-tests` workflow. Distribution of OpenSky-derived training data requires a verified dataset-specific license or written authorization, as documented in `LICENSING.md`.
 
 ## How
 
 - **Acquisition layer (foundation for both tracks).**
-  - OpenSky client: pull historical state vectors from the Impala REST endpoint and the Zenodo trajectory dump. Primary source for the redistributable training set.
+  - OpenSky client: pull historical state vectors from the Impala REST endpoint and the Zenodo trajectory dump. Primary training source, subject to the applicable use and distribution rights.
   - ADS-B Exchange v2 gateway client: poll `/api/aircraft/v2/airport/{icao}` snapshots with a rate-limit budget. Live evaluation and edge-case test set (unfiltered military targets). Raw data is not redistributed under ADSBx TOS — the script and reproducibility recipe are shipped instead.
   - Common trajectory schema in Parquet/Arrow; per-ICAO track stitching from point-in-time snapshots; class taxonomy mapping from ADS-B emitter categories (A0–A7, B0–B7, C0–C3) to a thresh detection-class enum.
 - **Track A — Learned detector.**
@@ -59,7 +59,7 @@ The pipeline is explicitly **open and reproducible**: the OpenSky-derived traini
 - `python/training/` (new) — PyTorch training scripts, dataset adapters, ONNX export utilities.
 - `python/acquisition/` (new) — OpenSky and ADSBx clients, trajectory schema, ingestion pipeline.
 - `test-data/models/` — `test_detector.onnx` replaced with a trained checkpoint once Track A passes exit criteria; new `imm_mode_classifier.onnx` once Track B passes.
-- `test-data/trajectories/` (new) — small (< 5 MB) redistributable trajectory sample from OpenSky for CI dry-runs and smoke tests.
+- `test-data/trajectories/` (new) — small (< 5 MB) OpenSky trajectory sample for CI dry-runs and smoke tests. The existing API fixture's redistribution authorization remains unverified; see its README and `LICENSING.md`.
 - `TRAINING.md`, `LICENSING.md` (new) — reproducibility and licensing documentation.
 - `pyproject.toml`, `uv.lock` (new at repo root or under `python/`) — Python toolchain pinning.
 
