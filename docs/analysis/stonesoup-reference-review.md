@@ -68,15 +68,30 @@ review_dir=$(mktemp -d /private/tmp/thresh-stonesoup-review.XXXXXX)
 uv venv "$review_dir/venv" --python 3.12.13
 uv pip install --python "$review_dir/venv/bin/python" \
   'stonesoup==1.9.1' 'numpy==2.5.3' 'scipy==1.18.1'
-# Run the base probes before adding the optional MFA dependency.
-uv pip install --python "$review_dir/venv/bin/python" 'ortools==9.14.6206'
 export PYO3_PYTHON="$review_dir/venv/bin/python"
 export CARGO_TARGET_DIR="$review_dir/target"
 cargo test --locked -p thresh-bridge --no-default-features
 cargo test --locked -p thresh-bridge --features stonesoup --test stonesoup_integration
 cargo test --locked -p thresh-bridge --features stonesoup \
   --test stonesoup_integration -- --ignored --test-threads=1 --nocapture
+
+# Execute Appendix A directly; the Rust commands do not run these Python probes.
+run_review_python() {
+  awk -v blocks="$1" '
+    /^## Appendix A\./ { appendix = 1 }
+    appendix && /^```python$/ { block++; code = 1; next }
+    appendix && /^```$/ { code = 0 }
+    code && block <= blocks { print }
+  ' docs/analysis/stonesoup-reference-review.md | "$review_dir/venv/bin/python" -
+}
+run_review_python 1  # Includes MFA import: capture missing OR-Tools before installation.
+uv pip install --python "$review_dir/venv/bin/python" 'ortools==9.14.6206'
+run_review_python 2  # Recreates base state, then executes the MFA continuation.
 ```
+
+The first Python invocation records the missing-dependency result in §2.2. The
+second starts a fresh interpreter, repeats the base block to recreate its state
+(the MFA import now succeeds), and then runs the four-scan MFA continuation.
 
 Installed transitive versions for reproducing the observed environment (pin
 these too when creating a future CI constraints file): `contourpy=1.4.0`,

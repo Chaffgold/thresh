@@ -2,9 +2,11 @@
 
 ## Purpose
 
-A tracker-level entry point that drives the per-track IMM mode-probability
-update from a learned ONNX classifier instead of the analytic Markov update,
-behind the `learned-imm` feature. It composes Track B's filter-level
+A tracker-level entry point that replaces the per-track posterior IMM
+mode-probability estimate with a learned ONNX classifier after the analytic
+measurement update, behind the `learned-imm` feature. The analytic transition
+matrix and interaction-step mixing are retained; `combine()` re-blends the
+state using the learned probabilities. It composes Track B's filter-level
 `LearnedImmFilter` (from `flight-data-training-pipeline`) with
 `MultiObjectTracker`, and exposes the learned path through the evaluation
 harness so the analytic and learned pipelines can be compared on identical
