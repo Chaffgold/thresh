@@ -112,10 +112,12 @@ fn unloadable_detector_model_is_an_error_not_a_baseline() {
 #[test]
 fn identical_detector_models_get_identical_point_cloud_metrics() {
     let path = model("test_detector.onnx");
+    // Random stubs create many false tracks; a few frames cover CLI parity.
+    // Quality sensitivity and exact input reuse have longer harness regressions.
     let output = run(&[
         "--json",
         "--duration-seconds",
-        "1.5",
+        "0.3",
         "--learned-detector",
         "--detector-model",
         &path,

@@ -63,7 +63,7 @@ analytic fallback, including in JSON mode.
 
 `--duration-seconds` accepts a positive finite duration (default 30 seconds)
 and preserves the maneuvering scenario's 1:2 cruise/turn phase ratio. CI uses
-1.5-second sequences as bounded smoke checks only, not acceptance evidence.
+0.3- and 1.5-second sequences as bounded smoke checks only, not acceptance evidence.
 
 From the repository root:
 
