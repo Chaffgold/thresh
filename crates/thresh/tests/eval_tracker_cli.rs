@@ -133,7 +133,7 @@ fn identical_detector_models_get_identical_point_cloud_metrics() {
     let lines: Vec<_> = stdout.lines().collect();
     assert!(!String::from_utf8_lossy(&output.stderr).contains("failed"));
     assert_eq!(lines.len(), 6);
-    for pair in lines.chunks_exact(2) {
+    for pair in lines.as_chunks::<2>().0 {
         assert!(pair[0].contains("detector-candidate/analytic-imm"));
         assert_eq!(
             pair[0].replace("detector-candidate", "detector-baseline"),

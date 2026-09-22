@@ -55,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut input: Vec<f32> = (0..numel as usize).map(fixture_value).collect();
     if shape.len() == 3 && shape[1..] == [10, 13] {
-        for (row_index, row) in input.chunks_exact_mut(13).enumerate() {
+        for (row_index, row) in input.as_chunks_mut::<13>().0.iter_mut().enumerate() {
             row[12] = if row_index % 10 == 0 { 0.0 } else { elapsed };
         }
     }

@@ -88,13 +88,13 @@ impl DetectorEvalSequence {
         let mut inputs = Vec::with_capacity(snapshots.len());
         let mut truth = Vec::with_capacity(snapshots.len());
         for snapshot in snapshots {
-            let points = snapshot.point_cloud.chunks_exact(POINT_DIM);
+            let (points, _) = snapshot.point_cloud.as_chunks::<POINT_DIM>();
             inputs.push(SensorInput {
                 points: points
-                    .clone()
+                    .iter()
                     .map(|p| [p[0] as f64, p[1] as f64, p[2] as f64])
                     .collect(),
-                intensities: Some(points.map(|p| p[3] as f64).collect()),
+                intensities: Some(points.iter().map(|p| p[3] as f64).collect()),
                 timestamp: snapshot.time_s,
             });
             truth.push(ground_truth(targets, config, snapshot.time_s));
