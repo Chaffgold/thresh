@@ -60,6 +60,24 @@ fn adapter_rejects_malformed_windows() {
     // Wrong feature width.
     let wide = vec![vec![0.0; CLASSIFIER_FEATURE_DIM + 1]; WINDOW_LEN];
     assert!(adapter.predict(&wide).is_err());
+
+    let legacy = vec![vec![0.0; 12]; WINDOW_LEN];
+    assert!(adapter.predict(&legacy).unwrap_err().contains("!= 13"));
+    for elapsed in [-1.0, f64::NAN, f64::INFINITY] {
+        let mut invalid = vec![vec![0.0; CLASSIFIER_FEATURE_DIM]; WINDOW_LEN];
+        invalid[5][12] = elapsed;
+        assert!(adapter.predict(&invalid).is_err());
+    }
+}
+
+#[test]
+fn adapter_rejects_wrong_model_contract_at_load() {
+    let detector = stub_onnx().with_file_name("test_detector.onnx");
+    let err = ImmModeAdapter::from_onnx(detector)
+        .err()
+        .expect("wrong contract");
+    assert!(err.contains("13"));
+    assert!(err.contains("re-export"));
 }
 
 #[test]

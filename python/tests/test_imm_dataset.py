@@ -32,7 +32,9 @@ SAMPLE_PARQUET = (
 )
 
 
-def _write_parquet(path: Path, trajectories: dict[int, tuple[int, int]]) -> None:
+def _write_parquet(
+    path: Path, trajectories: dict[int, tuple[int, int]], *, dt: float = 1.0
+) -> None:
     """Write a synthetic IMM-samples Parquet.
 
     ``trajectories`` maps ``trajectory_id -> (num_rows, label_index)``; each
@@ -47,8 +49,8 @@ def _write_parquet(path: Path, trajectories: dict[int, tuple[int, int]]) -> None
         for i in range(n):
             traj_ids.append(traj)
             track_ids.append(traj * 1000)
-            times.append(float(i))
-            feats.append([float(traj) + 0.01 * i] * FEATURE_DIM)
+            times.append(float(i) * dt)
+            feats.append([float(traj) + 0.01 * i] * (FEATURE_DIM - 1) + [0.0 if i == 0 else dt])
             labels.append(label)
     table = pa.table(
         {
@@ -85,6 +87,81 @@ def test_windows_never_span_trajectories(tmp_path: Path) -> None:
     for tid, label in zip(windows.trajectory_ids, windows.y, strict=True):
         expected = 0 if tid == 0 else 3
         assert label == expected
+
+
+def test_identical_states_at_1hz_and_10hz_have_distinct_timing(tmp_path: Path) -> None:
+    slow, fast = tmp_path / "1hz.parquet", tmp_path / "10hz.parquet"
+    _write_parquet(slow, {0: (12, 0)}, dt=1.0)
+    _write_parquet(fast, {0: (12, 0)}, dt=0.1)
+    a, b = build_windows(slow), build_windows(fast)
+    np.testing.assert_array_equal(a.x[:, :, :-1], b.x[:, :, :-1])
+    assert a.x[0, 0, -1] == b.x[0, 0, -1] == 0.0
+    np.testing.assert_allclose(a.x[0, 1:, -1], 1.0)
+    np.testing.assert_allclose(b.x[0, 1:, -1], 0.1)
+    # Moving the window forward must not reset its first interval.
+    assert a.x[1, 0, -1] == 1.0
+    assert b.x[1, 0, -1] == np.float32(0.1)
+
+
+def _write_timed_rows(path: Path, times: list[float], elapsed: list[float]) -> None:
+    pq.write_table(pa.table({
+        "trajectory_id": [0] * len(times),
+        "track_id": [1] * len(times),
+        "time_s": times,
+        "feature": [[0.0] * (FEATURE_DIM - 1) + [dt] for dt in elapsed],
+        "label_index": [0] * len(times),
+    }), path)
+
+
+def test_missing_observations_keep_the_elapsed_gap(tmp_path: Path) -> None:
+    path = tmp_path / "gap.parquet"
+    _write_timed_rows(path, [0.1, 0.4, 0.5], [0.0, 0.3, 0.1])
+    windows = build_windows(path, window=2)
+    np.testing.assert_allclose(windows.x[:, :, -1], [[0.0, 0.3], [0.3, 0.1]])
+
+
+def test_same_time_updates_preserve_zero_intervals(tmp_path: Path) -> None:
+    path = tmp_path / "same-time.parquet"
+    _write_timed_rows(path, [0.1, 0.1, 0.4], [0.0, 0.0, 0.3])
+    windows = build_windows(path, window=2)
+    np.testing.assert_allclose(windows.x[:, :, -1], [[0.0, 0.0], [0.0, 0.3]])
+
+
+def test_out_of_order_rows_are_sorted_but_intervals_are_not_rewritten(tmp_path: Path) -> None:
+    path = tmp_path / "unordered.parquet"
+    _write_timed_rows(path, [0.4, 0.1], [0.3, 0.0])
+    np.testing.assert_allclose(build_windows(path, window=2).x[0, :, -1], [0.0, 0.3])
+    _write_timed_rows(path, [0.4, 0.1], [0.0, 0.3])
+    with pytest.raises(ValueError, match="elapsed_seconds"):
+        build_windows(path, window=2)
+
+
+@pytest.mark.parametrize(("times", "elapsed"), [
+    ([0.0, 0.0], [0.0, 0.1]),
+    ([0.0, float("nan")], [0.0, 0.1]),
+    ([0.0, float("inf")], [0.0, 0.1]),
+    ([0.0, 0.1], [0.1, 0.1]),
+    ([0.0, 0.1], [0.0, 1.0]),
+    ([0.0, 0.1], [0.0, -0.1]),
+    ([0.0, 0.1], [0.0, float("inf")]),
+])
+def test_rejects_invalid_timestamps_and_intervals(
+    tmp_path: Path, times: list[float], elapsed: list[float]
+) -> None:
+    path = tmp_path / "bad-time.parquet"
+    _write_timed_rows(path, times, elapsed)
+    with pytest.raises(ValueError):
+        build_windows(path, window=2)
+
+
+def test_rejects_legacy_width_with_regeneration_message(tmp_path: Path) -> None:
+    path = tmp_path / "legacy.parquet"
+    pq.write_table(pa.table({
+        "trajectory_id": [0], "track_id": [1], "time_s": [0.0],
+        "feature": [[0.0] * 12], "label_index": [0],
+    }), path)
+    with pytest.raises(ValueError, match=r"regenerate.*elapsed_seconds"):
+        build_windows(path)
 
 
 def test_short_tracks_yield_no_windows(tmp_path: Path) -> None:

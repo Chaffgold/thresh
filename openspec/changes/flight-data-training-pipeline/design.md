@@ -1,6 +1,6 @@
 # Design — Flight Data Training Pipeline
 
-## Current status (2026-09-20)
+## Current status (2026-09-22)
 
 The decisions and experiment logs below retain their historical context.
 Current implementation and acceptance status is tracked in `tasks.md`:
@@ -8,19 +8,22 @@ Current implementation and acceptance status is tracked in `tasks.md`:
 - The Rust tracker-level learned-IMM path is implemented by
   `learned-imm-tracker-integration`; its representative trained-model A/B is
   still pending.
-- Detector-to-tracker evaluation and Python model/feature forwarding are not
-  complete. Task 9.3 is reopened rather than treating accepted flags as a
-  working learned-detector comparison.
+- Detector-to-tracker evaluation and Python model/feature forwarding are
+  implemented and synthetically verified (tasks 9.3 and 12.2). Detector
+  comparisons reuse materialized point clouds and independent trajectory truth;
+  unavailable modes fail explicitly. Short CLI smoke runs do not satisfy
+  representative trained-model acceptance.
 - Detector acceptance uses Decision 26's baseline-relative distance-AP gate,
   not Decision 11's superseded IoU threshold. Both learned tracks still have
   unmet acceptance criteria; incremental PRs do not complete task 11.5.
 - Decision 29 makes the IMM no-regression release gate strict: an experimental
   label or disabled-by-default feature does not permit a failing trained
   checkpoint to replace the stub or be published.
-- The maintainer approved synthetic-only follow-ups for category translation,
-  detector evaluation, and elapsed-time-aware IMM inputs. Section 12 tracks
-  them as pending; the implemented IMM input remains 12-dimensional until a
-  shared replacement contract is specified and verified.
+- The approved synthetic-only follow-ups for category translation, detector
+  evaluation, and elapsed-time-aware IMM inputs are implemented in Section 12.
+  Decision 30's shared 13-dimensional IMM input is implemented
+  and verified with synthetic rate/gap tests and Python/ONNX/Rust parity;
+  this does not satisfy the trained-model acceptance gates.
 - CI uses mocked responses and wholly synthetic fixtures under Decision 28.
   Real-data access/use and model-distribution gates remain in force.
 - The deferred `crates-io-publishing` plan has been restored to the active
@@ -327,7 +330,7 @@ question for the radar-scene spec.
 - trained with OpenSky-derived truth: release only after documenting the dataset terms or written authorization permitting the intended training and checkpoint distribution, with attribution and applicable restrictions; retain the stub while those rights remain unverified;
 - trained with ADSBx data: not released.
 
-**Rationale:** A research/evaluation label alone does not authorize model distribution. This is a project release requirement; it does not assume that data licenses automatically transfer to model weights. See the verified source terms and distinction between API data and dataset-specific grants in `LICENSING.md`. The artifacts in `test-data/models/` remain random-weight stubs. Downstream products can train from synthetic truth or from data licensed for the intended purpose. The repository license itself changes from Apache-2.0 to `MIT OR Apache-2.0`, applying the choice listed in the archived, deferred `crates-io-publishing` change.
+**Rationale:** A research/evaluation label alone does not authorize model distribution. This is a project release requirement; it does not assume that data licenses automatically transfer to model weights. See the verified source terms and distinction between API data and dataset-specific grants in `LICENSING.md`. The artifacts in `test-data/models/` remain random-weight stubs. Downstream products can train from synthetic truth or from data licensed for the intended purpose. The repository license itself changes from Apache-2.0 to `MIT OR Apache-2.0`, applying the choice listed in the deferred `crates-io-publishing` change (now restored to the active backlog, without authorizing publishing).
 
 ### 28. Synthetic acquisition fixture; real-data rights remain pending
 
@@ -363,6 +366,44 @@ the strict gate. A regressing model may be investigated in authorized local
 experiments, but it cannot replace the checked-in random stub or be published
 as an experimental exception. This decision changes no historical run result
 and marks no acceptance task complete.
+
+### 30. Elapsed-time-aware IMM input (supersedes the live contract in Decisions 14, 18 and 25)
+
+**Decision (2026-09-22, task 12.3):** The classifier input is
+`features: float32[batch, 10, 13]`. Each row contains the six common-space
+state entries `[x, vx, y, vy, z, vz]`, six covariance-diagonal variances,
+and `elapsed_seconds` since the previous recorded measurement update.
+The first post-birth measurement update has elapsed time zero. Later rows
+retain their actual intervals even when they become the first row of a
+sliding window; windowing must not reset the elapsed value.
+
+History records actual post-birth measurement updates, including tentative
+tracks, but neither birth initialization nor prediction-only/coasting ticks.
+The runtime accumulates every finite, nonnegative `predict(dt)` interval
+between updates, so missed measurements increase the next row's elapsed
+time. Invalid or overflowing intervals are rejected before mutating the
+filter. Repeated updates without a prediction have elapsed time zero.
+The Rust synthetic generator uses the same row eligibility and interval
+semantics; its Parquet contains 13-wide features plus `time_s`. Python
+validates finite, nondecreasing timestamps, the first zero interval,
+and agreement between subsequent elapsed features and timestamp differences.
+The loader retains its per-track stable timestamp sort; equal timestamps keep
+their input order and require a zero interval. It never rewrites conflicting
+elapsed features to make an unordered dataset pass.
+
+Legacy 12-wide models and datasets are rejected explicitly and must be
+re-exported/re-generated. Their missing time and possible prediction-only
+rows cannot be recovered safely by assuming a sample rate. Regenerate the
+checked-in wholly synthetic sample and random ONNX stub; no trained weights
+or external captures are introduced. Existing historical experiments retain
+their original 12-wide contract in the record below.
+
+**Rationale:** Identical state sequences at 1 Hz and 10 Hz encode different
+motion. Carrying physical seconds removes that ambiguity without inventing
+acceleration components or fixing deployment to a single sample rate.
+Including time is not a claim of sample-rate invariance or trained-model
+acceptance: representative training, no-regression checks, and release rights
+remain separate gates under Decisions 27 and 29.
 
 ## Implementation status & deferrals (Phase 11 wrap-up)
 

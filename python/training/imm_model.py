@@ -53,8 +53,8 @@ class SoftmaxClassifier(nn.Module):
 
     Optionally standardizes features inside the graph (fixed mean/std buffers
     exported as ONNX constants): the Rust ``ImmModeAdapter`` keeps feeding raw
-    ``project_filter_state`` outputs, while the core sees the standardized
-    distribution it was trained on — raw filter-state scales span orders of
+    ``project_filter_state`` outputs (including elapsed seconds), while the core
+    sees the standardized distribution it was trained on — raw filter-state scales span orders of
     magnitude and wreck out-of-distribution robustness otherwise."""
 
     def __init__(

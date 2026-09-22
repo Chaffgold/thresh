@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate a tiny synthetic ONNX stub for the Track B IMM mode classifier.
 
-Input:  features   (1, 10, 12)  float32  — 10 consecutive 12-dim filter-state
-                                            projections (state + cov diagonal).
+Input:  features   (1, 10, 13)  float32  — 10 consecutive 13-dim filter-state
+                                      projections (state + cov diagonal + dt).
 Output: mode_probs (1, 4)       float32  — softmaxed probabilities over
                                             [CV, CA, CTRV, coord_turn].
 
@@ -18,12 +18,12 @@ import onnx
 from onnx import TensorProto, helper, numpy_helper
 
 # ---------------------------------------------------------------------------
-# Dimensions — must match thresh_filter::imm::CLASSIFIER_FEATURE_DIM (12),
+# Dimensions — must match thresh_filter::imm::CLASSIFIER_FEATURE_DIM (13),
 # imm_adapter::WINDOW_LEN (10) and NUM_MODES (4).
 # ---------------------------------------------------------------------------
 BATCH = 1
 WINDOW_LEN = 10
-FEATURE_DIM = 12
+FEATURE_DIM = 13
 NUM_MODES = 4
 
 rng = np.random.default_rng(42)
@@ -40,7 +40,7 @@ def build_model() -> onnx.ModelProto:
     w = _rand_init("w", (FEATURE_DIM, NUM_MODES))
     b = _rand_init("b", (NUM_MODES,))
 
-    # pooled = mean over the time axis → (1, 12)
+    # pooled = mean over the time axis → (1, 13)
     pool = helper.make_node(
         "ReduceMean", ["features"], ["pooled"], axes=[1], keepdims=0
     )

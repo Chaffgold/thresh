@@ -328,8 +328,8 @@ jobs:
         run: cargo test -p thresh-filter --features learned-imm
       - name: Run learned-IMM tracker seam tests
         run: cargo test -p thresh-tracker --features learned-imm
-      - name: Build umbrella crate with learned-IMM (eval-tracker --learned-imm)
-        run: cargo build -p thresh --features learned-imm --bin eval-tracker
+      - name: Test detector evaluation and learned-IMM modes (synthetic and stub models)
+        run: cargo test -p thresh --features onnx,learned-imm --lib --test eval_tracker_cli
       - name: Set up Python (ONNX parity check)
         uses: actions/setup-python@v5
         with:
