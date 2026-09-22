@@ -1,6 +1,6 @@
 # Learned-IMM Tracker Integration
 
-## What
+## What Changes
 
 Add a tracker-level entry point for the learned IMM mode classifier so the
 multi-object tracker can run the learned mode-probability update end-to-end,
@@ -44,7 +44,17 @@ gated on `learned-imm`; default builds are unchanged.
   fine for the small target counts in evaluation scenarios).
 - Any change to the analytic IMM path or to single-model KF tracking.
 
-## Affected crates and paths
+## Capabilities
+
+### New Capabilities
+
+- `learned-imm-tracker`: opt-in learned IMM tracking with analytic fallback and runnable analytic-versus-learned evaluation.
+
+### Modified Capabilities
+
+None. The existing filter-level integration is reused by this new tracker-level capability.
+
+## Impact
 
 - `crates/thresh-tracker` — new `learned-imm` feature; `new_imm_position_learned`;
   learned-filter map + birth/predict/update/removal wiring (`src/tracker.rs`).

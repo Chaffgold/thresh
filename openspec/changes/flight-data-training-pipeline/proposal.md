@@ -2,7 +2,7 @@
 
 > **Status:** Experimental — this change is a deliberate spike. Each track has an exit criterion (see `design.md` § Exit criteria); a track may be abandoned without invalidating the rest of the change.
 
-## What
+## What Changes
 
 Build an end-to-end pipeline that ingests real flight data (ADS-B trajectories from OpenSky Network and ADS-B Exchange v2) and produces trained ONNX model checkpoints to replace the random-weights stubs currently shipped in `test-data/models/`. Two parallel learning tracks share a single acquisition foundation:
 
@@ -38,7 +38,7 @@ The pipeline ships reproducible acquisition and training scripts with a pinned l
   - `pyproject.toml` + `uv.lock` pin the Python toolchain; one-shot `uv sync && uv run python scripts/train_detector.py` is the developer ergonomics goal.
 - **CI posture.**
   - Training does not run in CI (offline only).
-  - Acquisition layer gets a PR-time dry-run job that hits OpenSky's free REST tier with a tiny query to verify schema parity.
+  - Acquisition CI uses mocked provider responses and a wholly synthetic fixture to verify schema parity, without live provider access. Real-data validation remains pending under Decision 28.
   - ONNX export contract is verified by the existing `onnx-tests` workflow once trained checkpoints land.
 
 ## Out of scope
@@ -51,11 +51,23 @@ The pipeline ships reproducible acquisition and training scripts with a pinned l
 - **Self-hosted dump1090 ingestion.** A third acquisition backend is deferred to a future change.
 - **The other two Track B candidates.** Learned association cost and short-horizon trajectory predictor are designed for but not implemented in this change; they remain in `specs/learned-tracker-components/spec.md` as future requirements.
 
-## Affected crates and paths
+## Capabilities
+
+### New Capabilities
+
+- `flight-data-acquisition`: canonical trajectory ingestion, provider translation, offline schema checks, and documented data-use constraints.
+- `learned-detector`: trajectory-driven synthetic radar pairing, detector training/export, and downstream evaluation gates.
+- `learned-tracker-components`: filter-state-based IMM classification, runtime integration, and trained-model acceptance gates.
+
+### Modified Capabilities
+
+None. These capability deltas introduce new specifications; existing capabilities remain unchanged.
+
+## Impact
 
 - `crates/thresh-synth/` — radar simulator gains a trajectory-driven mode that consumes real ADS-B traces.
 - `crates/thresh-filter/` — IMM gains an opt-in `learned-imm` feature gate that loads an ONNX mode classifier.
-- `crates/thresh-inference/` — re-used as-is; no API changes expected.
+- `crates/thresh-inference/` — reusable ONNX execution and three-output detector decoding (Decisions 17 and 21–22).
 - `python/training/` (new) — PyTorch training scripts, dataset adapters, ONNX export utilities.
 - `python/acquisition/` (new) — OpenSky and ADSBx clients, trajectory schema, ingestion pipeline.
 - `test-data/models/` — `test_detector.onnx` replaced with a trained checkpoint once Track A passes exit criteria; new `imm_mode_classifier.onnx` once Track B passes.

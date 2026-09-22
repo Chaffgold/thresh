@@ -37,6 +37,20 @@ repos:
         files: ^openspec/
         pass_filenames: false
 
+      - id: openspec-validate-archived
+        name: openspec validate archived tasks
+        entry: openspec validate --archived --strict --no-interactive
+        language: system
+        files: ^openspec/
+        pass_filenames: false
+
+      - id: openspec-validate-metadata
+        name: openspec validate active change metadata
+        entry: bash -ec 'for change in openspec/changes/*; do if [[ -d "$change" && "${change##*/}" != archive ]]; then openspec status --change "${change##*/}"; fi; done'
+        language: system
+        files: ^openspec/
+        pass_filenames: false
+
       - id: python-training-ruff
         name: ruff (python/)
         entry: bash -c 'cd python && uv run --no-default-groups --group dev ruff check .'

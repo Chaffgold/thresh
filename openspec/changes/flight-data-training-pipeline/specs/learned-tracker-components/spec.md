@@ -1,6 +1,6 @@
-## Capability: Learned Tracker Components
+# Capability: Learned Tracker Components
 
-### Overview
+## Purpose
 
 A family of small ONNX models that augment the existing classical Bayesian tracker. Three candidate components are scoped: an IMM mode-probability classifier (implemented in this change), a learned association cost network (designed but not implemented here), and a short-horizon trajectory predictor (designed but not implemented here). Each component is opt-in via a Cargo feature gate; the classical pipeline remains the default.
 
@@ -14,7 +14,7 @@ The IMM mode classifier ONNX model MUST conform to the following contract. The i
 
 | Tensor | Shape | dtype | Semantics |
 |---|---|---|---|
-| `filter_state_history` (input) | `(batch, 10, filter_state_dim)` | float32 | 10 consecutive filter-state snapshots. Default `filter_state_dim` = 12: the IMM common-space state `[x, vx, y, vy, z, vz]` concatenated with the 6 diagonal entries of the 6×6 common-space covariance (see design.md Decision 14 — the IMM combine output is 6D, so acceleration is inferred by the sequence model from the window rather than carried explicitly). All values in sensor-ENU frame and SI units. Produced by `thresh_filter::imm::project_filter_state` (`CLASSIFIER_FEATURE_DIM = 12`). |
+| `features` (input) | `(batch, 10, filter_state_dim)` | float32 | 10 consecutive filter-state snapshots. Default `filter_state_dim` = 12: the IMM common-space state `[x, vx, y, vy, z, vz]` concatenated with the 6 diagonal entries of the 6×6 common-space covariance (see design.md Decision 14 — the IMM combine output is 6D, so acceleration is inferred by the sequence model from the window rather than carried explicitly). All values in sensor-ENU frame and SI units. Produced by `thresh_filter::imm::project_filter_state` (`CLASSIFIER_FEATURE_DIM = 12`). |
 | `mode_probs` (output) | `(batch, 4)` | float32 | Softmaxed probabilities over `[CV, CA, CTRV, coord_turn]` |
 
 #### Scenario: Contract verification
@@ -41,7 +41,7 @@ The IMM mode classifier MUST be trained on inputs produced by running the classi
 
 **WHEN** the `learned-imm` adapter is fed an input that does not match the `filter_state_dim` (e.g. a 9-dim raw state without covariance, or a measurement-level vector)
 
-**THEN** the adapter returns an error and falls back to the analytic transition matrix; it does NOT silently produce mode probabilities from a malformed input
+**THEN** the adapter returns an error and the learned filter wrapper retains the analytic update; it does NOT silently produce mode probabilities from a malformed input
 
 **SHALL** log the rejection at WARN level with the observed input shape.
 
@@ -67,7 +67,7 @@ The training pipeline MUST derive analytic mode labels for each trajectory state
 
 ### Requirement: `learned-imm` feature gate in `thresh-filter`
 
-`thresh-filter` MUST expose a Cargo feature `learned-imm` that, when enabled, provides an adapter loading the ONNX mode classifier and using it as the IMM's mode-transition input.
+`thresh-filter` MUST expose a Cargo feature `learned-imm` that, when enabled, provides an adapter loading the ONNX mode classifier and a wrapper using its output to replace the IMM's posterior mode-probability estimate. The analytic transition matrix and interaction-step mixing MUST remain unchanged, as defined in design.md Decision 19.
 
 #### Scenario: Feature off — classical IMM unchanged
 
@@ -79,11 +79,11 @@ The training pipeline MUST derive analytic mode labels for each trajectory state
 
 #### Scenario: Feature on — learned mode probabilities feed IMM
 
-**WHEN** the `learned-imm` feature is enabled and a trained classifier ONNX checkpoint is loaded
+**WHEN** the `learned-imm` feature is enabled, a trained classifier ONNX checkpoint is loaded, and a full 10-step window of filter-state projections is available
 
-**THEN** the IMM uses the classifier's `mode_probs` output as its per-step mode-transition input, replacing the analytic mode-transition matrix
+**THEN** after the analytic measurement update, the learned filter wrapper replaces the posterior `mode_probabilities` with the classifier's `mode_probs` output and re-runs `combine()` to re-blend the bank's estimates, without replacing the analytic transition matrix or interaction-step mixing
 
-**SHALL** fall back to the analytic transition matrix and log a warning if the ONNX inference fails at runtime.
+**SHALL** retain the analytic update during the warm-up window and fall back to the analytic update with a warning if ONNX inference fails at runtime.
 
 ### Requirement: Exit criteria for IMM classifier
 
@@ -110,13 +110,13 @@ Distribution MUST also satisfy the documented rights requirement in `LICENSING.m
 
 **THEN** the random stub remains in place and the trained checkpoint is not committed or published until the applicable rights are documented
 
-#### Scenario: MOTA regression — ship with feature off by default
+#### Scenario: MOTA regression blocks checkpoint release
 
-**WHEN** the first two exit criteria are met, downstream MOTA regresses, and the intended training and checkpoint distribution rights are documented
+**WHEN** the first two exit criteria are met but downstream MOTA regresses, even if the intended training and checkpoint distribution rights are documented
 
-**THEN** the classifier is still committed at `test-data/models/imm_mode_classifier.onnx`, but the `learned-imm` feature is documented as experimental, defaults to off, and the regression is documented in `design.md`'s Open Questions section
+**THEN** the random stub remains at `test-data/models/imm_mode_classifier.onnx`, the trained checkpoint is not committed or published, and the regression is documented in `design.md` for further training and evaluation
 
-**SHALL NOT** make `learned-imm` a default feature until the regression is resolved.
+**SHALL NOT** waive the no-regression gate by labeling the trained model experimental or leaving `learned-imm` disabled by default.
 
 ### Requirement: Future learned components — designed but deferred
 

@@ -1,8 +1,8 @@
-## Capability: crates.io Publishing Workflow
+# Capability: crates.io Publishing Workflow
 
-### Overview
+## Purpose
 
-A fully automated workflow for publishing all thresh workspace crates to crates.io in correct dependency order, with metadata validation, dry-run verification, and CI integration.
+A fully automated workflow for publishing eligible thresh workspace crates to crates.io in correct dependency order, with metadata validation, dry-run verification, and CI integration. `thresh-py` remains excluded (`publish = false`); its maturin/PyPI distribution is a separate concern.
 
 ## ADDED Requirements
 
@@ -26,7 +26,7 @@ The publishing workflow MUST publish crates in dependency order so that each cra
 
 **WHEN** a version tag (e.g., `v0.3.0`) is pushed to the repository
 
-**THEN** the GitHub Actions workflow publishes crates in topological order: thresh-core, thresh-filter, thresh-association, thresh-fusion, thresh-tracker, thresh-inference, thresh-synth, thresh-eval, thresh-bridge, thresh-data, thresh, thresh-py
+**THEN** the GitHub Actions workflow publishes eligible crates in topological order: thresh-core, thresh-filter, thresh-association, thresh-fusion, thresh-tracker, thresh-inference, thresh-synth, thresh-eval, thresh-bridge, thresh-data, thresh. `thresh-py` MUST remain excluded. The deferred `thresh-bridge` eligibility decision must be resolved before implementing this sequence.
 
 **SHALL** wait for crates.io index propagation between publishes (at minimum 30 seconds) and abort the remaining sequence if any publish fails
 
