@@ -6,7 +6,7 @@
 
 Build an end-to-end pipeline that ingests real flight data (ADS-B trajectories from OpenSky Network and ADS-B Exchange v2) and produces trained ONNX model checkpoints to replace the random-weights stubs currently shipped in `test-data/models/`. Two parallel learning tracks share a single acquisition foundation:
 
-- **Track A — Learned detector (slot ①).** Drive `thresh-synth`'s radar simulator from real ADS-B trajectories to produce paired `(point_cloud, gt_boxes_3D)` examples; fine-tune a DETR-family detector in PyTorch from a pretrained backbone; export to ONNX matching the existing input/output contract `(1, 1000, 4) → (1, 100, 7) + (1, 100, 1)`; replace `test-data/models/test_detector.onnx`.
+- **Track A — Learned detector (slot ①).** Drive `thresh-synth`'s radar simulator from real ADS-B trajectories to produce paired `(point_cloud, gt_boxes_3D)` examples; fine-tune a DETR-family detector in PyTorch from a pretrained backbone; export to ONNX matching the three-output contract: input `(1, 1000, 4)`, boxes `(1, 100, 7)`, scores `(1, 100, 1)`, and classes `(1, 100, 1)`; replace `test-data/models/test_detector.onnx` only after the acceptance and rights gates pass.
 - **Track B — Learned tracker components (slot ②).** Build an IMM mode-probability classifier (CV / CA / CTRV / coordinated-turn) trained on **filter-state outputs** from the classical tracker run over synthesised measurements (NOT on raw ADS-B states — see Decision 4 in `design.md`: ADS-B is system-level truth and must not be the classifier's input). Export to ONNX and wire it into `thresh-filter`'s IMM behind an opt-in `learned-imm` feature gate. Two further candidates (learned association cost, short-horizon trajectory predictor) are designed but deferred.
 
 ## Why
@@ -22,14 +22,14 @@ The pipeline ships reproducible acquisition and training scripts with a pinned l
 - **Acquisition layer (foundation for both tracks).**
   - OpenSky client: pull historical state vectors from the Impala REST endpoint and the Zenodo trajectory dump. Primary training source, subject to the applicable use and distribution rights.
   - ADS-B Exchange v2 gateway client: poll `/api/aircraft/v2/airport/{icao}` snapshots with a rate-limit budget. Live evaluation and edge-case test set (unfiltered military targets). Raw data is not redistributed under ADSBx TOS — the script and reproducibility recipe are shipped instead.
-  - Common trajectory schema in Parquet/Arrow; per-ICAO track stitching from point-in-time snapshots; class taxonomy mapping from ADS-B emitter categories (A0–A7, B0–B7, C0–C3) to a thresh detection-class enum.
+  - Common trajectory schema in Parquet/Arrow; per-ICAO track stitching from point-in-time snapshots; class taxonomy mapping from canonical ADS-B emitter categories to a thresh detection-class enum. OpenSky integers 2–8, 9–15, and 16–20 translate to A1–A7, B1–B7, and C1–C5 respectively; missing/no-information values remain null.
 - **Track A — Learned detector.**
   - Extend `thresh-synth`'s radar simulator to consume a real trajectory and emit paired `(point_cloud, gt_boxes_3D)` examples in the existing ONNX input format. RCS, clutter, and detection-probability models reuse the current synth code paths.
   - PyTorch training script: fine-tune a pretrained DETR-family detector (RT-DETR or 3D-DETR variant) on the synthesised pairs, using set-prediction loss.
   - ONNX export with shape-contract verification; drop into `test-data/models/test_detector.onnx` once exit criteria are met.
 - **Track B — Learned tracker components.**
   - Pick the **IMM mode-probability classifier** as the first experiment. Integrates with the existing IMM in `thresh-filter` via an opt-in `learned-imm` feature gate.
-  - **Training pipeline mirrors deployment** (per Decision 4): drive `thresh-synth` from each real ADS-B trajectory to produce a synthesised measurement stream; run the classical tracker over that stream; snapshot the filter state and covariance per step; train the classifier on those filter-state snapshots, with motion-mode labels derived from the underlying trajectory kinematics.
+  - **Training pipeline mirrors deployment** (Decisions 4 and 30): drive `thresh-synth` from each authorized truth trajectory to produce a synthesised measurement stream; run the classical tracker over that stream; record post-birth measurement updates, including tentative tracks but excluding coasts. Each 13-wide feature contains six state entries, six covariance-diagonal entries, and elapsed seconds since the preceding recorded update (first interval zero). Train with motion-mode labels derived from the underlying trajectory kinematics.
   - The classifier's input is the filter state, **not** the raw ADS-B state — this avoids a train-on-truth / deploy-on-filter-output distribution shift.
   - Export as ONNX. The `learned-imm` adapter loads the checkpoint via the existing inference pipeline and feeds the IMM filter at runtime.
 - **Reproducibility and licensing.**

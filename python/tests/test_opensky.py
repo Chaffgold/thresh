@@ -26,6 +26,7 @@ from acquisition.opensky import (
 )
 from acquisition.schema import TrajectoryRecord
 from acquisition.storage import write_partition
+from training.classes import TargetClass, class_for_adsb_category
 
 FIXTURE_TIME = 1_700_000_000
 FIXTURE_STATE_ROW: list[object] = [
@@ -46,7 +47,7 @@ FIXTURE_STATE_ROW: list[object] = [
     "2345",            # squawk
     False,             # spi
     0,                 # position_source
-    4,                 # category (numeric → "A4")
+    4,                 # OpenSky Large category (numeric → "A3")
 ]
 
 
@@ -64,7 +65,7 @@ class TestStateRowTranslation:
         assert rec.vel_ground_mps == 120.0
         assert rec.track_deg == 45.0
         assert rec.vrate_mps == 1.5
-        assert rec.category == "A4"
+        assert rec.category == "A3"
         assert rec.timestamp_us == FIXTURE_TIME * 1_000_000
 
     def test_skips_rows_without_position(self) -> None:
@@ -90,10 +91,16 @@ class TestStateRowTranslation:
         rec = state_row_to_record(row, FIXTURE_TIME)
         assert rec is not None and rec.category == "B6"
 
-    def test_zero_category_treated_as_none(self) -> None:
+    @pytest.mark.parametrize("category", [None, 0, 1, -1, 21, 999, True, False, 2.5, 8.0])
+    def test_unknown_category_treated_as_none(self, category: object) -> None:
         row = list(FIXTURE_STATE_ROW)
-        row[17] = 0
+        row[17] = category
         rec = state_row_to_record(row, FIXTURE_TIME)
+        assert rec is not None and rec.category is None
+        assert class_for_adsb_category(rec.category) == TargetClass.OTHER
+
+    def test_non_extended_row_has_no_category(self) -> None:
+        rec = state_row_to_record(FIXTURE_STATE_ROW[:17], FIXTURE_TIME)
         assert rec is not None and rec.category is None
 
     def test_missing_time_position_uses_fetch_time(self) -> None:
@@ -127,6 +134,53 @@ def _mock_transport(payloads: Sequence[Mapping[str, Any]]) -> httpx.MockTranspor
 
 
 class TestFetchStateVectors:
+    @pytest.mark.parametrize(
+        ("numeric", "emitter", "target_class"),
+        [
+            (0, None, TargetClass.OTHER),
+            (1, None, TargetClass.OTHER),
+            (2, "A1", TargetClass.LIGHT_FIXED_WING),
+            (3, "A2", TargetClass.LIGHT_FIXED_WING),
+            (4, "A3", TargetClass.HEAVY_FIXED_WING),
+            (5, "A4", TargetClass.HEAVY_FIXED_WING),
+            (6, "A5", TargetClass.HEAVY_FIXED_WING),
+            (7, "A6", TargetClass.OTHER),
+            (8, "A7", TargetClass.ROTORCRAFT),
+            (9, "B1", TargetClass.GLIDER_BALLOON_UAV),
+            (10, "B2", TargetClass.GLIDER_BALLOON_UAV),
+            (11, "B3", TargetClass.OTHER),
+            (12, "B4", TargetClass.OTHER),
+            (13, "B5", TargetClass.OTHER),
+            (14, "B6", TargetClass.GLIDER_BALLOON_UAV),
+            (15, "B7", TargetClass.OTHER),
+            (16, "C1", TargetClass.OTHER),
+            (17, "C2", TargetClass.OTHER),
+            (18, "C3", TargetClass.OTHER),
+            (19, "C4", TargetClass.OTHER),
+            (20, "C5", TargetClass.OTHER),
+            (21, None, TargetClass.OTHER),
+        ],
+    )
+    def test_provider_category_mapping(
+        self, numeric: int, emitter: str | None, target_class: TargetClass
+    ) -> None:
+        # Synthetic responses cover the complete documented provider enumeration
+        # through the acquisition boundary and the unchanged five-class taxonomy.
+        row = list(FIXTURE_STATE_ROW)
+        row[17] = numeric
+        with httpx.Client(
+            base_url="https://opensky-network.org/api",
+            transport=_mock_transport([{"time": FIXTURE_TIME, "states": [row]}]),
+        ) as client:
+            records = list(fetch_state_vectors(
+                BoundingBox(40.0, 50.0, -130.0, -110.0),
+                TimeRange(FIXTURE_TIME, FIXTURE_TIME + 1),
+                client=client,
+            ))
+        assert len(records) == 1
+        assert records[0].category == emitter
+        assert class_for_adsb_category(records[0].category) == target_class
+
     def test_polls_each_step_in_time_range(self) -> None:
         payloads = [
             {"time": FIXTURE_TIME, "states": [FIXTURE_STATE_ROW]},

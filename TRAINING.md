@@ -1,8 +1,8 @@
 # thresh — Training Pipeline
 
-Reproduction recipe for the trained ONNX checkpoints under `test-data/models/` that the inference pipeline consumes. This pipeline is tracked by the OpenSpec change `flight-data-training-pipeline`; see [`openspec/changes/flight-data-training-pipeline/`](openspec/changes/flight-data-training-pipeline/) for the full proposal, design, and tasks.
+Reproduction recipe for training and evaluating ONNX models; the checked-in `test-data/models/` artifacts are random-weight test stubs, not trained checkpoints. This pipeline is tracked by the OpenSpec change `flight-data-training-pipeline`; see [`openspec/changes/flight-data-training-pipeline/`](openspec/changes/flight-data-training-pipeline/) for the full proposal, design, and tasks.
 
-> **Status:** Phases 1–7 landed — acquisition (OpenSky + ADS-B Exchange), the trajectory-driven synth pairing, and the full training/export scaffolding for **both** learned components (Track B IMM mode classifier, Track A detector). The real GPU training runs (and the trained checkpoints that replace the random-weight stubs) are deferred — training is a non-CI goal (design Decision 7) and is gated on the full external dataset + GPU hardware. The end-to-end evaluation harness (Phase 9) has landed as well — `python/eval/run_tracker.py` over the Rust-native `eval-tracker` binary, with results in [`docs/eval/flight-data-training-pipeline.md`](docs/eval/flight-data-training-pipeline.md). What remains is trained checkpoints that meet the exit criteria: Track B (tasks 6.8/8.5) is blocked on authenticated OpenSky captures with turning traffic, and Track A (tasks 7.9/8.4) awaits the in-progress scene-normalization retrain. The checked-in `test-data/models/*.onnx` are **random-weight stubs** for shape contracts; see `test-data/models/MODEL_CARD.md`.
+> **Status (2026-09-22):** Acquisition clients, synthetic generation, and both training/export pipelines are implemented. The July experiments did not satisfy trained-model acceptance; no training run is currently implied. Further external-data work awaits confirmed access/use rights, and representative model acceptance plus documented distribution rights remain pending for both tracks. Synthetic-only correctness work includes the 13-feature elapsed-time IMM contract (Decision 30). Evaluation details and historical results are in [`docs/eval/flight-data-training-pipeline.md`](docs/eval/flight-data-training-pipeline.md). The checked-in models remain **random-weight stubs**; see `test-data/models/MODEL_CARD.md`.
 
 ## Python tree layout
 
@@ -25,7 +25,7 @@ Requires [`uv`](https://docs.astral.sh/uv/) (any recent version).
 
 ```sh
 cd python
-uv sync                          # install full env (training-side deps incl. torch)
+uv sync --extra training         # full training/export env including torch
 uv sync --no-default-groups --group dev   # lightweight dev tooling only (ruff, pyright, pytest)
 ```
 
@@ -142,7 +142,7 @@ Output layout: `<root>/airport=KSEA/source=adsbx/date=YYYY-MM-DD/trajectories.pa
 
 ## Synthetic dataset generation (Phase 4–5/7)
 
-Both learned components train on **synthetic perception driven by real truth**: a real ADS-B trajectory is the truth target, and `thresh-synth`'s radar simulator turns it into sensor returns (design Decision 3). ADS-B is consumed as system-level truth, **never** as a measurement. The Rust side generates the training Parquet (behind the `training-export` Cargo feature on the umbrella `thresh` crate):
+Both learned components train on **synthetic perception driven by truth trajectories**. The default commands below use wholly synthetic built-in trajectories, without provider access or data. Authorized real ADS-B trajectories can supply system-level truth, **never** direct measurements (design Decision 3). The Rust side generates the training Parquet (behind the `training-export` Cargo feature on the umbrella `thresh` crate):
 
 ```sh
 # Track B — IMM filter-state features paired with analytic mode labels:
@@ -158,7 +158,7 @@ The small checked-in samples under `test-data/training/` are produced by these b
 
 ## Track B — IMM mode classifier
 
-Predicts `(p_CV, p_CA, p_CTRV, p_coord_turn)` from a window of classical-tracker filter-state projections (12-dim: 6D common state + 6 covariance-diagonal). The classifier is loaded at runtime behind the `thresh-filter` `learned-imm` feature to override the analytic IMM mode update.
+Predicts `(p_CV, p_CA, p_CTRV, p_coord_turn)` from 13-dimensional projections: 6D common state, 6 covariance-diagonal entries, and elapsed seconds since the preceding recorded measurement update. History includes tentative post-birth updates but excludes birth initialization and prediction-only ticks. The first recorded update has elapsed time zero; missed measurements accumulate into the next update's interval. Sliding windows preserve each row's interval. Legacy 12-wide datasets/checkpoints must be regenerated/retrained, not assigned an assumed rate. The `learned-imm` feature overrides posterior mode probabilities, leaving analytic interaction/mixing unchanged.
 
 ```sh
 cd python
@@ -166,10 +166,10 @@ uv run --extra training python -m training.train_imm \
   --data ../test-data/training/imm-classifier/imm-samples.parquet \
   --out best_imm.pt --epochs 30
 uv run --extra training python -m export.export_imm \
-  --checkpoint best_imm.pt --out ../test-data/models/imm_mode_classifier.onnx
+  --checkpoint best_imm.pt --out ../data/imm_mode_classifier.onnx
 ```
 
-`train_imm.py` uses a fixed seed and a trajectory-grouped split; `export_imm.py` exports `(batch, 10, 12) → (batch, 4)` and verifies under onnxruntime. **Exit criterion (task 6.8):** held-out accuracy ≥ 0.70 and downstream MOTA no worse than analytic — until met, the stub stays in place and `learned-imm` ships off by default.
+`train_imm.py` uses a fixed seed and a trajectory-grouped split; `export_imm.py` exports `(batch, 10, 13) → (batch, 4)` and verifies under onnxruntime. Local candidates stay outside the tracked fixture path. **Exit criterion (task 6.8):** held-out accuracy ≥ 0.70, passing IMM tests, and downstream MOTA no worse than analytic, plus documented training/distribution rights. Until all gates pass, the stub stays and `learned-imm` ships off by default; an experimental label cannot waive a regression.
 
 ## Track A — detector
 
@@ -181,14 +181,34 @@ uv run --extra training python -m training.train_detector \
   --data ../test-data/training/detector/detector-samples.parquet \
   --out best_detector.pt --epochs 50
 uv run --extra training python -m export.export_detector \
-  --checkpoint best_detector.pt --out ../test-data/models/test_detector.onnx
+  --checkpoint best_detector.pt --out ../data/test_detector.onnx
 ```
 
-`train_detector.py` uses a DETR set-prediction loss (Hungarian matcher + L1 box + 3D-IoU + class CE + objectness). **Exit criterion (task 7.9):** mAP@0.5 ≥ 0.30 on a held-out region and a downstream MOTA improvement — until met, the random-weight stub stays in place.
+`train_detector.py` uses a DETR set-prediction loss (Hungarian matcher + L1 box + 3D-IoU + class CE + objectness). **Exit criterion (task 7.9, Decision 26):** micro distance-gated AP at {2.5, 5, 10} m strictly exceeds the classical baseline on the same held-out point clouds, matched-box class accuracy ≥ 0.50, and downstream MOTA beats the random stub. Documented training/distribution rights are also required; until then the random-weight stub stays.
 
 ## Evaluation (Phase 9)
 
-The end-to-end MOTA/MOTP/IDF1 A/B harness (`python/eval/run_tracker.py`, with `--learned-imm` / `--learned-detector` flags) has landed: it is a thin wrapper over the Rust-native `eval-tracker` binary (`thresh::eval_harness`), and baseline/A/B results live in [`docs/eval/flight-data-training-pipeline.md`](docs/eval/flight-data-training-pipeline.md). The full reproduction is `uv sync` → acquire → `gen-*-dataset` → `train_*` → `export_*` → `run_tracker.py`. What remains is checkpoints that meet the exit criteria: Track B (tasks 6.8/8.5) is blocked on authenticated OpenSky captures with turning traffic; Track A (tasks 7.9/8.4) awaits the in-progress scene-normalization retrain.
+The MOTA/MOTP/IDF1 evaluation wrapper (`python/eval/run_tracker.py`) drives the Rust-native `eval-tracker` binary (`thresh::eval_harness`); details and historical results live in [`docs/eval/flight-data-training-pipeline.md`](docs/eval/flight-data-training-pipeline.md). Offline reproduction uses synthetic `gen-*-dataset` output → `train_*` → `export_*` → `run_tracker.py`. External-data acquisition requires confirmed access/use rights. Representative trained-model acceptance and distribution-rights gates remain open for both tracks; passing synthetic contract tests does not close them.
+
+From `python/`, compare an authorized local detector candidate against the random
+stub on the **same materialized point clouds**:
+
+```sh
+uv run python -m eval.run_tracker --learned-detector \
+  --detector-model /path/to/candidate.onnx \
+  --detector-baseline-model ../test-data/models/test_detector.onnx
+```
+
+The wrapper enables the required Cargo features and resolves paths from the
+calling directory. Add `--learned-imm --imm-model /path/to/imm.onnx` for combined
+mode, or use those two options alone for learned-IMM evaluation. Legacy 12-wide
+IMM models must be regenerated/re-exported under Decision 30. Invalid or
+unavailable modes fail rather than reporting analytic fallback results.
+
+The default synthetic duration is 30 seconds; `--duration-seconds 1.5` is useful
+for bounded smoke checks, **not** representative acceptance. The fabricated
+`eval_single_detection.onnx` fixture exists only to exercise the combined CLI
+without many random tracks/model sessions; it is not a detector-quality baseline.
 
 ## License posture
 

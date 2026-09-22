@@ -31,7 +31,8 @@ bank in a `LearnedImmFilter` driven by that classifier.
 
 **WHEN** the constructor is given an invalid `ImmConfig`, a bank whose model
 count is not the 4 the classifier expects, or a path to an ONNX model that
-cannot be loaded
+cannot be loaded or does not match the elapsed-time-aware `(batch, 10, 13)`
+input contract defined by `flight-data-training-pipeline` Decision 30
 
 **THEN** it returns an error and does not construct a tracker.
 

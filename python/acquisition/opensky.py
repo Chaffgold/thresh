@@ -105,6 +105,27 @@ _STATE_COLUMNS = (
 _COL = {name: index for index, name in enumerate(_STATE_COLUMNS)}
 
 
+def _emitter_category(value: object) -> str | None:
+    """Map OpenSky's integer enumeration, not raw ADS-B category numbers.
+
+    The REST contract reserves both 0 and 1 for missing information, then
+    enumerates A1..A7 (2..8), B1..B7 (9..15), and C1..C5 (16..20).
+    Already-canonical strings remain supported for imported records.
+    """
+    if isinstance(value, str):
+        return value
+    # Do not coerce booleans or fractional values into aircraft categories.
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    if 2 <= value <= 8:
+        return f"A{value - 1}"
+    if 9 <= value <= 15:
+        return f"B{value - 8}"
+    if 16 <= value <= 20:
+        return f"C{value - 15}"
+    return None
+
+
 def state_row_to_record(row: list[Any], fetch_time_s: int) -> TrajectoryRecord | None:
     """Translate one OpenSky state-vector row to a canonical record.
 
@@ -125,22 +146,7 @@ def state_row_to_record(row: list[Any], fetch_time_s: int) -> TrajectoryRecord |
     callsign = callsign_raw.strip() if callsign_raw else None
 
     category_raw: Any = row[_COL["category"]] if len(row) > _COL["category"] else None
-    category: str | None
-    if category_raw is None or category_raw == 0:
-        category = None
-    elif isinstance(category_raw, str):
-        category = category_raw
-    else:
-        # Numeric category codes from the API map to A0..A7 / B0..B7 / C0..C3.
-        cat_int = int(category_raw)
-        if 1 <= cat_int <= 7:
-            category = f"A{cat_int}"
-        elif 8 <= cat_int <= 14:
-            category = f"B{cat_int - 7}"
-        elif 15 <= cat_int <= 18:
-            category = f"C{cat_int - 14}"
-        else:
-            category = None
+    category = _emitter_category(category_raw)
 
     return TrajectoryRecord(
         icao24=icao24.lower().strip(),

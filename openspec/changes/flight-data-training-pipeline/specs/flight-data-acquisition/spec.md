@@ -20,6 +20,18 @@ The acquisition layer MUST define a single canonical schema for flight trajector
 
 **SHALL** preserve original quality fields (`nic`, `nac_p`) when available and emit `null` when not.
 
+#### Scenario: Translating OpenSky numeric emitter categories
+
+**WHEN** an OpenSky state-vector record contains an integer category
+
+**THEN** categories `2..8` map to `A1..A7`, `9..15` to `B1..B7`, and
+`16..20` to `C1..C5` before applying the unchanged five-class taxonomy
+
+**SHALL** map missing, no-information (`0` or `1`), out-of-range, and malformed
+non-string values to a null category, never inferring an aircraft class by
+coercing a boolean or fractional value. Already-canonical string categories
+SHALL remain supported.
+
 #### Scenario: ADSBx readsb record translates to canonical schema
 
 **WHEN** an ADSBx v2 aircraft record is fetched containing `(hex, flight, lat, lon, alt_baro, alt_geom, gs, track, baro_rate, category, nic, nac_p)`

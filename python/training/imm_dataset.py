@@ -10,7 +10,7 @@ unit-tested in the default CI lane without the heavy ``training`` extras. The
 windows it returns are consumed by ``imm_model.py`` / ``train_imm.py``.
 
 Feature width and window length mirror the Rust constants
-``thresh_filter::imm::CLASSIFIER_FEATURE_DIM`` (12) and
+``thresh_filter::imm::CLASSIFIER_FEATURE_DIM`` (13) and
 ``thresh_filter::imm_adapter::WINDOW_LEN`` (10).
 """
 
@@ -22,8 +22,8 @@ from pathlib import Path
 import numpy as np
 import pyarrow.parquet as pq
 
-#: Filter-state feature width (state[6] + covariance-diagonal[6]).
-FEATURE_DIM = 12
+#: State[6] + covariance-diagonal[6] + elapsed_seconds since preceding update.
+FEATURE_DIM = 13
 #: Number of consecutive timesteps per classifier input window.
 WINDOW_LEN = 10
 #: Number of IMM modes: CV, CA, CTRV, coord_turn.
@@ -66,12 +66,31 @@ def _grouped_rows(path: Path | str) -> dict[tuple[int, int], list[tuple[float, l
         if len(feats) != FEATURE_DIM:
             raise ValueError(
                 f"feature width {len(feats)} != expected {FEATURE_DIM}; "
-                "regenerate the dataset (CLASSIFIER_FEATURE_DIM mismatch)"
+                "regenerate the dataset with elapsed_seconds (legacy schema is unsupported)"
             )
         groups.setdefault((int(traj), int(track)), []).append(
             (float(time_s), feats, int(label_index))
         )
     return groups
+
+
+def _validate_timing(rows: list[tuple[float, list[float], int]]) -> None:
+    """Decision 30: timestamps and stored observation intervals must agree.
+
+    Validate before windowing: the first *track* row is zero, not the first
+    row of every sliding window. Legacy coast-inclusive datasets need regeneration.
+    """
+    times = np.asarray([row[0] for row in rows], dtype=np.float64)
+    features = np.asarray([row[1] for row in rows], dtype=np.float64)
+    if not np.isfinite(times).all() or np.any(np.diff(times) < 0):
+        raise ValueError("track time_s must be finite and nondecreasing")
+    if not np.isfinite(features).all() or np.any(np.abs(features) > np.finfo(np.float32).max):
+        raise ValueError("features must be finite and representable as float32")
+    expected = np.concatenate(([0.0], np.diff(times)))
+    if np.any(features[:, -1] < 0) or not np.allclose(
+        features[:, -1], expected, rtol=1e-9, atol=1e-9
+    ):
+        raise ValueError("elapsed_seconds must start at zero and match consecutive time_s gaps")
 
 
 def build_windows(path: Path | str, window: int = WINDOW_LEN) -> ImmWindows:
@@ -82,12 +101,15 @@ def build_windows(path: Path | str, window: int = WINDOW_LEN) -> ImmWindows:
     than ``window`` contribute no windows. The label of a window is the mode
     label at its final timestep.
     """
+    if window < 1:
+        raise ValueError("window must be positive")
     groups = _grouped_rows(path)
     xs: list[list[list[float]]] = []
     ys: list[int] = []
     tids: list[int] = []
     for (traj, _track), rows in groups.items():
         rows.sort(key=lambda r: r[0])  # by time_s
+        _validate_timing(rows)
         feats = [r[1] for r in rows]
         labels = [r[2] for r in rows]
         for start in range(len(rows) - window + 1):
