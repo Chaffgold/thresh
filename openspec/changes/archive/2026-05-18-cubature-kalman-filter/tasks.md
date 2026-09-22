@@ -2,6 +2,12 @@
 
 > Single-PR change. Phases are sequential — each builds on the last; tests gate the next phase. Phase 5 may be skipped if `thresh-tracker` exposes no filter-kind selector.
 
+> **Checklist representation corrected (2026-09-20):** the five items already
+> documented below as descoped, skipped, or not applicable are historical
+> disposition notes, not completed implementation tasks. Their former `[~]`
+> markers were interpreted as unfinished work by OpenSpec. The decisions and
+> rationale are unchanged; no additional work is claimed complete.
+
 ## 1. Core implementation
 
 - [x] 1.1 Create `crates/thresh-filter/src/ckf.rs` modelled on `ukf.rs`. Module-level docstring citing Arasaratnam & Haykin 2009.
@@ -29,19 +35,19 @@
 > **Update:** delivered by the `imm-pluggable-leaf-filter` change — `LeafFilter` trait + `ImmLeafKind` selector (`ImmFilter::with_leaf_kind`), with `imm_ckf_leaf_matches_ekf_leaf` carrying the descoped 3.3 parity test.
 
 - [x] 3.1 Inspect `thresh-filter::imm` to find the `StateMapping` impl pattern used for UKF leaves. _Done — found the mismatch above; no UKF-leaf `StateMapping` exists._
-- [~] 3.2 Descoped to `imm-pluggable-leaf-filter`: no UKF `StateMapping` to copy; requires a leaf-filter trait refactor of `imm.rs`.
-- [~] 3.3 Descoped to `imm-pluggable-leaf-filter`: the IMM-leaf parity test moves with the refactor.
+- Historical item 3.2 — Descoped to `imm-pluggable-leaf-filter`: no UKF `StateMapping` to copy; requires a leaf-filter trait refactor of `imm.rs`.
+- Historical item 3.3 — Descoped to `imm-pluggable-leaf-filter`: the IMM-leaf parity test moves with the refactor.
 
 ## 4. Tracker-side filter-kind wiring (conditional)
 
 - [x] 4.1 Survey `thresh-tracker` for any filter-kind enum or selector. _Surveyed all of `crates/thresh-tracker/src` (grep `FilterKind`/`filter_kind`/`Kf`/`Ekf`/`Ukf`/`kalman`): **no filter-kind selector exists**. Per design Decision 4, Phase 4 is skipped — CKF is a `thresh-filter`-level offering only._
-- [~] 4.2 Skipped — no `FilterKind`-style enum exists (see 4.1).
-- [~] 4.3 Skipped — no tracker-level filter selector to drive (see 4.1).
+- Historical item 4.2 — Skipped: no `FilterKind`-style enum exists (see 4.1).
+- Historical item 4.3 — Skipped: no tracker-level filter selector to drive (see 4.1).
 
 ## 5. Documentation
 
 - [x] 5.1 Add a section to `crates/thresh-filter/README.md` (or create one) documenting CKF alongside UKF, with a one-paragraph "when to choose which" guide. _Created `crates/thresh-filter/README.md` (none existed): filter table, CKF-vs-UKF guidance, Arasaratnam–Haykin citation, IMM-leaf pointer._
-- [~] 5.2 N/A — conditional task. `docs/reference/` has no Kalman-filter notes file (only `benchmarks.md`, `profiling.md`, transformer references). No file to extend; not creating one to avoid scope creep beyond this change.
+- Historical item 5.2 — N/A: conditional task. `docs/reference/` has no Kalman-filter notes file (only `benchmarks.md`, `profiling.md`, transformer references). No file to extend; not creating one to avoid scope creep beyond this change.
 - [x] 5.3 Update `CLAUDE.md`'s `thresh-filter` line in the architecture diagram to mention CKF. _`(KF, EKF, UKF, CKF + motion models: …)`._
 
 ## 6. Wrap-up

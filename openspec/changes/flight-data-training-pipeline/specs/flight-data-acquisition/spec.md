@@ -1,6 +1,6 @@
-## Capability: Flight Data Acquisition
+# Capability: Flight Data Acquisition
 
-### Overview
+## Purpose
 
 A unified Python ingestion layer that pulls real flight-data trajectories from two providers — OpenSky Network (primary, historical) and ADS-B Exchange v2 (live, geographically scoped, edge cases) — into a single canonical Parquet/Arrow schema. The acquisition layer is the shared foundation for both Track A (learned detector) and Track B (learned tracker components). Data use and redistribution depend on the source's applicable terms and documented grants.
 

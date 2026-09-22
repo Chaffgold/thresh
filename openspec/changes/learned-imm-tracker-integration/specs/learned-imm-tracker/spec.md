@@ -1,6 +1,6 @@
-## Capability: Learned-IMM Tracker
+# Capability: Learned-IMM Tracker
 
-### Overview
+## Purpose
 
 A tracker-level entry point that drives the per-track IMM mode-probability
 update from a learned ONNX classifier instead of the analytic Markov update,

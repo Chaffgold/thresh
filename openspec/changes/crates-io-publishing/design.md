@@ -1,3 +1,5 @@
+# Design — crates.io Publishing (deferred)
+
 ## Context
 
 thresh is a Cargo workspace with 12 crates (thresh-core, thresh-filter, thresh-association, thresh-fusion, thresh-tracker, thresh-inference, thresh-bridge, thresh-synth, thresh-eval, thresh-data, thresh, thresh-py). Currently, the only way to use thresh is to clone the repository and depend on path-based crate references. Publishing to crates.io would enable standard Rust dependency management (`cargo add thresh-filter`) and automatic docs.rs hosting.

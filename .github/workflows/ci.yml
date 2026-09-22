@@ -75,6 +75,21 @@ jobs:
       - run: openspec validate --all --strict --no-interactive
         env:
           OPENSPEC_TELEMETRY: '0'
+      # --all does not include archived-task validation; keep this separate.
+      - run: openspec validate --archived --strict --no-interactive
+        env:
+          OPENSPEC_TELEMETRY: '0'
+      # Document validation alone does not reject missing schema metadata.
+      - name: Validate active change metadata
+        shell: bash
+        run: |
+          for change in openspec/changes/*; do
+            if [[ -d "$change" && "${change##*/}" != archive ]]; then
+              openspec status --change "${change##*/}"
+            fi
+          done
+        env:
+          OPENSPEC_TELEMETRY: '0'
 
   synth-benchmark-gate:
     # Runs every synthetic and ballistic benchmark scenario through

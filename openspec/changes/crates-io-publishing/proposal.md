@@ -1,8 +1,8 @@
 # crates.io Publishing Workflow
 
-> **Deferred (2026-07-03, not implemented):** archived with 0/26 tasks done and no spec deltas applied — thresh stays GitHub-org-internal for now. Revisit this change if/when crates.io publishing becomes a goal.
+> **Deferred — not implemented:** originally archived on 2026-07-03 with 0/26 tasks done and no spec deltas applied. Restored to the active backlog on 2026-09-20 because unfinished plans are not completed archives. All 26 tasks remain open; restoring the plan does not authorize publishing or start implementation. Revisit it only if crates.io publishing becomes a goal.
 
-## What
+## What Changes
 
 Polish crate metadata across all workspace members and add a cargo-release + GitHub Actions workflow for publishing all workspace crates to crates.io in correct dependency order. This includes completing Cargo.toml metadata (descriptions, license, repository, documentation URLs), verifying publish ordering, configuring cargo-release for workspace version management, and creating a CI workflow that automates the publish sequence.
 
@@ -27,7 +27,17 @@ thresh is currently only usable by cloning the repository. Publishing to crates.
 - Automatic changelog generation (manual for now)
 - Publishing Python wheels to PyPI (separate concern)
 
-## Affected crates
+## Capabilities
+
+### New Capabilities
+
+- `publishing-workflow`: crate metadata, ordered publication, release versioning, and publish dry-run checks.
+
+### Modified Capabilities
+
+None. This deferred change has not applied any capability deltas.
+
+## Impact
 
 - All workspace Cargo.toml files (metadata completion)
 - Workspace root Cargo.toml (workspace.package inheritance)

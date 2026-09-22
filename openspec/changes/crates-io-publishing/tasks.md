@@ -1,3 +1,8 @@
+# Tasks — crates.io Publishing (deferred)
+
+> Restored to the active backlog on 2026-09-20 with all 26 tasks still open.
+> This is a deferred plan, not authorization to publish or begin implementation.
+
 ## 1. Metadata Audit
 
 - [ ] 1.1 Check crates.io name availability for all 12 crate names: thresh-core, thresh-filter, thresh-association, thresh-fusion, thresh-tracker, thresh-inference, thresh-bridge, thresh-synth, thresh-eval, thresh-data, thresh, thresh-py.

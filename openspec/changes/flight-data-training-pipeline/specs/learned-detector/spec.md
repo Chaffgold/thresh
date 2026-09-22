@@ -1,6 +1,6 @@
-## Capability: Learned Point-Cloud Detector
+# Capability: Learned Point-Cloud Detector
 
-### Overview
+## Purpose
 
 A PyTorch-trained DETR-family detector that consumes 3D point clouds and emits oriented 3D bounding boxes, plus a per-detection class index and confidence score. Training data is produced by driving `thresh-synth`'s radar simulator with real ADS-B trajectories from the acquisition layer. The trained model is exported to ONNX and replaces the random-weights stub at `test-data/models/test_detector.onnx`.
 
@@ -93,9 +93,11 @@ The detector's class index output MUST map to the canonical five-bucket class en
 
 The trained detector ONNX checkpoint MUST replace `test-data/models/test_detector.onnx` only when the held-out evaluation meets all of the following:
 
-- mAP at IoU 0.5 (3D) ≥ 0.30 on a geographic-holdout region.
-- Per-detection class accuracy ≥ 0.50.
+- Micro-averaged centre-distance AP, pooling all classes and averaging over gates `{0.5σ, 1σ, 2σ}` where `σ = return_position_noise_m` (`{2.5, 5, 10}` m at `σ = 5` m), strictly greater than the classical DBSCAN-centroid baseline evaluated on the same point clouds in a geographic-holdout region.
+- Per-detection class accuracy ≥ 0.50 on matched boxes.
 - Downstream tracker MOTA strictly better than the current random-stub baseline on `thresh-eval`'s ADS-B scenario.
+
+The distance-AP comparison MUST use deployment-postprocessed outputs (confidence ≥ 0.5 and class-agnostic NMS at IoU 0.4). IoU-based mAP, per-class AP, and the oracle ceiling from GT-segmented return centroids SHALL be reported as diagnostics, not substituted for the micro distance-AP gate, as defined in design.md Decision 26.
 
 Distribution MUST also satisfy the documented rights requirement in `LICENSING.md`.
 
@@ -116,7 +118,7 @@ Distribution MUST also satisfy the documented rights requirement in `LICENSING.m
 
 #### Scenario: Failure to meet exit criteria
 
-**WHEN** a developer runs the evaluation harness and any exit-criterion metric falls below threshold
+**WHEN** a developer runs the evaluation harness and any exit criterion is not met
 
 **THEN** the random-stub model remains in place, the failed metrics are documented in `design.md`, and either (a) the developer iterates on training configuration and re-runs, or (b) Track A is documented as abandoned in `design.md`'s Open Questions section without blocking Track B
 

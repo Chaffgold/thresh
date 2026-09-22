@@ -1,6 +1,6 @@
-## Capability: crates.io Publishing Workflow
+# Capability: crates.io Publishing Workflow
 
-### Overview
+## Purpose
 
 A fully automated workflow for publishing all thresh workspace crates to crates.io in correct dependency order, with metadata validation, dry-run verification, and CI integration.
 

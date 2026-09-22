@@ -1,2 +1,3 @@
 type: change
 name: flight-data-training-pipeline
+schema: spec-driven
