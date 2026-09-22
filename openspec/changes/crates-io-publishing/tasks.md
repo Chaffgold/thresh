@@ -5,7 +5,7 @@
 
 ## 1. Metadata Audit
 
-- [ ] 1.1 Check crates.io name availability for all 12 crate names: thresh-core, thresh-filter, thresh-association, thresh-fusion, thresh-tracker, thresh-inference, thresh-bridge, thresh-synth, thresh-eval, thresh-data, thresh, thresh-py.
+- [ ] 1.1 Check crates.io name availability for candidate crates: thresh-core, thresh-filter, thresh-association, thresh-fusion, thresh-tracker, thresh-inference, thresh-bridge, thresh-synth, thresh-eval, thresh-data, thresh. Exclude thresh-py; thresh-bridge eligibility remains subject to task 3.3.
 - [ ] 1.2 Verify current `[package]` metadata completeness for each crate: identify missing fields (description, license, repository, documentation, readme, keywords, categories).
 - [ ] 1.3 Draft unique `description` strings for each crate (concise, under 200 chars, explains the crate's purpose).
 - [ ] 1.4 Select appropriate `keywords` (max 5 per crate) and `categories` from the crates.io taxonomy for each crate.

@@ -60,7 +60,8 @@ Each crate specifies only: `description` (unique per crate), `keywords` (crate-s
 9. thresh-bridge
 10. thresh-data
 11. thresh (umbrella)
-12. thresh-py
+
+`thresh-py` is excluded from crates.io (`publish = false`); its maturin/PyPI distribution is out of scope. This is the candidate order for eligible crates, not an authorization to publish. Resolve `thresh-bridge` eligibility (task 3.3) before implementing the sequence.
 
 **Rationale:** Each crate must be available on the crates.io index before crates that depend on it are published. This order satisfies all `[dependencies]` constraints.
 
@@ -113,7 +114,7 @@ publish = false  # requires PyO3, not suitable for crates.io default build
 
 ## Risks / Trade-offs
 
-**[Risk] Name squatting.** The `thresh-*` namespace may already be taken on crates.io. Mitigation: check name availability for all 12 crate names before starting the metadata work.
+**[Risk] Name squatting.** The `thresh-*` namespace may already be taken on crates.io. Mitigation: check name availability for eligible candidate crates, excluding `thresh-py`, if publishing work is authorized.
 
 **[Risk] Partial publish failure.** If crate N fails to publish, crates 1 through N-1 are already published and cannot be unpublished (only yanked). Mitigation: the dry-run pass catches most issues. If a partial publish does occur, yank the incomplete set and retry after fixing the issue.
 
