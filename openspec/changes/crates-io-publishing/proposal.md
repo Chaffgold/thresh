@@ -4,7 +4,7 @@
 
 ## What Changes
 
-Polish crate metadata across all workspace members and add a cargo-release + GitHub Actions workflow for publishing all workspace crates to crates.io in correct dependency order. This includes completing Cargo.toml metadata (descriptions, license, repository, documentation URLs), verifying publish ordering, configuring cargo-release for workspace version management, and creating a CI workflow that automates the publish sequence.
+Polish crate metadata across all workspace members and add a cargo-release + GitHub Actions workflow for publishing eligible workspace crates to crates.io in correct dependency order. `thresh-py` remains excluded (`publish = false`), with maturin/PyPI distribution handled separately. This includes completing Cargo.toml metadata (descriptions, license, repository, documentation URLs), verifying publish ordering, configuring cargo-release for workspace version management, and creating a CI workflow that automates the publish sequence.
 
 ## Why
 
