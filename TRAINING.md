@@ -190,6 +190,26 @@ uv run --extra training python -m export.export_detector \
 
 The MOTA/MOTP/IDF1 evaluation wrapper (`python/eval/run_tracker.py`) drives the Rust-native `eval-tracker` binary (`thresh::eval_harness`); details and historical results live in [`docs/eval/flight-data-training-pipeline.md`](docs/eval/flight-data-training-pipeline.md). Offline reproduction uses synthetic `gen-*-dataset` output → `train_*` → `export_*` → `run_tracker.py`. External-data acquisition requires confirmed access/use rights. Representative trained-model acceptance and distribution-rights gates remain open for both tracks; passing synthetic contract tests does not close them.
 
+From `python/`, compare an authorized local detector candidate against the random
+stub on the **same materialized point clouds**:
+
+```sh
+uv run python -m eval.run_tracker --learned-detector \
+  --detector-model /path/to/candidate.onnx \
+  --detector-baseline-model ../test-data/models/test_detector.onnx
+```
+
+The wrapper enables the required Cargo features and resolves paths from the
+calling directory. Add `--learned-imm --imm-model /path/to/imm.onnx` for combined
+mode, or use those two options alone for learned-IMM evaluation. Legacy 12-wide
+IMM models must be regenerated/re-exported under Decision 30. Invalid or
+unavailable modes fail rather than reporting analytic fallback results.
+
+The default synthetic duration is 30 seconds; `--duration-seconds 1.5` is useful
+for bounded smoke checks, **not** representative acceptance. The fabricated
+`eval_single_detection.onnx` fixture exists only to exercise the combined CLI
+without many random tracks/model sessions; it is not a detector-quality baseline.
+
 ## License posture
 
 OpenSky API access and attribution do not establish permission to redistribute data. Verify and document the applicable dataset license or written authorization before sharing captures or derived datasets. The earlier API fixture is replaced with a wholly synthetic sample; no redistribution permission is known for the historical capture. ADS-B Exchange data is **not** redistributed; an acquisition script is provided and reproduction requires a developer-supplied ADSBx API key. See [`LICENSING.md`](LICENSING.md) for the full attribution and redistribution posture.

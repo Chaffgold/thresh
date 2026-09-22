@@ -1,6 +1,6 @@
 # Design — Flight Data Training Pipeline
 
-## Current status (2026-09-20)
+## Current status (2026-09-22)
 
 The decisions and experiment logs below retain their historical context.
 Current implementation and acceptance status is tracked in `tasks.md`:
@@ -8,18 +8,20 @@ Current implementation and acceptance status is tracked in `tasks.md`:
 - The Rust tracker-level learned-IMM path is implemented by
   `learned-imm-tracker-integration`; its representative trained-model A/B is
   still pending.
-- Detector-to-tracker evaluation and Python model/feature forwarding are not
-  complete. Task 9.3 is reopened rather than treating accepted flags as a
-  working learned-detector comparison.
+- Detector-to-tracker evaluation and Python model/feature forwarding are
+  implemented and synthetically verified (tasks 9.3 and 12.2). Detector
+  comparisons reuse materialized point clouds and independent trajectory truth;
+  unavailable modes fail explicitly. Short CLI smoke runs do not satisfy
+  representative trained-model acceptance.
 - Detector acceptance uses Decision 26's baseline-relative distance-AP gate,
   not Decision 11's superseded IoU threshold. Both learned tracks still have
   unmet acceptance criteria; incremental PRs do not complete task 11.5.
 - Decision 29 makes the IMM no-regression release gate strict: an experimental
   label or disabled-by-default feature does not permit a failing trained
   checkpoint to replace the stub or be published.
-- The maintainer approved synthetic-only follow-ups for category translation,
-  detector evaluation, and elapsed-time-aware IMM inputs. Section 12 tracks
-  their progress. Decision 30's shared 13-dimensional IMM input is implemented
+- The approved synthetic-only follow-ups for category translation, detector
+  evaluation, and elapsed-time-aware IMM inputs are implemented in Section 12.
+  Decision 30's shared 13-dimensional IMM input is implemented
   and verified with synthetic rate/gap tests and Python/ONNX/Rust parity;
   this does not satisfy the trained-model acceptance gates.
 - CI uses mocked responses and wholly synthetic fixtures under Decision 28.
