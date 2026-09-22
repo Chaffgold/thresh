@@ -20,6 +20,10 @@
 //! (the ONNX mode classifier, with analytic fallback) so the two can be
 //! compared on identical inputs. A *representative* comparison still needs a
 //! trained checkpoint (the committed model is a random-weight stub).
+//! [`DetectorEvalSequence`] and [`run_detector_eval`] evaluate detector outputs
+//! against independent truth, reusing identical point clouds across detector
+//! candidates. The analytic radar-measurement path is a distinct sensor input,
+//! not a same-observation detector baseline.
 
 use nalgebra::DVector;
 use rand::SeedableRng;
@@ -31,8 +35,10 @@ use thresh_core::track::TrackState;
 use thresh_eval::matching::FrameData;
 use thresh_eval::metrics::{compute_idf1, compute_mot_metrics};
 use thresh_filter::imm::ImmConfig;
+use thresh_inference::detection::{DetectionPipeline, SensorInput};
 use thresh_synth::radar_trajectory::{
-    TargetTrack, TrajectoryRadarConfig, TrajectoryRadarError, measurements_from_trajectory,
+    POINT_DIM, TargetTrack, TrajectoryRadarConfig, TrajectoryRadarError, from_trajectory,
+    measurements_from_trajectory,
 };
 use thresh_synth::trajectory::Waypoint;
 use thresh_tracker::tracker::MultiObjectTracker;
@@ -59,6 +65,114 @@ pub struct EvalReport {
 /// Default matching gate (m). Synth radar noise (~10 m range, ~1 mrad angular)
 /// plus tracker convergence error sits comfortably under this.
 pub const DEFAULT_DISTANCE_THRESHOLD_M: f64 = 50.0;
+
+/// Materialized observations and independent truth for detector comparisons.
+///
+/// Generate this once, then pass the same sequence to every detector under
+/// comparison. Only point clouds (never GT boxes/classes) reach the detector.
+pub struct DetectorEvalSequence {
+    inputs: Vec<SensorInput>,
+    truth: Vec<Vec<(u64, [f64; 3])>>,
+    dt: f64,
+}
+
+impl DetectorEvalSequence {
+    /// Synthesize sensor-frame point clouds; derive stable-ID truth directly
+    /// from the trajectories, including targets missed by the sensor.
+    pub fn from_trajectories(
+        targets: &[TargetTrack],
+        config: &TrajectoryRadarConfig,
+        seed: u64,
+    ) -> Result<Self, TrajectoryRadarError> {
+        let snapshots = from_trajectory(targets, config, &mut StdRng::seed_from_u64(seed))?;
+        let mut inputs = Vec::with_capacity(snapshots.len());
+        let mut truth = Vec::with_capacity(snapshots.len());
+        for snapshot in snapshots {
+            let points = snapshot.point_cloud.chunks_exact(POINT_DIM);
+            inputs.push(SensorInput {
+                points: points
+                    .clone()
+                    .map(|p| [p[0] as f64, p[1] as f64, p[2] as f64])
+                    .collect(),
+                intensities: Some(points.map(|p| p[3] as f64).collect()),
+                timestamp: snapshot.time_s,
+            });
+            truth.push(ground_truth(targets, config, snapshot.time_s));
+        }
+        Ok(Self {
+            inputs,
+            truth,
+            dt: 1.0 / config.sample_rate_hz,
+        })
+    }
+}
+
+/// Run a detector and a fresh position tracker on a shared observation sequence.
+///
+/// The caller may supply either an analytic or learned-IMM tracker. Supplying a
+/// fresh tracker for each run prevents history leaking between comparisons.
+pub fn run_detector_eval(
+    sequence: &DetectorEvalSequence,
+    detector: &dyn DetectionPipeline,
+    mut tracker: MultiObjectTracker,
+    distance_threshold_m: f64,
+) -> EvalReport {
+    let frames: Vec<_> = sequence
+        .inputs
+        .iter()
+        .zip(&sequence.truth)
+        .map(|(input, gt)| {
+            let detections = detector.detect(input);
+            tracker.step_detections(&detections, sequence.dt);
+            FrameData {
+                gt: gt.clone(),
+                tracks: confirmed_positions(&tracker),
+            }
+        })
+        .collect();
+    report_from_frames(&frames, distance_threshold_m)
+}
+
+fn ground_truth(
+    targets: &[TargetTrack],
+    config: &TrajectoryRadarConfig,
+    time: f64,
+) -> Vec<(u64, [f64; 3])> {
+    targets
+        .iter()
+        .enumerate()
+        .filter_map(|(id, target)| {
+            gt_position_at(
+                target,
+                time,
+                config.sensor.position_enu_m,
+                config.max_range_m,
+            )
+            .map(|position| (id as u64, position))
+        })
+        .collect()
+}
+
+fn confirmed_positions(tracker: &MultiObjectTracker) -> Vec<(u64, [f64; 3])> {
+    tracker
+        .tracks
+        .iter()
+        .filter(|track| track.lifecycle == TrackState::Confirmed)
+        .map(|track| (track.id.0, [track.state[0], track.state[2], track.state[4]]))
+        .collect()
+}
+
+fn report_from_frames(frames: &[FrameData], distance_threshold_m: f64) -> EvalReport {
+    let (mota, motp, id_switches) = compute_mot_metrics(frames, distance_threshold_m);
+    EvalReport {
+        mota,
+        motp,
+        idf1: compute_idf1(frames, distance_threshold_m),
+        id_switches,
+        frames: frames.len(),
+        distance_threshold_m,
+    }
+}
 
 /// Convert a sensor-frame radar measurement `(range, az, el)` into a Cartesian
 /// `[x, y, z]` detection (the tracker's position-only input).
@@ -169,7 +283,6 @@ fn run_eval_with_tracker(
         .filter_map(|t| t.waypoints.first())
         .map(|w| w.time)
         .fold(f64::INFINITY, f64::min);
-    let sensor = config.sensor.position_enu_m;
 
     let mut frames = Vec::with_capacity(per_tick.len());
     for (i, tick) in per_tick.iter().enumerate() {
@@ -177,37 +290,19 @@ fn run_eval_with_tracker(
         tracker.step(&detections, dt);
         let t = t_start + i as f64 * dt;
 
-        let gt: Vec<(u64, [f64; 3])> = targets
-            .iter()
-            .enumerate()
-            .filter_map(|(tid, target)| {
-                gt_position_at(target, t, sensor, config.max_range_m).map(|p| (tid as u64, p))
-            })
-            .collect();
-        let tracks: Vec<(u64, [f64; 3])> = tracker
-            .tracks
-            .iter()
-            .filter(|tr| tr.lifecycle == TrackState::Confirmed)
-            .map(|tr| (tr.id.0, [tr.state[0], tr.state[2], tr.state[4]]))
-            .collect();
+        let gt = ground_truth(targets, config, t);
+        let tracks = confirmed_positions(&tracker);
         frames.push(FrameData { gt, tracks });
     }
 
-    let (mota, motp, id_switches) = compute_mot_metrics(&frames, distance_threshold_m);
-    let idf1 = compute_idf1(&frames, distance_threshold_m);
-    Ok(EvalReport {
-        mota,
-        motp,
-        idf1,
-        id_switches,
-        frames: frames.len(),
-        distance_threshold_m,
-    })
+    Ok(report_from_frames(&frames, distance_threshold_m))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use thresh_core::detection::Detection3D;
     use thresh_synth::trajectory::{Segment, SegmentType, Trajectory};
 
     fn cv_target(pos: [f64; 3], vel: [f64; 3]) -> TargetTrack {
@@ -234,6 +329,135 @@ mod tests {
             sample_rate_hz: 10.0,
             ..TrajectoryRadarConfig::default()
         }
+    }
+
+    struct RecordingDetector {
+        detections: Vec<Detection3D>,
+        seen: RefCell<Vec<SensorInput>>,
+    }
+
+    impl DetectionPipeline for RecordingDetector {
+        fn detect(&self, input: &SensorInput) -> Vec<Detection3D> {
+            self.seen.borrow_mut().push(input.clone());
+            self.detections.clone()
+        }
+
+        fn name(&self) -> &str {
+            "recording"
+        }
+    }
+
+    fn test_tracker() -> MultiObjectTracker {
+        let params = ImmTrainingParams::default();
+        MultiObjectTracker::new_imm_position(
+            move || {
+                ImmConfig::cv_ca_ctrv_ct(
+                    params.sigma_a,
+                    params.sigma_j,
+                    params.sigma_v,
+                    params.sigma_omega,
+                )
+            },
+            params.measurement_noise_sigma,
+            params.gate_threshold,
+        )
+    }
+
+    #[test]
+    fn detector_outputs_drive_metrics_on_identical_observations() {
+        let config = config_10hz();
+        let target = cv_target([5_000.0, 0.0, 1_000.0], [0.0; 3]);
+        let sequence = DetectorEvalSequence::from_trajectories(&[target], &config, 42).unwrap();
+        let perfect = RecordingDetector {
+            detections: vec![Detection3D {
+                position: [5_000.0, 0.0, 1_000.0],
+                dimensions: [10.0; 3],
+                yaw: 0.0,
+                class_id: 1,
+                confidence: 1.0,
+            }],
+            seen: RefCell::default(),
+        };
+        let empty = RecordingDetector {
+            detections: vec![],
+            seen: RefCell::default(),
+        };
+        let good = run_detector_eval(
+            &sequence,
+            &perfect,
+            test_tracker(),
+            DEFAULT_DISTANCE_THRESHOLD_M,
+        );
+        let bad = run_detector_eval(
+            &sequence,
+            &empty,
+            test_tracker(),
+            DEFAULT_DISTANCE_THRESHOLD_M,
+        );
+        assert!(good.mota > 0.95, "perfect detector MOTA: {}", good.mota);
+        assert_eq!(bad.mota, 0.0, "empty detector must miss trajectory truth");
+        assert!(good.mota > bad.mota);
+        assert_eq!(good.frames, sequence.inputs.len());
+        assert_eq!(perfect.seen.borrow().len(), good.frames);
+        assert_eq!(empty.seen.borrow().len(), bad.frames);
+        for (a, b) in perfect.seen.borrow().iter().zip(empty.seen.borrow().iter()) {
+            assert_eq!(a.points, b.points);
+            assert_eq!(a.intensities, b.intensities);
+            assert_eq!(a.timestamp, b.timestamp);
+            assert_eq!(a.points.len(), 1000);
+        }
+    }
+
+    #[test]
+    fn detector_truth_keeps_identity_across_target_arrival_and_sensor_offset() {
+        let config = TrajectoryRadarConfig {
+            sensor: thresh_synth::radar_trajectory::SensorPose {
+                position_enu_m: [100.0, 200.0, 300.0],
+            },
+            ..config_10hz()
+        };
+        let first = cv_target([1_000.0, 2_000.0, 3_000.0], [0.0; 3]);
+        let mut later = cv_target([5_000.0, 6_000.0, 7_000.0], [0.0; 3]);
+        for waypoint in &mut later.waypoints {
+            waypoint.time += 1.0;
+        }
+        let sequence =
+            DetectorEvalSequence::from_trajectories(&[first, later], &config, 7).unwrap();
+        assert_eq!(sequence.truth[0], vec![(0, [900.0, 1_800.0, 2_700.0])]);
+        assert_eq!(
+            sequence.truth[10],
+            vec![
+                (0, [900.0, 1_800.0, 2_700.0]),
+                (1, [4_900.0, 5_800.0, 6_700.0])
+            ]
+        );
+        assert_eq!(
+            sequence.truth.last().unwrap(),
+            &vec![(1, [4_900.0, 5_800.0, 6_700.0])]
+        );
+    }
+
+    #[test]
+    fn detector_truth_includes_targets_with_no_sensor_returns() {
+        let mut config = config_10hz();
+        config.radar.p_detection = 0.0;
+        config.radar.radar_equation = None;
+        let target = cv_target([5_000.0, 0.0, 1_000.0], [0.0; 3]);
+        let sequence = DetectorEvalSequence::from_trajectories(&[target], &config, 42).unwrap();
+        assert!(
+            sequence
+                .truth
+                .iter()
+                .all(|gt| gt == &vec![(0, [5_000.0, 0.0, 1_000.0])])
+        );
+        assert!(sequence.inputs.iter().all(|input| {
+            input
+                .intensities
+                .as_ref()
+                .unwrap()
+                .iter()
+                .all(|&intensity| intensity <= config.clutter_intensity_max as f64)
+        }));
     }
 
     #[test]

@@ -44,21 +44,70 @@ tracking a maneuver.
 
 | Track | Criterion | Status |
 |---|---|---|
-| **B** (IMM mode classifier) | held-out accuracy ≥ 0.70; MOTA no worse than analytic (task 6.8) | **Pending** — needs a trained classifier + tracker-level learned-IMM integration (see below) |
-| **A** (detector) | mAP@0.5 ≥ 0.30; downstream MOTA improvement (task 7.9) | **Pending** — needs a trained detector |
+| **B** (IMM mode classifier) | held-out accuracy ≥ 0.70; passing IMM tests; MOTA no worse than analytic (task 6.8) | **Unmet** — historical maneuvering runs regressed; runtime integration is available |
+| **A** (detector) | micro distance-AP strictly above the classical same-point-cloud baseline; matched class accuracy ≥ 0.50; MOTA strictly above the random detector stub (task 7.9, Decision 26) | **Unmet** — historical learned distance-AP was below classical; detector-to-tracker evaluation is now available |
 
-## Learned vs. analytic A/B — what's blocking it
+Both tracks additionally require documented training and model-distribution
+rights. These synthetic implementation checks do not satisfy representative
+trained-model acceptance, and the checked-in models remain random-weight stubs.
 
-`run_tracker.py` / `eval-tracker` accept `--learned-imm` / `--learned-detector`,
-but the A/B comparison is not yet runnable, for two independent reasons:
+## Learned-mode evaluation (2026-09-22)
 
-1. **No tracker-level learned path.** Phase 6 added `LearnedImmFilter` as a
-   *filter-level* wrapper; `MultiObjectTracker` has no learned-IMM constructor,
-   so the eval's tracker can't yet swap in the learned classifier. Adding a
-   `MultiObjectTracker::new_imm_position_learned(...)` is the missing piece.
-2. **No trained checkpoints.** The committed models are random-weight stubs;
-   real training (tasks 6.8 / 7.5 / 7.9) is deferred (non-CI, GPU-gated — design
-   Decision 7). Until then the flags fall back to the analytic baseline.
+The IMM path accepts `--learned-imm --imm-model PATH` (`--model` remains an
+IMM-only alias). The detector path accepts `--learned-detector --detector-model
+PATH`; it runs `from_trajectory` point clouds through `OnnxDetector::detect`
+and feeds its output into `MultiObjectTracker::step_detections`. The two modes
+can be combined with separate model paths. Missing features, missing model
+arguments, and nonexistent/unloadable models fail instead of reporting an
+analytic fallback, including in JSON mode.
 
-When both land, this report gains an analytic-vs-learned column per scenario and
-the exit-criteria rows are filled in.
+`--duration-seconds` accepts a positive finite duration (default 30 seconds)
+and preserves the maneuvering scenario's 1:2 cruise/turn phase ratio. CI uses
+1.5-second sequences as bounded smoke checks only, not acceptance evidence.
+
+From the repository root:
+
+```sh
+# Learned IMM using the committed random stub (integration smoke only):
+cargo run -p thresh --features learned-imm --bin eval-tracker -- \
+  --json --learned-imm --imm-model test-data/models/imm_mode_classifier.onnx
+
+# Candidate versus current random detector, sharing exact point clouds:
+cargo run -p thresh --features onnx --bin eval-tracker -- \
+  --json --learned-detector --detector-model /path/to/candidate.onnx \
+  --detector-baseline-model test-data/models/test_detector.onnx
+
+# Python selects Cargo features automatically; paths are caller-relative:
+cd python
+uv run python -m eval.run_tracker \
+  --learned-detector --detector-model ../test-data/models/test_detector.onnx \
+  --learned-imm --imm-model ../test-data/models/imm_mode_classifier.onnx
+```
+
+`--detector-baseline-model` materializes one immutable
+`DetectorEvalSequence` per scenario and reuses it for both detector runs.
+Each run starts a fresh tracker. The generic `run_detector_eval` API accepts
+any `DetectionPipeline`, allowing alternative detectors to use the same
+observations without exposing truth to inference. Truth comes from the
+original trajectories, not snapshot GT-box slots; sensor misses remain false
+negatives and target IDs remain stable as targets enter/leave.
+
+JSON includes `pipeline`, distinguishing `radar-measurements/analytic-imm`,
+`radar-measurements/learned-imm`, `detector-candidate/analytic-imm`, and
+`detector-baseline/analytic-imm` (or `/learned-imm` in combined mode).
+The radar-measurement baseline above is **not** a same-input detector baseline:
+radar plots and point clouds are different observations. Compare detector
+models using the shared sequence, not against those historic radar numbers.
+The Python distance-AP bracket continues to handle the classical DBSCAN
+comparison; this tracker harness does not assert that distance-AP gate passed.
+
+Regression coverage includes valid-position versus empty detectors (MOTA
+above 0.95 versus 0), detector invocation on every frame, byte-equivalent
+materialized observations, independent truth despite sensor misses,
+sensor-offset/arrival identity, explicit CLI rejection paths, and exact Python
+model/feature forwarding. The ONNX CI job also executes the real committed
+detector stub and same-model candidate/baseline parity. Combined learned-mode
+smoke uses `eval_single_detection.onnx`: a wholly synthetic constant-output
+fixture generated by `scripts/generate_eval_detector_fixture.py`, avoiding
+dozens of random tracks and their per-track classifier sessions. This fixture
+contains no training or external data and must never be an accuracy baseline.
