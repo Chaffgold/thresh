@@ -261,6 +261,13 @@ If the third bullet fails, retain the random stub and do not commit or publish t
 
 **Rationale:** The literal spec ("via `thresh-py`") is infeasible now: `thresh-py`'s `PyMultiObjectTracker` is CV-only (no IMM, no learned path), the Python synth-measurement binding was deferred (task 4.6), and the `thresh-py` extension does not build in the development environment. A Rust-native engine sidesteps all three, produces **real** baseline numbers (the analytic tracker works), is verifiable in CI and locally, and shares the synth/tracker/eval crates the rest of the change uses. The learned-vs-analytic A/B (task 9.3) is deferred behind two gaps it surfaces: `MultiObjectTracker` needs a learned-IMM constructor (Phase 6's `LearnedImmFilter` is filter-level only), and trained checkpoints are gated on the real GPU runs (Decision 7). The `--learned-*` flags exist and fall back to the analytic baseline until then.
 
+**Current contract (supersedes the historical fallback above):** Tasks 9.3 and
+12.2 require explicitly requested learned modes to invoke the selected learned
+pipeline. Missing feature support or an unusable model must produce an explicit
+error, including in JSON mode, rather than silently evaluating the analytic
+baseline. This does not change the per-track warm-up/inference-error fallback
+of an already constructed `LearnedImmFilter` in Decision 19.
+
 ### 25. ONNX parity via an `onnx-infer` binary + JSON, on the IMM classifier
 
 **Decision:** The cross-language ONNX parity check (task 8.3) compares the **Python** runtime (`onnxruntime`) and the **Rust** runtime (`thresh-inference`/`ort`) on the IMM classifier (`(1,10,12)→(1,4)`), using a deterministic `sin(i*0.1)` fixture. Rust runs via a feature-gated `onnx-infer` binary (`thresh --features onnx`) that prints the output as JSON; `python/eval/onnx_parity.py` runs the same fixture under `onnxruntime` and asserts agreement within 1e-5. It runs in the `onnx-tests` CI job.
