@@ -2,7 +2,7 @@
 
 Loads a checkpoint, wraps it with a softmax head (so the deployed graph emits a
 probability distribution), and ``torch.onnx.export``s it with input
-``(batch, WINDOW_LEN, FEATURE_DIM)`` = ``(batch, 10, 12)`` and output
+``(batch, WINDOW_LEN, FEATURE_DIM)`` = ``(batch, 10, 13)`` and output
 ``(batch, NUM_MODES)`` = ``(batch, 4)``. Then runs the exported model under
 onnxruntime on a fixture batch and asserts the outputs are valid probabilities
 (each row sums to 1).
@@ -29,6 +29,12 @@ from training.imm_model import ImmModeClassifier, SoftmaxClassifier
 def export(checkpoint: Path, out_path: Path, *, opset: int = 17) -> None:
     """Export ``checkpoint`` to ONNX at ``out_path`` with a softmax head."""
     ckpt = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    width = ckpt["state_dict"]["gru.weight_ih_l0"].shape[1]
+    if width != FEATURE_DIM:
+        raise ValueError(
+            f"classifier feature width {width} != {FEATURE_DIM}; "
+            "retrain legacy checkpoints with elapsed_seconds before exporting"
+        )
     core = ImmModeClassifier(hidden_dim=int(ckpt.get("hidden_dim", 64)))
     core.load_state_dict(ckpt["state_dict"])
     core.eval()
@@ -52,14 +58,21 @@ def export(checkpoint: Path, out_path: Path, *, opset: int = 17) -> None:
         dynamo=False,
     )
     print(f"exported ONNX → {out_path}")
+    verify(out_path, reference_model=model)
 
 
-def verify(onnx_path: Path, *, batch: int = 3) -> None:
+def verify(
+    onnx_path: Path, *, batch: int = 3, reference_model: SoftmaxClassifier | None = None
+) -> None:
     """Run the exported model under onnxruntime and assert valid probabilities."""
     import onnxruntime as ort  # local import: only needed at verification time
 
     rng = np.random.default_rng(0)
     fixture = rng.standard_normal((batch, WINDOW_LEN, FEATURE_DIM)).astype(np.float32)
+    # Mix 1 Hz, 10 Hz, and a three-tick missed-observation interval.
+    intervals = np.resize(np.array([1.0, 0.1, 0.3], dtype=np.float32), batch)
+    fixture[:, :, -1] = intervals[:, None]
+    fixture[:, 0, -1] = 0.0
     sess = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
     (out,) = sess.run(None, {"features": fixture})
 
@@ -67,6 +80,11 @@ def verify(onnx_path: Path, *, batch: int = 3) -> None:
     row_sums = out.sum(axis=1)
     assert np.allclose(row_sums, 1.0, atol=1e-5), f"rows must sum to 1, got {row_sums}"
     assert (out >= 0.0).all() and (out <= 1.0).all(), "probabilities must be in [0, 1]"
+    if reference_model is not None:
+        with torch.no_grad():
+            expected = reference_model(torch.from_numpy(fixture)).numpy()
+        max_diff = float(np.max(np.abs(out - expected)))
+        assert max_diff <= 1e-5, f"PyTorch/ONNX timing parity failed: max diff {max_diff}"
     print(f"verified {onnx_path}: output {out.shape}, rows sum to 1.0 (±1e-5)")
 
 

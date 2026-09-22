@@ -35,7 +35,10 @@ def _separable_windows() -> ImmWindows:
         base = 0.0 if label == 0 else 5.0
         for _ in range(8):
             noise = rng.standard_normal((WINDOW_LEN, FEATURE_DIM)) * 0.1
-            xs.append((noise + base).astype(np.float32))
+            features = (noise + base).astype(np.float32)
+            features[:, -1] = 0.1
+            features[0, -1] = 0.0
+            xs.append(features)
             ys.append(label)
             tids.append(traj)
     return ImmWindows(
@@ -53,7 +56,7 @@ def test_model_forward_shape() -> None:
 
 def test_smoke_train_runs_and_learns() -> None:
     windows = _separable_windows()
-    model, acc = train(windows, epochs=8, hidden_dim=16, seed=0)
+    model, acc = train(windows, epochs=24, hidden_dim=16, seed=0)
     assert 0.0 <= acc <= 1.0
     # The task is trivially separable; a few epochs should beat chance (0.5 for
     # the two populated classes). Keep the bar low — this is a smoke test, not
@@ -78,3 +81,14 @@ def test_export_and_onnxruntime_verify(tmp_path: Path) -> None:
     assert onnx_path.exists()
     # `verify` asserts shape (batch, 4) and rows summing to 1.0.
     verify(onnx_path, batch=4)
+
+
+def test_export_rejects_legacy_12_feature_checkpoint(tmp_path: Path) -> None:
+    from export.export_imm import export
+
+    model = ImmModeClassifier(feature_dim=12, hidden_dim=8)
+    ckpt = tmp_path / "legacy.pt"
+    torch.save({"state_dict": model.state_dict(), "hidden_dim": 8}, ckpt)
+    with pytest.raises(ValueError, match="retrain legacy checkpoints"):
+        export(ckpt, tmp_path / "must-not-exist.onnx")
+    assert not (tmp_path / "must-not-exist.onnx").exists()

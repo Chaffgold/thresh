@@ -19,7 +19,7 @@ cargo run -p thresh --features training-export --bin gen-detector-dataset -- <ou
 ```
 
 `training::generate_imm_training_samples` runs synth measurements → analytic IMM
-tracker → 12-dim filter-state features; `training::detector::generate_detector_samples`
+tracker → 13-dim filter-state/covariance/elapsed-time features; `training::detector::generate_detector_samples`
 maps the synth `RadarSnapshot`s to detector samples. The Python training tree
 under `python/` consumes the emitted Parquet (see `TRAINING.md`). The
 `arrow`/`parquet` stack is heavy, hence the feature gate — it stays out of

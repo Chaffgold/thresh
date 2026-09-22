@@ -10,7 +10,7 @@
 //! | `trajectory_id`     | uint32          | source trajectory                  |
 //! | `track_id`          | uint64          | tracker track the feature is from  |
 //! | `time_s`            | float64         | tick time (s)                      |
-//! | `feature`           | `list<float64>` | 12-dim filter-state feature        |
+//! | `feature`           | `list<float64>` | 13-dim state/covariance/time feature |
 //! | `label`             | utf8            | `cv`/`ca`/`ctrv`/`coord_turn`      |
 //! | `label_index`       | int32           | IMM mode index `0..4`              |
 //! | `imm_dominant_mode` | int32 nullable  | analytic IMM's mode (reference)    |
@@ -219,7 +219,7 @@ mod tests {
             track_id: 42,
             time_s: 1.5,
             feature: vec![
-                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0,
+                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 0.0,
             ],
             label,
             imm_dominant_mode: dom,
@@ -249,14 +249,14 @@ mod tests {
         assert_eq!(batch.num_rows(), 2);
         assert_eq!(batch.num_columns(), 7);
 
-        // The `feature` list column should hold 12 floats per row.
+        // The `feature` list column should hold 13 floats per row.
         let features = batch
             .column_by_name("feature")
             .unwrap()
             .as_any()
             .downcast_ref::<arrow::array::ListArray>()
             .unwrap();
-        assert_eq!(features.value(0).len(), 12);
+        assert_eq!(features.value(0).len(), 13);
 
         let labels = batch
             .column_by_name("label")

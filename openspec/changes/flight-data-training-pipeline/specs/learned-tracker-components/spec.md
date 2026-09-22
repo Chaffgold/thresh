@@ -14,16 +14,56 @@ The IMM mode classifier ONNX model MUST conform to the following contract. The i
 
 | Tensor | Shape | dtype | Semantics |
 |---|---|---|---|
-| `features` (input) | `(batch, 10, filter_state_dim)` | float32 | 10 consecutive filter-state snapshots. Default `filter_state_dim` = 12: the IMM common-space state `[x, vx, y, vy, z, vz]` concatenated with the 6 diagonal entries of the 6×6 common-space covariance (see design.md Decision 14 — the IMM combine output is 6D, so acceleration is inferred by the sequence model from the window rather than carried explicitly). All values in sensor-ENU frame and SI units. Produced by `thresh_filter::imm::project_filter_state` (`CLASSIFIER_FEATURE_DIM = 12`). |
+| `features` (input) | `(batch, 10, 13)` | float32 | 10 measurement-updated filter-state snapshots: common-space state `[x, vx, y, vy, z, vz]`, 6 covariance-diagonal variances, then elapsed seconds since the preceding recorded update. State is sensor-ENU in SI units; the first post-birth update has elapsed time zero (Decision 30). Produced by `thresh_filter::imm::project_filter_state` (`CLASSIFIER_FEATURE_DIM = 13`). |
 | `mode_probs` (output) | `(batch, 4)` | float32 | Softmaxed probabilities over `[CV, CA, CTRV, coord_turn]` |
 
 #### Scenario: Contract verification
 
 **WHEN** the `onnx-tests` workflow runs against `test-data/models/imm_mode_classifier.onnx`
 
-**THEN** the workflow asserts the model's input shape is exactly `(batch, 10, 12)` — the trailing dimension MUST equal `thresh_filter::imm::CLASSIFIER_FEATURE_DIM` (12) so a model whose feature width disagrees with the runtime projection cannot pass — output shape is `(batch, 4)`, and output values sum to 1.0 per batch row within 1e-5 tolerance
+**THEN** the workflow asserts the model's input shape is exactly `(batch, 10, 13)` — the trailing dimension MUST equal `thresh_filter::imm::CLASSIFIER_FEATURE_DIM` (13) so a model whose feature width disagrees with the runtime projection cannot pass — output shape is `(batch, 4)`, and output values sum to 1.0 per batch row within 1e-5 tolerance
 
 **SHALL** fail the build on any shape, name, or normalisation violation.
+
+### Requirement: Shared elapsed-time and observation-history contract
+
+Training and deployment MUST record post-birth measurement updates, including
+tentative tracks, and MUST NOT append birth initialization or prediction-only
+states. The first recorded row MUST have elapsed time zero. Each later row
+MUST contain all elapsed seconds since the preceding recorded update; sliding
+windows MUST preserve that value rather than resetting their first row.
+Runtime prediction intervals MUST be finite and nonnegative, and invalid or
+overflowing intervals MUST be rejected before mutating the filter. Legacy
+12-wide datasets and models MUST fail explicitly with a regeneration or
+re-export instruction rather than assuming a sample rate.
+
+#### Scenario: Different sample rates remain distinguishable
+
+**WHEN** identical filter-state sequences are sampled at 1 Hz and 10 Hz
+
+**THEN** the corresponding elapsed features after the initial zero are 1.0
+and 0.1 seconds respectively in both training and runtime windows.
+
+#### Scenario: Missed measurements accumulate time
+
+**WHEN** three predictions of 0.1 seconds occur between two measurement updates
+
+**THEN** only the two updated states enter history, and the second carries
+0.3 seconds regardless of the missing intermediate measurements.
+
+#### Scenario: Training timestamps contradict stored intervals
+
+**WHEN** a dataset contains nonfinite timestamps, or elapsed
+features that disagree with consecutive timestamps for its track
+
+**THEN** Python rejects the dataset rather than producing training windows.
+
+#### Scenario: Multiple updates at the same timestamp
+
+**WHEN** consecutive updates share a finite timestamp
+
+**THEN** both training and deployment retain their update order and record
+zero elapsed seconds for each update after the first at that timestamp.
 
 ### Requirement: Training data must come from filter outputs, not raw ADS-B
 

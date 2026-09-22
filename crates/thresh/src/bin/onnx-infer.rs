@@ -7,12 +7,15 @@
 //!
 //! ```sh
 //! cargo run -p thresh --features onnx --bin onnx-infer -- \
-//!   test-data/models/imm_mode_classifier.onnx 1 10 12
+//!   test-data/models/imm_mode_classifier.onnx 1 10 13
 //! ```
 //!
 //! Args: `<model.onnx> <dim0> <dim1> ...` (the full input shape). The input
 //! tensor is filled with the **same deterministic ramp** the Python side uses:
-//! `x[i] = sin(i * 0.1)`, row-major over the flattened shape. Output is printed
+//! `x[i] = sin(i * 0.1)`, row-major over the flattened shape. For the IMM
+//! `(batch, 10, 13)` contract the final column is elapsed seconds (default 0.1,
+//! override with `--elapsed-seconds <dt>`), starting with zero per batch.
+//! Output is printed
 //! as `{"output":[...]}` (the first output, flattened f32).
 
 use thresh::inference::session::OnnxModel;
@@ -32,13 +35,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(2);
     }
     let model_path = &args[1];
-    let shape: Vec<i64> = args[2..]
+    let timing_index = args.iter().position(|arg| arg == "--elapsed-seconds");
+    let shape_end = timing_index.unwrap_or(args.len());
+    let shape: Vec<i64> = args[2..shape_end]
         .iter()
         .map(|s| s.parse::<i64>())
         .collect::<Result<_, _>>()?;
     let numel: i64 = shape.iter().product();
 
-    let input: Vec<f32> = (0..numel as usize).map(fixture_value).collect();
+    let elapsed = match timing_index {
+        Some(index) => args
+            .get(index + 1)
+            .ok_or("missing elapsed seconds")?
+            .parse::<f32>()?,
+        None => 0.1,
+    };
+    if !elapsed.is_finite() || elapsed < 0.0 {
+        return Err("elapsed seconds must be finite and nonnegative".into());
+    }
+    let mut input: Vec<f32> = (0..numel as usize).map(fixture_value).collect();
+    if shape.len() == 3 && shape[1..] == [10, 13] {
+        for (row_index, row) in input.chunks_exact_mut(13).enumerate() {
+            row[12] = if row_index % 10 == 0 { 0.0 } else { elapsed };
+        }
+    }
 
     let mut model = OnnxModel::load(model_path)?;
     let output = model.run_f32(&input, &shape)?;

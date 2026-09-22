@@ -613,7 +613,7 @@ mod tests {
         );
     }
 
-    /// Task 8.2: the IMM-classifier stub maps `(1, 10, 12)` to 4 probabilities.
+    /// Task 8.2: the IMM-classifier stub maps `(1, 10, 13)` to 4 probabilities.
     #[cfg(feature = "onnx")]
     #[test]
     fn imm_classifier_stub_contract() {
@@ -621,7 +621,7 @@ mod tests {
         let mut model =
             OnnxModel::load(model_path("imm_mode_classifier.onnx")).expect("load imm stub");
         let out = model
-            .run_f32(&vec![0.0_f32; 10 * 12], &[1, 10, 12])
+            .run_f32(&vec![0.0_f32; 10 * 13], &[1, 10, 13])
             .expect("run imm classifier");
         assert_eq!(out.len(), 4, "4 mode probabilities");
         let sum: f32 = out.iter().sum();

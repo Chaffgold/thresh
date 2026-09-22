@@ -7,7 +7,7 @@
 //! canonical trajectory (waypoints)
 //!   └─▶ thresh_synth::radar::measurements_from_trajectory   (5.1)
 //!         └─▶ MultiObjectTracker (analytic 4-model IMM)      (5.2)
-//!               └─▶ project_filter_state  (12-dim feature)   (5.3)
+//!               └─▶ project_filter_state  (13-dim feature)   (5.3)
 //!                     └─▶ paired with analytic_mode_label    (5.4)
 //!                           └─▶ ImmTrainingSample  → Parquet  (5.5)
 //! ```
@@ -24,6 +24,8 @@
 //! `training-export` feature so default and CI builds stay free of the
 //! `arrow`/`parquet` deps.
 
+use std::collections::HashMap;
+
 use nalgebra::DVector;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -31,7 +33,6 @@ use rand::rngs::StdRng;
 use thresh_core::coords::spherical_to_cartesian;
 use thresh_core::measurement::Measurement;
 use thresh_core::motion_mode::MotionModeLabel;
-use thresh_core::track::TrackState;
 use thresh_filter::imm::{CLASSIFIER_FEATURE_DIM, ImmConfig, project_filter_state};
 use thresh_synth::mode_label::analytic_mode_label;
 use thresh_synth::radar_trajectory::{
@@ -48,7 +49,7 @@ pub mod parquet_export;
 #[cfg(feature = "training-export")]
 pub mod trajectory_ingest;
 
-/// One training example: a confirmed-track filter-state feature vector paired
+/// One training example: a measurement-updated filter-state feature vector paired
 /// with the analytic ground-truth motion mode at that timestep.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImmTrainingSample {
@@ -58,7 +59,7 @@ pub struct ImmTrainingSample {
     pub track_id: u64,
     /// Tick time (seconds since the trajectory epoch).
     pub time_s: f64,
-    /// 12-dim feature `[x, vx, y, vy, z, vz, Pxx, Pvxvx, Pyy, Pvyvy, Pzz, Pvzvz]`.
+    /// 13-dim state + covariance-diagonal + elapsed-seconds feature (Decision 30).
     pub feature: Vec<f64>,
     /// Analytic mode label derived from trajectory kinematics (the target).
     pub label: MotionModeLabel,
@@ -170,8 +171,9 @@ fn radar_to_detection(measurement: &Measurement) -> Option<DVector<f64>> {
 /// `sample_rate_hz` (so synth tick `i` aligns with waypoint `i`); this is how
 /// the in-memory `Trajectory::generate()` output and the acquisition-layer
 /// trajectories are produced. Analytic labels are computed from these
-/// ground-truth waypoints; features are computed only from confirmed-track
-/// filter state.
+/// ground-truth waypoints; features are computed only from post-birth
+/// measurement-updated filter states, including tentative tracks. Prediction-only
+/// states are omitted, matching the learned runtime's history.
 pub fn generate_imm_training_samples(
     trajectory_id: u32,
     waypoints: &[Waypoint],
@@ -203,6 +205,7 @@ pub fn generate_imm_training_samples(
     );
 
     let mut samples = Vec::new();
+    let mut last_updates = HashMap::new();
     for (i, tick) in per_tick.iter().enumerate() {
         // Task 5.7 guard: only sensor-level measurements reach the tracker.
         ensure_sensor_level(tick)?;
@@ -214,11 +217,12 @@ pub fn generate_imm_training_samples(
         let label = analytic_mode_label(waypoints, i.min(waypoints.len() - 1));
 
         for track in &tracker.tracks {
-            if track.lifecycle != TrackState::Confirmed {
+            if !track.is_alive() || track.coast_count != 0 || track.total_hits <= 1 {
                 continue;
             }
+            let elapsed = record_update_time(&mut last_updates, track.id.0, time_s);
             // Feature is read from filter state — never from a measurement.
-            let feature = project_filter_state(&track.state, &track.covariance);
+            let feature = project_filter_state(&track.state, &track.covariance, elapsed);
             debug_assert_eq!(feature.len(), CLASSIFIER_FEATURE_DIM);
             samples.push(ImmTrainingSample {
                 trajectory_id,
@@ -232,6 +236,13 @@ pub fn generate_imm_training_samples(
     }
 
     Ok(samples)
+}
+
+/// Called only for recorded measurement updates, never births or coasting ticks.
+fn record_update_time(last_updates: &mut HashMap<u64, f64>, track_id: u64, time: f64) -> f64 {
+    last_updates
+        .insert(track_id, time)
+        .map_or(0.0, |previous| time - previous)
 }
 
 #[cfg(test)]
@@ -262,8 +273,8 @@ mod tests {
         .generate()
     }
 
-    /// Task 5.2/5.3: the pipeline produces confirmed-track samples whose
-    /// features are 12-dim filter state (positive covariance diagonal proves
+    /// Task 5.2/5.3: the pipeline produces measurement-updated samples whose
+    /// features are 13-dim filter state (positive covariance diagonal proves
     /// the value came through the filter, not from a raw measurement).
     #[test]
     fn cv_trajectory_produces_filter_state_samples() {
@@ -280,7 +291,7 @@ mod tests {
 
         assert!(
             !samples.is_empty(),
-            "a confirmed track should yield samples"
+            "a measurement-updated track should yield samples"
         );
         for s in &samples {
             assert_eq!(s.feature.len(), CLASSIFIER_FEATURE_DIM);
@@ -293,6 +304,24 @@ mod tests {
                 &s.feature[6..12]
             );
         }
+        let mut previous = HashMap::new();
+        for sample in &samples {
+            let expected = record_update_time(&mut previous, sample.track_id, sample.time_s);
+            assert!((sample.feature[12] - expected).abs() < 1e-12);
+        }
+        assert!(
+            samples.iter().any(|sample| sample.feature[12] > 0.15),
+            "seeded missed measurements must remain gaps, not prediction-only rows"
+        );
+    }
+
+    #[test]
+    fn training_intervals_preserve_missed_updates_and_track_boundaries() {
+        let mut times = HashMap::new();
+        assert_eq!(record_update_time(&mut times, 1, 0.1), 0.0);
+        // No recorded updates at 0.2/0.3 seconds: exactly the runtime's three predicts.
+        assert!((record_update_time(&mut times, 1, 0.4) - 0.3).abs() < 1e-12);
+        assert_eq!(record_update_time(&mut times, 2, 0.4), 0.0);
     }
 
     /// Task 5.6 (end-to-end): a straight-line target is labelled overwhelmingly

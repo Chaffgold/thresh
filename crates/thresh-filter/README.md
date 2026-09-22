@@ -68,9 +68,15 @@ cargo build -p thresh-filter --features learned-imm   # pulls the ort/ONNX stack
 
 `ImmModeAdapter::from_onnx(path)` loads the checkpoint; `LearnedImmFilter` wraps
 an `ImmFilter`, feeding it the classifier's probabilities once a full 10-step
-window of filter-state projections (`project_filter_state`, 12-dim) exists, and
+window of filter-state projections (`project_filter_state`, 13-dim: state,
+covariance diagonal, and elapsed seconds) exists, and
 falling back to the analytic update on any error. The core `ImmFilter` is
 untouched, so the analytic test suite passes unchanged with the feature on. The
 training/export pipeline lives under `python/` (see `TRAINING.md`); the feature
 is feature-gated because the `ort`/ONNX-Runtime stack is heavy. Ships off by
 default until the trained checkpoint meets its exit criterion.
+
+History contains post-birth measurement updates (including tentative tracks),
+not births or prediction-only states. The first elapsed value is zero; later
+values include all prediction intervals since the previous update. The adapter
+rejects legacy 12-wide ONNX models at load time with a re-export instruction.

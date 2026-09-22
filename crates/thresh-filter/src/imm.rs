@@ -663,23 +663,35 @@ const COMMON_STATE_DIM: usize = 6;
 
 /// Length of the feature vector produced by [`project_filter_state`].
 ///
-/// Six state components followed by six covariance-diagonal variances.
-pub const CLASSIFIER_FEATURE_DIM: usize = 2 * COMMON_STATE_DIM;
+/// Six state components, six covariance-diagonal variances, then elapsed seconds.
+pub const CLASSIFIER_FEATURE_DIM: usize = 2 * COMMON_STATE_DIM + 1;
 
 /// Project an IMM common-space estimate into the fixed-length feature vector
 /// consumed by the Track B IMM mode classifier.
 ///
 /// The IMM `combine` step yields a 6D common state `[x, vx, y, vy, z, vz]` and
 /// a 6×6 covariance. The feature is those six state components followed by the
-/// six covariance-diagonal entries (variances), in the same order —
-/// [`CLASSIFIER_FEATURE_DIM`] (= 12) elements total.
+/// six covariance-diagonal entries (variances), then `elapsed_seconds` since
+/// the previous recorded measurement update — [`CLASSIFIER_FEATURE_DIM`]
+/// (= 13) elements total. The first post-birth update uses zero elapsed time.
 ///
 /// Acceleration is intentionally **not** fabricated here: the common space has
 /// no acceleration component, and the downstream sequence model infers it from
 /// the windowed state history. Only the leading 6 state entries and the leading
 /// 6×6 covariance block are read, so larger inputs are tolerated; in debug
 /// builds, smaller inputs trip an assertion.
-pub fn project_filter_state(state: &DVector<f64>, covariance: &DMatrix<f64>) -> Vec<f64> {
+///
+/// # Panics
+/// Panics if elapsed time is negative, nonfinite, or cannot fit in float32.
+pub fn project_filter_state(
+    state: &DVector<f64>,
+    covariance: &DMatrix<f64>,
+    elapsed_seconds: f64,
+) -> Vec<f64> {
+    assert!(
+        elapsed_seconds >= 0.0 && (elapsed_seconds as f32).is_finite(),
+        "classifier elapsed_seconds must be finite, nonnegative and fit float32"
+    );
     debug_assert!(
         state.len() >= COMMON_STATE_DIM,
         "state has {} elements, need at least {COMMON_STATE_DIM}",
@@ -694,6 +706,7 @@ pub fn project_filter_state(state: &DVector<f64>, covariance: &DMatrix<f64>) -> 
     let mut feature = Vec::with_capacity(CLASSIFIER_FEATURE_DIM);
     feature.extend((0..COMMON_STATE_DIM).map(|i| state[i]));
     feature.extend((0..COMMON_STATE_DIM).map(|i| covariance[(i, i)]));
+    feature.push(elapsed_seconds);
     feature
 }
 
@@ -1059,10 +1072,11 @@ mod tests {
         cov[(0, 1)] = 999.0;
         cov[(3, 4)] = -999.0;
 
-        let feature = project_filter_state(&state, &cov);
+        let feature = project_filter_state(&state, &cov, 0.3);
         assert_eq!(feature.len(), CLASSIFIER_FEATURE_DIM);
         assert_eq!(&feature[0..6], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
         assert_eq!(&feature[6..12], &[10.0, 20.0, 30.0, 40.0, 50.0, 60.0]);
+        assert_eq!(feature[12], 0.3);
     }
 
     // 6.1: State mapping round-trips
