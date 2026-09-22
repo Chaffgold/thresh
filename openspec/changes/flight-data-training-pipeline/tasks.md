@@ -111,6 +111,6 @@
 
 ## 12. Approved synthetic-only correctness follow-up
 
-- [ ] 12.1 Correct OpenSky numeric-category translation without changing the five-class taxonomy. Verify mocked provider categories map to the canonical emitter codes, including rotorcraft and UAVs, and unknown/no-information values do not become an aircraft class.
+- [x] 12.1 Correct OpenSky numeric-category translation without changing the five-class taxonomy. Verify mocked provider categories map to the canonical emitter codes, including rotorcraft and UAVs, and unknown/no-information values do not become an aircraft class. _2026-09-22: numeric 2..8 → A1..A7, 9..15 → B1..B7, 16..20 → C1..C5; 0/1, unknown, and malformed numeric values → null. Mocked provider-to-taxonomy regressions cover every documented category, including heavy aircraft, rotorcraft, and UAVs; `test_opensky.py`: 49 passed. Ruff and explicit-venv Pyright pass. No live provider calls or captures._
 - [ ] 12.2 Complete the detector-evaluation work in 9.3 using synthetic point clouds and independent trajectory truth. Verify a detector returning valid positions scores better than an empty detector, and learned-mode requests never silently run the analytic baseline.
 - [ ] 12.3 Define and implement a shared elapsed-time input contract for IMM training and deployment, updating the contract/design before implementation. Verify synthetic 1 Hz/10 Hz windows, accumulated gaps across missed measurements, and Python/ONNX/Rust parity; do not claim real-data acceptance or replace stubs with trained checkpoints.
