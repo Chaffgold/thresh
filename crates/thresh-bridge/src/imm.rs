@@ -4,6 +4,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use crate::error::{BridgeError, BridgeResult};
+use crate::runtime::{import_module, required_attribute, with_python};
 
 /// Configuration for the IMM filter.
 #[derive(Debug, Clone)]
@@ -40,30 +41,34 @@ impl ImmFilter {
         config: &ImmConfig,
         models: &Bound<'_, PyList>,
     ) -> BridgeResult<Self> {
-        let np = py.import("numpy").map_err(BridgeError::from)?;
+        let error = |error| BridgeError::from_python(py, error, "IMM construction");
+        let np = import_module(py, "numpy")?;
 
         // Build transition matrix as numpy array.
         let trans_list = PyList::empty(py);
         for row in &config.transition_matrix {
-            let py_row = PyList::new(py, row)?;
-            trans_list.append(py_row)?;
+            let py_row = PyList::new(py, row).map_err(error)?;
+            trans_list.append(py_row).map_err(error)?;
         }
-        let trans_matrix = np.call_method1("array", (trans_list,))?;
+        let array = required_attribute(np.as_any(), "array", "IMM array lookup")?;
+        let trans_matrix = array.call1((trans_list,)).map_err(error)?;
 
-        let prob_list = PyList::new(py, &config.model_probabilities)?;
-        let probs = np.call_method1("array", (prob_list,))?;
+        let prob_list = PyList::new(py, &config.model_probabilities).map_err(error)?;
+        let probs = array.call1((prob_list,)).map_err(error)?;
 
-        let ss_imm = py
-            .import("stonesoup.predictor.interacting")
-            .map_err(BridgeError::from)?;
+        let ss_imm = import_module(py, "stonesoup.predictor.interacting")?;
 
         let kwargs = PyDict::new(py);
-        kwargs.set_item("sub_predictors", models)?;
-        kwargs.set_item("transition_matrix", trans_matrix)?;
-        kwargs.set_item("model_probabilities", probs)?;
+        kwargs.set_item("sub_predictors", models).map_err(error)?;
+        kwargs
+            .set_item("transition_matrix", trans_matrix)
+            .map_err(error)?;
+        kwargs
+            .set_item("model_probabilities", probs)
+            .map_err(error)?;
 
-        let imm_cls = ss_imm.getattr("IMMPredictor")?;
-        let predictor = imm_cls.call((), Some(&kwargs))?;
+        let imm_cls = required_attribute(ss_imm.as_any(), "IMMPredictor", "IMM predictor lookup")?;
+        let predictor = imm_cls.call((), Some(&kwargs)).map_err(error)?;
 
         Ok(Self {
             py_predictor: predictor.unbind(),
@@ -76,12 +81,16 @@ impl ImmFilter {
     /// `timestamp` is a Python datetime for the prediction target time.
     /// Returns the predicted state.
     pub fn predict(&self, prior: &Py<PyAny>, timestamp: &Py<PyAny>) -> BridgeResult<Py<PyAny>> {
-        Python::attach(|py| {
-            let result = self
-                .py_predictor
-                .call_method1(py, "predict", (prior.bind(py), timestamp.bind(py)))
-                .map_err(BridgeError::from)?;
-            Ok(result)
+        with_python("IMM prediction", |py| {
+            let method = required_attribute(
+                self.py_predictor.bind(py),
+                "predict",
+                "IMM prediction lookup",
+            )?;
+            method
+                .call1((prior.bind(py), timestamp.bind(py)))
+                .map(Bound::unbind)
+                .map_err(|error| BridgeError::from_python(py, error, "IMM prediction"))
         })
     }
 }

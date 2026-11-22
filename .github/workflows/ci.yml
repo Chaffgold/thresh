@@ -166,6 +166,64 @@ jobs:
             exit 1
           fi
 
+  stonesoup-boundary:
+    # Required on every PR, including PRs to develop; never path-filter this lane.
+    # Boundary success does not certify the separate algorithm-wrapper repairs.
+    name: Stone Soup boundary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.13'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: stonesoup-boundary-python-3.12.13
+      - name: Install isolated, hash-locked boundary dependencies
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/thresh-bridge-python"
+          "$RUNNER_TEMP/thresh-bridge-python/bin/python" -m pip install --require-hashes -r crates/thresh-bridge/tests/requirements.txt
+          echo "PYO3_PYTHON=$RUNNER_TEMP/thresh-bridge-python/bin/python" >> "$GITHUB_ENV"
+      - name: Verify boundary runner failure modes
+        run: '"$PYO3_PYTHON" -m unittest discover -s crates/thresh-bridge/tests -p test_runner.py -v'
+      - name: Execute every manifest boundary test
+        # Runner verifies versions and sets child PYTHONPATH for embedding only.
+        # It rejects missing packages, ignored tests, missing names and zero tests.
+        run: '"$PYO3_PYTHON" crates/thresh-bridge/tests/run_boundary_tests.py'
+      - name: Execute feature-enabled bridge documentation examples
+        shell: bash
+        run: |
+          export PYTHONPATH="$("$PYO3_PYTHON" -c 'import os, site; print(os.pathsep.join(site.getsitepackages())))"
+          cargo test --locked -p thresh-bridge --no-default-features --features stonesoup --doc
+
+  native-no-python:
+    name: Native workspace without Python
+    runs-on: ubuntu-latest
+    env:
+      PYO3_NO_PYTHON: '1'
+      PYO3_PYTHON: /__thresh_python_discovery_disabled__
+      PYTHON_SYS_EXECUTABLE: /__thresh_python_discovery_disabled__
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: native-no-python
+      - name: Reject Python dependencies in the native workspace
+        shell: bash
+        run: |
+          dependency_tree="$(cargo tree --color never --locked --workspace --exclude thresh-py --no-default-features --prefix none)"
+          if printf '%s\n' "$dependency_tree" | grep -Eq '^pyo3([ -]|$)'; then
+            echo 'Native dependency tree unexpectedly contains PyO3' >&2
+            exit 1
+          fi
+      - name: Build native workspace with Python discovery disabled
+        run: cargo build --locked --workspace --exclude thresh-py --no-default-features
+      - name: Test native workspace with Python discovery disabled
+        run: cargo test --locked --workspace --exclude thresh-py --no-default-features
+
   python-tests:
     name: Python tests
     runs-on: ubuntu-latest

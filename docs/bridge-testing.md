@@ -1,0 +1,107 @@
+# Stone Soup boundary verification
+
+The `Stone Soup boundary` CI job runs on every pull request, including PRs to
+`develop`, without path-based skipping. It verifies only the Rust/Python boundary.
+It does **not** certify JPDA, MHT, IMM, or GM-PHD algorithm graphs, trained-model
+acceptance, provider-data permissions, or deployment without a linked Python
+shared library. All inputs are synthetic; no OpenSky access or data is needed.
+
+## Exact isolated runtime
+
+Use **CPython 3.12.13**, the workspace-locked **PyO3 0.29.0**, **Stone Soup 1.9.1**,
+**NumPy 2.5.3**, and **SciPy 1.18.1**. All direct/transitive Python versions and
+distribution hashes are recorded in
+`crates/thresh-bridge/tests/requirements.txt`, independently of the training lock.
+No OR-Tools is required. Install from the repository root:
+
+```sh
+python3.12 --version  # Must report 3.12.13.
+bridge_env="$(mktemp -d)/venv"
+python3.12 -m venv "$bridge_env"
+"$bridge_env/bin/python" -m pip install --require-hashes -r crates/thresh-bridge/tests/requirements.txt
+export PYO3_PYTHON="$bridge_env/bin/python"
+"$PYO3_PYTHON" -m unittest discover -s crates/thresh-bridge/tests -p test_runner.py -v
+"$PYO3_PYTHON" crates/thresh-bridge/tests/run_boundary_tests.py
+export PYTHONPATH="$("$PYO3_PYTHON" -c 'import os, site; print(os.pathsep.join(site.getsitepackages())))"
+cargo test --locked -p thresh-bridge --no-default-features --features stonesoup --doc
+```
+
+The runner prints the interpreter, locked PyO3 version, and every installed
+Python package version. It rejects a mismatched interpreter, a missing package,
+an incorrect pinned version, a failed package import, or a non-virtualenv host.
+It sets `PYO3_PYTHON` and `PYTHONPATH` only for the Cargo/test child processes.
+On Linux it also adds the selected interpreter's configured shared-library
+directory to child `LD_LIBRARY_PATH`, because the test executables run directly
+rather than through Cargo's runtime search-path setup.
+The latter is necessary because an embedded interpreter does not automatically
+find a virtualenv's site-packages. These environment settings never move into
+the bridge library; the host still owns Python initialization and lifetime.
+On macOS with multiple developer tools, select the working Command Line Tools
+installation through `DEVELOPER_DIR` if required by your local toolchain.
+
+## Checked test manifest
+
+`crates/thresh-bridge/tests/boundary-test-manifest.json` records exact test names
+for the library unit tests and every integration-test target. The runtime command
+currently requires **63 passed tests across six targets, zero ignored/failed**:
+
+| Target | Required tests |
+| --- | ---: |
+| Library unit tests | 17 |
+| `context_contract` | 11 |
+| `detection_contract` | 15 |
+| `numeric_contract` | 9 |
+| `runtime_contract` | 9 |
+| `stonesoup_integration` | 2 |
+
+The last target contains the original import and nalgebra round-trip tests; they
+are no longer ignored and initialize their host explicitly. The library target
+includes physical-time, covariance, overflow, and interpreter-attachment tests.
+The integration targets cover five observation profiles, frame/pose/covariance,
+metadata, array rejection, lifecycle, and structured errors. Fresh-child process
+tests prevent imported modules or prior interpreter initialization from hiding
+missing-runtime/package cases. Feature-enabled executable documentation examples
+run as a separate gate after the manifest.
+
+The runner first checks Cargo's complete integration-target inventory against the
+manifest, builds all targets with `--locked`, then lists every executable's tests.
+Only an exact match can proceed. It executes each complete target with stable
+libtest text output, verifies every named result is `ok`, and checks the single
+summary has the exact expected passed count and zero failed, ignored, measured,
+or filtered tests. No test-name filtering is exposed. Any added, removed, renamed,
+ignored, or silently unselected test fails the gate until the checked manifest is
+deliberately updated. `--manifest PATH` allows testing an alternate manifest; CI
+always uses the checked default.
+
+The **14 stdlib runner self-tests** exercise success and fail-closed behavior for
+empty selection, missing/renamed/unlisted tests, ignored/failed assertions, failed
+children, missing/incorrect dependencies, zero execution, filtered/duplicate
+results, missing test targets, and Linux shared-library discovery. They require no
+third-party Python packages.
+An ordinary `cargo test` exit code of zero is not a substitute for this gate.
+
+## Native workspace without Python
+
+The separate `Native workspace without Python` CI job excludes only `thresh-py`,
+whose PyO3 dependency is intentionally unconditional. All existing Python-binding,
+training, lint, documentation, benchmark, and OpenSpec jobs remain intact.
+Run the native check from a fresh shell, or explicitly clear a boundary virtualenv:
+
+```sh
+unset PYTHONPATH VIRTUAL_ENV
+export PYO3_NO_PYTHON=1
+export PYO3_PYTHON=/__thresh_python_discovery_disabled__
+export PYTHON_SYS_EXECUTABLE=/__thresh_python_discovery_disabled__
+dependency_tree="$(cargo tree --color never --locked --workspace --exclude thresh-py --no-default-features --prefix none)"
+if printf '%s\n' "$dependency_tree" | grep -Eq '^pyo3([ -]|$)'; then
+  echo 'Unexpected PyO3 dependency in native workspace' >&2
+  exit 1
+fi
+cargo build --locked --workspace --exclude thresh-py --no-default-features
+cargo test --locked --workspace --exclude thresh-py --no-default-features
+```
+
+The dependency check rejects PyO3 and its `pyo3-*` support crates. Invalid Python
+discovery paths and `PYO3_NO_PYTHON=1` prevent a Python-enabled build script from
+quietly relying on the machine's interpreter. This lane does not disable the
+independent `thresh-py` integration job or weaken any feature-enabled boundary test.
