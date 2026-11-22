@@ -52,6 +52,39 @@ fn radar(rate: Option<f64>, time: f64) -> Measurement {
     }
 }
 
+fn spherical_cases(azimuth: f64) -> [(Measurement, DetectionContext); 3] {
+    let radar = |range_rate| Measurement::Radar {
+        range: 100.0,
+        azimuth,
+        elevation: 0.1,
+        range_rate,
+        time: 0.0,
+        sensor_id: 7,
+    };
+    [
+        (
+            radar(None),
+            context(ObservationProfile::Radar3 { sensor: sensor() }),
+        ),
+        (
+            radar(Some(-3.0)),
+            context(ObservationProfile::Radar4 {
+                sensor: sensor(),
+                doppler_sign: DopplerSign::PositiveAway,
+            }),
+        ),
+        (
+            Measurement::EoIr {
+                azimuth,
+                elevation: 0.1,
+                time: 0.0,
+                sensor_id: 7,
+            },
+            context(ObservationProfile::Eoir2 { sensor: sensor() }),
+        ),
+    ]
+}
+
 fn adsb(longitude: f64, velocity: Option<[f64; 3]>) -> Measurement {
     Measurement::AdsB {
         lat: 0.0,
@@ -163,6 +196,83 @@ fn radar3_has_absolute_time_model_and_correlated_covariance() {
             "2020-01-01T00:00:01.250000+00:00"
         );
     });
+}
+
+#[test]
+fn spherical_azimuth_preserves_direction_for_large_finite_angles() {
+    use std::f64::consts::{PI, TAU};
+
+    for magnitude in [
+        f64::from_bits(PI.to_bits() + 1),
+        TAU,
+        3.0 * PI,
+        1e12,
+        1e20,
+        1e100,
+        f64::MAX / 2.0,
+        f64::from_bits(f64::MAX.to_bits() - 1),
+        f64::MAX,
+    ] {
+        for azimuth in [magnitude, -magnitude] {
+            assert_spherical_direction(azimuth);
+        }
+    }
+}
+
+fn assert_spherical_direction(azimuth: f64) {
+    use std::f64::consts::PI;
+
+    for (measurement, context) in spherical_cases(azimuth) {
+        let detection = detect(&measurement, &context);
+        Python::attach(|py| {
+            let actual = values(py, detection.bind(py))[1];
+            assert!((-PI..PI).contains(&actual));
+            // Compare unit directions, not another modulo implementation.
+            let direction_error =
+                (actual.cos() - azimuth.cos()).hypot(actual.sin() - azimuth.sin());
+            assert!(
+                direction_error <= 8.0 * f64::EPSILON,
+                "azimuth {azimuth:e} became {actual:e}, direction error {direction_error:e}"
+            );
+        });
+    }
+}
+
+#[test]
+fn spherical_azimuth_preserves_canonical_values_and_seam() {
+    use std::f64::consts::PI;
+
+    let canonical = [
+        -PI,
+        -1.0,
+        -0.2,
+        -f64::MIN_POSITIVE,
+        -f64::from_bits(1),
+        -0.0,
+        0.0,
+        f64::from_bits(1),
+        f64::MIN_POSITIVE,
+        0.2,
+        1.0,
+        f64::from_bits(PI.to_bits() - 1),
+    ];
+    for (azimuth, expected) in canonical
+        .into_iter()
+        .map(|angle| (angle, angle))
+        .chain([(PI, -PI)])
+    {
+        assert_spherical_azimuth_bits(azimuth, expected);
+    }
+}
+
+fn assert_spherical_azimuth_bits(azimuth: f64, expected: f64) {
+    for (measurement, context) in spherical_cases(azimuth) {
+        let detection = detect(&measurement, &context);
+        Python::attach(|py| {
+            let actual = values(py, detection.bind(py))[1];
+            assert_eq!(actual.to_bits(), expected.to_bits(), "azimuth {azimuth:e}");
+        });
+    }
 }
 
 #[test]
@@ -696,6 +806,17 @@ fn assert_derived_overflow_without_python() {
     assert!(Python::try_attach(|_| ()).is_none());
 }
 
+fn assert_nonfinite_azimuth_rejected() {
+    for azimuth in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for (measurement, context) in spherical_cases(azimuth) {
+            assert!(matches!(
+                measurement_to_detection(&measurement, &context),
+                Err(BridgeError::ConversionError(_))
+            ));
+        }
+    }
+}
+
 #[test]
 fn detection_process_child() {
     let Ok(case) = std::env::var("THRESH_DETECTION_CONTRACT_CASE") else {
@@ -723,6 +844,7 @@ fn detection_process_child() {
         measurement_to_detection(&radar(None, 0.0), &invalid),
         Err(BridgeError::ConversionError(_))
     ));
+    assert_nonfinite_azimuth_rejected();
     if case == "uninitialized" {
         assert!(matches!(
             measurement_to_detection(&radar(None, 0.0), &context),

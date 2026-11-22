@@ -146,13 +146,17 @@ fn radar_components(
 }
 
 fn normalize_azimuth(angle: f64) -> f64 {
-    // Reduce before shifting: adding pi first could overflow a finite input.
-    let wrapped = angle.rem_euclid(std::f64::consts::TAU);
-    if wrapped >= std::f64::consts::PI {
-        wrapped - std::f64::consts::TAU
-    } else {
-        wrapped
+    use std::f64::consts::PI;
+
+    // Keep canonical values exact, including signed zero and tiny bearings.
+    if (-PI..PI).contains(&angle) {
+        return angle;
     }
+    // Remainder against rounded TAU accumulates phase error for large inputs.
+    // Recover the original direction using trigonometric argument reduction.
+    let (sine, cosine) = angle.sin_cos();
+    let wrapped = sine.atan2(cosine);
+    if wrapped == PI { -PI } else { wrapped }
 }
 
 fn spherical_model(

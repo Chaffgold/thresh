@@ -2,6 +2,7 @@
 //!
 //! Only finite, nonempty float64 arrays are supported. Generic vectors are emitted
 //! as `(n,)`; detection construction is responsible for making column StateVectors.
+//! Validated ndarray subclasses are viewed as base arrays without dtype coercion.
 //! Observation covariance has additional checks: its dimension must match the
 //! profile, and symmetry and positive semidefiniteness use
 //! `1e-12 * max(1, max_row_sum(abs(R)))`, evaluated with overflow-safe scaling.
@@ -125,7 +126,14 @@ fn logical_values(
     arr: &Bound<'_, PyAny>,
     expected: usize,
 ) -> BridgeResult<Vec<f64>> {
-    let values: Vec<f64> = arr
+    // Subclasses such as np.matrix override ravel to retain two dimensions.
+    // Shape/dtype validation has already run; omit dtype here to avoid coercion.
+    let base = py
+        .import("numpy")
+        .and_then(|np| np.call_method1("asarray", (arr,)))
+        .map_err(|e| BridgeError::from_python(py, e, "normalize validated ndarray subclass"))?;
+    validate_dtype(py, &base)?;
+    let values: Vec<f64> = base
         .call_method1("ravel", ("C",))
         .and_then(|flat| flat.call_method0("tolist"))
         .and_then(|list| list.extract())

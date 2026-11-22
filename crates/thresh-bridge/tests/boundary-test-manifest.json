@@ -51,6 +51,8 @@
       "radar3_has_absolute_time_model_and_correlated_covariance",
       "radar4_preserves_pose_velocity_mapping_and_both_doppler_signs",
       "rounded_timestamp_collisions_keep_distinct_original_times",
+      "spherical_azimuth_preserves_canonical_values_and_seam",
+      "spherical_azimuth_preserves_direction_for_large_finite_angles",
       "spherical_pose_supports_pitch_gimbal_lock_without_nonfinite_offsets",
       "validation_precedes_runtime_and_missing_packages"
     ],

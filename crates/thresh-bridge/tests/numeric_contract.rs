@@ -21,6 +21,19 @@ fn array<'py>(py: Python<'py>, expression: &str) -> Bound<'py, PyAny> {
         .unwrap()
 }
 
+fn stonesoup_array<'py>(
+    py: Python<'py>,
+    class: &str,
+    values: &Bound<'py, PyAny>,
+) -> Bound<'py, PyAny> {
+    py.import("stonesoup.types.array")
+        .unwrap()
+        .getattr(class)
+        .unwrap()
+        .call1((values,))
+        .unwrap()
+}
+
 fn assert_array_layout(arr: &Bound<'_, PyAny>, shape: &[usize]) {
     assert_eq!(
         arr.getattr("shape")
@@ -73,6 +86,7 @@ fn strided_vectors_and_columns_preserve_logical_order() {
         for expression in [
             "np.arange(8, dtype='float64')[::-2]",
             "np.arange(8, dtype='float64')[::-2,None]",
+            "np.matrix(np.arange(8, dtype='float64')[::-2,None])",
         ] {
             let input = array(py, expression);
             let vector = convert::numpy_to_dvector(py, &input).unwrap();
@@ -84,6 +98,15 @@ fn strided_vectors_and_columns_preserve_logical_order() {
                 vector
             );
         }
+        let state = stonesoup_array(
+            py,
+            "StateVector",
+            &array(py, "np.arange(8, dtype='float64')[::-2]"),
+        );
+        assert_eq!(
+            convert::numpy_to_dvector(py, &state).unwrap().as_slice(),
+            &[7.0, 5.0, 3.0, 1.0]
+        );
         let scalar_column = array(py, "np.array([[2.5]], dtype='float64')");
         assert_eq!(
             convert::numpy_to_dvector(py, &scalar_column)
@@ -110,6 +133,10 @@ fn strided_transposed_and_fortran_matrices_preserve_logical_order() {
                 "np.asfortranarray(np.arange(6, dtype='float64').reshape(2,3))",
                 vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
             ),
+            (
+                "np.matrix(np.arange(6, dtype='float64').reshape(2,3))",
+                vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+            ),
         ];
         for (expression, expected) in cases {
             let input = array(py, expression);
@@ -121,6 +148,15 @@ fn strided_transposed_and_fortran_matrices_preserve_logical_order() {
                 matrix
             );
         }
+        let covariance = stonesoup_array(
+            py,
+            "CovarianceMatrix",
+            &array(py, "np.array([[4.,1.],[1.,9.]])"),
+        );
+        assert_eq!(
+            convert::numpy_to_dmatrix(py, &covariance).unwrap(),
+            DMatrix::from_row_slice(2, 2, &[4.0, 1.0, 1.0, 9.0])
+        );
     });
 }
 
@@ -131,6 +167,15 @@ fn unsupported_dtypes_are_never_coerced() {
             let input = array(py, &format!("np.ones((2,1), dtype='{dtype}')"));
             assert!(convert::numpy_to_dvector(py, &input).is_err(), "{dtype}");
             assert!(convert::numpy_to_dmatrix(py, &input).is_err(), "{dtype}");
+            let matrix_subclass = array(py, &format!("np.matrix(np.ones((2,1), dtype='{dtype}'))"));
+            assert!(
+                convert::numpy_to_dvector(py, &matrix_subclass).is_err(),
+                "{dtype}"
+            );
+            assert!(
+                convert::numpy_to_dmatrix(py, &matrix_subclass).is_err(),
+                "{dtype}"
+            );
         }
         // Endianness is storage metadata, not a change in the float64 value type.
         let input = array(py, "np.array([1.25, -2.5], dtype='>f8')");
@@ -146,6 +191,7 @@ fn invalid_vector_shapes_do_not_flatten() {
     with_python(|py| {
         for expression in [
             "np.zeros((1,3))",
+            "np.matrix(np.zeros((1,3)))",
             "np.zeros((2,2))",
             "np.zeros((2,1,1))",
             "np.array(1.0)",
@@ -191,6 +237,8 @@ fn nonfinite_inputs_are_rejected_in_both_directions() {
             "np.array([[np.nan]])",
             "np.array([[np.inf]])",
             "np.array([[-np.inf]])",
+            "np.matrix([[np.nan]])",
+            "np.matrix([[np.inf]])",
         ] {
             let input = array(py, expression);
             assert!(convert::numpy_to_dvector(py, &input).is_err());

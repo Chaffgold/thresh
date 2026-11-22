@@ -12,9 +12,11 @@ Use **CPython 3.12.13**, the workspace-locked **PyO3 0.29.0**, **Stone Soup 1.9.
 **NumPy 2.5.3**, and **SciPy 1.18.1**. All direct/transitive Python versions and
 distribution hashes are recorded in
 `crates/thresh-bridge/tests/requirements.txt`, independently of the training lock.
-No OR-Tools is required. Install from the repository root:
+No OR-Tools is required. Run from the repository root in Bash; validation failures
+stop the procedure:
 
-```sh
+```bash
+set -euo pipefail
 python3.12 --version  # Must report 3.12.13.
 bridge_env="$(mktemp -d)/venv"
 python3.12 -m venv "$bridge_env"
@@ -22,7 +24,18 @@ python3.12 -m venv "$bridge_env"
 export PYO3_PYTHON="$bridge_env/bin/python"
 "$PYO3_PYTHON" -m unittest discover -s crates/thresh-bridge/tests -p test_runner.py -v
 "$PYO3_PYTHON" crates/thresh-bridge/tests/run_boundary_tests.py
-export PYTHONPATH="$("$PYO3_PYTHON" -c 'import os, site; print(os.pathsep.join(site.getsitepackages()))')"
+PYTHONPATH="$("$PYO3_PYTHON" -c 'import os, site; print(os.pathsep.join(site.getsitepackages()))')"
+export PYTHONPATH
+bridge_library_path="$("$PYO3_PYTHON" -c '
+import os, runpy
+environment = os.environ.copy()
+runner = runpy.run_path("crates/thresh-bridge/tests/run_boundary_tests.py")
+runner["configure_shared_library"](environment)
+print(environment.get("LD_LIBRARY_PATH", ""))
+')"
+if [ -n "$bridge_library_path" ]; then
+  export LD_LIBRARY_PATH="$bridge_library_path"
+fi
 cargo test --locked -p thresh-bridge --no-default-features --features stonesoup --doc
 ```
 
@@ -33,7 +46,11 @@ It sets `PYO3_PYTHON` and `PYTHONPATH` only for the Cargo/test child processes.
 On Linux it also adds the selected interpreter's configured shared-library
 directory to child `LD_LIBRARY_PATH`, because the test executables run directly
 rather than through Cargo's runtime search-path setup.
-The latter is necessary because an embedded interpreter does not automatically
+The manual and CI doctest steps reuse that library-location validation before
+exporting the Linux path in their own shell, preserving any existing value;
+the runner's child settings do not modify the calling shell. Non-Linux library
+paths remain unchanged.
+`PYTHONPATH` is necessary because an embedded interpreter does not automatically
 find a virtualenv's site-packages. These environment settings never move into
 the bridge library; the host still owns Python initialization and lifetime.
 On macOS with multiple developer tools, select the working Command Line Tools
@@ -43,13 +60,13 @@ installation through `DEVELOPER_DIR` if required by your local toolchain.
 
 `crates/thresh-bridge/tests/boundary-test-manifest.json` records exact test names
 for the library unit tests and every integration-test target. The runtime command
-currently requires **67 passed tests across six targets, zero ignored/failed**:
+currently requires **69 passed tests across six targets, zero ignored/failed**:
 
 | Target | Required tests |
 | --- | ---: |
 | Library unit tests | 21 |
 | `context_contract` | 11 |
-| `detection_contract` | 15 |
+| `detection_contract` | 17 |
 | `numeric_contract` | 9 |
 | `runtime_contract` | 9 |
 | `stonesoup_integration` | 2 |
@@ -63,7 +80,8 @@ unchanged host path/environment, missing-method diagnostics, and ordinary Python
 exception details. They exercise the real JPDA/MHT/IMM/PHD step methods but do
 not repair or validate the algorithms' constructor graphs.
 The integration targets cover five observation profiles, frame/pose/covariance,
-metadata, array rejection, lifecycle, and structured errors. Fresh-child process
+canonical and large finite azimuths, metadata, ndarray-subclass conversion,
+array rejection, lifecycle, and structured errors. Fresh-child process
 tests prevent imported modules or prior interpreter initialization from hiding
 missing-runtime/package cases. Feature-enabled executable documentation examples
 run as a separate gate after the manifest.
@@ -92,13 +110,14 @@ whose PyO3 dependency is intentionally unconditional. All existing Python-bindin
 training, lint, documentation, benchmark, and OpenSpec jobs remain intact.
 Run the native check from a fresh shell, or explicitly clear a boundary virtualenv:
 
-```sh
+```bash
+set -euo pipefail
 unset PYTHONPATH VIRTUAL_ENV
 export PYO3_NO_PYTHON=1
 export PYO3_PYTHON=/__thresh_python_discovery_disabled__
 export PYTHON_SYS_EXECUTABLE=/__thresh_python_discovery_disabled__
 dependency_tree="$(cargo tree --color never --locked --workspace --exclude thresh-py --no-default-features --prefix none)"
-if printf '%s\n' "$dependency_tree" | grep -Eq '^pyo3([ -]|$)'; then
+if grep -Eq '^pyo3([ -]|$)' <<< "$dependency_tree"; then
   echo 'Unexpected PyO3 dependency in native workspace' >&2
   exit 1
 fi

@@ -195,7 +195,18 @@ jobs:
       - name: Execute feature-enabled bridge documentation examples
         shell: bash
         run: |
-          export PYTHONPATH="$("$PYO3_PYTHON" -c 'import os, site; print(os.pathsep.join(site.getsitepackages()))')"
+          PYTHONPATH="$("$PYO3_PYTHON" -c 'import os, site; print(os.pathsep.join(site.getsitepackages()))')"
+          export PYTHONPATH
+          bridge_library_path="$("$PYO3_PYTHON" -c '
+          import os, runpy
+          environment = os.environ.copy()
+          runner = runpy.run_path("crates/thresh-bridge/tests/run_boundary_tests.py")
+          runner["configure_shared_library"](environment)
+          print(environment.get("LD_LIBRARY_PATH", ""))
+          ')"
+          if [ -n "$bridge_library_path" ]; then
+            export LD_LIBRARY_PATH="$bridge_library_path"
+          fi
           cargo test --locked -p thresh-bridge --no-default-features --features stonesoup --doc
 
   native-no-python:
@@ -215,7 +226,7 @@ jobs:
         shell: bash
         run: |
           dependency_tree="$(cargo tree --color never --locked --workspace --exclude thresh-py --no-default-features --prefix none)"
-          if printf '%s\n' "$dependency_tree" | grep -Eq '^pyo3([ -]|$)'; then
+          if grep -Eq '^pyo3([ -]|$)' <<< "$dependency_tree"; then
             echo 'Native dependency tree unexpectedly contains PyO3' >&2
             exit 1
           fi
