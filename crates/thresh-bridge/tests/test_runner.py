@@ -43,12 +43,14 @@ class BoundaryRunnerTests(unittest.TestCase):
             runner.verify_discovery("required: test\nnew: test\n", ["required"], "fixture")
 
     def test_ignored_required_test_fails_even_with_successful_exit(self):
+        ignored_output = output("ignored", passed=0, ignored=1)
         with self.assertRaises(runner.GateFailure):
-            runner.verify_execution(output("ignored", passed=0, ignored=1), ["required"], "fixture")
+            runner.verify_execution(ignored_output, ["required"], "fixture")
 
     def test_failed_required_assertion_fails(self):
+        failed_output = output("FAILED", passed=0, failed=1)
         with self.assertRaises(runner.GateFailure):
-            runner.verify_execution(output("FAILED", passed=0, failed=1), ["required"], "fixture")
+            runner.verify_execution(failed_output, ["required"], "fixture")
 
     def test_failed_child_exit_fails(self):
         with self.assertRaises(runner.GateFailure):
@@ -86,10 +88,12 @@ class BoundaryRunnerTests(unittest.TestCase):
             )
 
     def test_filtered_counts_and_duplicate_result_lines_fail(self):
+        filtered_output = output(filtered=1)
         with self.assertRaises(runner.GateFailure):
-            runner.verify_execution(output(filtered=1), ["required"], "fixture")
+            runner.verify_execution(filtered_output, ["required"], "fixture")
+        duplicate_output = "test required ... ok\n" + output()
         with self.assertRaises(runner.GateFailure):
-            runner.verify_execution("test required ... ok\n" + output(), ["required"], "fixture")
+            runner.verify_execution(duplicate_output, ["required"], "fixture")
 
     def test_missing_target_cannot_disappear_from_manifest(self):
         metadata_output = '{"packages":[{"name":"thresh-bridge","targets":[{"name":"new_contract","kind":["test"]}]}]}'
