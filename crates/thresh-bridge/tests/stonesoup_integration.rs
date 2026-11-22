@@ -1,8 +1,8 @@
 //! Integration tests for the Stone Soup bridge.
 //!
 //! These tests require a working Python installation with `stonesoup` and
-//! `numpy` installed.  They are `#[ignore]`d by default so that CI (which
-//! may not have these dependencies) still passes.
+//! `numpy` installed. The required runtime CI lane installs the pinned baseline;
+//! enabling the feature without its dependencies must fail, not silently skip.
 
 #![cfg(feature = "stonesoup")]
 
@@ -10,14 +10,14 @@ use thresh_bridge::error::BridgeError;
 
 /// Verify that we can import `stonesoup` from Python.
 #[test]
-#[ignore]
 fn stonesoup_importable() {
+    pyo3::Python::initialize();
     pyo3::Python::attach(|py| {
         let result = py.import("stonesoup");
         match result {
             Ok(_) => {} // success
             Err(e) => {
-                let err = BridgeError::from(e);
+                let err = BridgeError::from_python(py, e, "integration import stonesoup");
                 panic!("Failed to import stonesoup: {err}");
             }
         }
@@ -26,11 +26,11 @@ fn stonesoup_importable() {
 
 /// Verify that nalgebra-to-numpy round-trips work.
 #[test]
-#[ignore]
 fn nalgebra_numpy_roundtrip() {
     use nalgebra::{DMatrix, DVector};
     use thresh_bridge::convert;
 
+    pyo3::Python::initialize();
     pyo3::Python::attach(|py| {
         // DVector round-trip
         let v = DVector::from_column_slice(&[1.0, 2.0, 3.0, 4.0]);

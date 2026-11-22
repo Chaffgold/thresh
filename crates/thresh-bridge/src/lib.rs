@@ -6,7 +6,11 @@
 //! a Python installation.
 
 #[cfg(feature = "stonesoup")]
+pub mod context;
+#[cfg(feature = "stonesoup")]
 pub mod convert;
+#[cfg(feature = "stonesoup")]
+mod covariance;
 #[cfg(feature = "stonesoup")]
 pub mod detection;
 #[cfg(feature = "stonesoup")]
@@ -18,4 +22,10 @@ pub mod jpda;
 #[cfg(feature = "stonesoup")]
 pub mod mht;
 #[cfg(feature = "stonesoup")]
+mod observation;
+#[cfg(feature = "stonesoup")]
 pub mod phd;
+#[cfg(feature = "stonesoup")]
+mod runtime;
+#[cfg(feature = "stonesoup")]
+pub mod time;

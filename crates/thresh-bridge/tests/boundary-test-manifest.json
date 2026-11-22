@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "targets": {
+    "lib": [
+      "convert::tests::shape_size_checks_reject_element_byte_and_address_overflow",
+      "covariance::tests::correlated_and_singular_covariance_remain_unchanged",
+      "covariance::tests::covariance_tolerance_is_scale_aware_without_repairs",
+      "covariance::tests::extreme_finite_covariance_never_gets_infinite_tolerance",
+      "covariance::tests::malformed_nonfinite_and_indefinite_covariance_rejected",
+      "imm::tests::initialized_predict_preserves_dispatch_and_errors",
+      "jpda::tests::initialized_associate_preserves_dispatch_and_errors",
+      "mht::tests::initialized_run_preserves_dispatch_and_errors",
+      "observation::pose_tests::pose_euler_does_not_amplify_tolerated_near_lock_matrix_error",
+      "observation::pose_tests::pose_euler_preserves_both_exact_gimbal_locks",
+      "observation::pose_tests::pose_euler_preserves_both_near_gimbal_locks",
+      "observation::pose_tests::pose_euler_preserves_multiaxis_rotations",
+      "observation::pose_tests::pose_euler_rejects_nonfinite_or_unpreservable_rotation",
+      "phd::tests::initialized_filter_preserves_dispatch_and_errors",
+      "runtime::tests::uninitialized_shared_attachment_is_fallible",
+      "time::tests::timestamps_accept_large_nonleap_intervals_without_float_cancellation",
+      "time::tests::timestamps_preserve_offsets_order_and_arrival",
+      "time::tests::timestamps_reject_hidden_leap_origins_and_both_crossing_directions",
+      "time::tests::timestamps_reject_nonfinite_overflow_and_outside_year_bounds",
+      "time::tests::timestamps_round_checked_calendar_carries",
+      "time::tests::timestamps_round_ties_even_and_keep_colliding_source_values"
+    ],
+    "context_contract": [
+      "adsb_requires_metric_noise_finite_datum_and_valid_degrees",
+      "all_five_context_profiles_validate_without_python",
+      "covariance_is_required_and_never_defaulted",
+      "delayed_arrival_preserves_independent_metadata_and_observation_order",
+      "frame_origin_must_be_finite_and_have_valid_radian_ranges",
+      "optional_observations_must_match_the_explicit_profile",
+      "overflowing_finite_datum_addition_and_nonfinite_velocity_are_rejected",
+      "rotations_must_be_proper_finite_and_orthogonal",
+      "sensor_identity_and_nonfinite_position_are_rejected",
+      "source_ranges_and_nonfinite_observations_are_rejected",
+      "unsupported_frames_and_motion_are_explicit_errors"
+    ],
+    "detection_contract": [
+      "adsb3_converts_msl_height_without_fabricating_velocity",
+      "adsb3_nonzero_origin_rotates_full_position_noise",
+      "adsb6_both_velocity_frames_preserve_full_covariance_at_nonzero_latitude",
+      "adsb6_ecef_velocity_and_cross_covariance_use_common_enu",
+      "adsb6_report_local_velocity_rotates_both_covariance_blocks",
+      "derived_overflow_is_rejected_before_python_access",
+      "detection_process_child",
+      "eoir_model_applies_nonzero_translation_and_ninety_degree_rotation",
+      "finite_position_and_covariance_overflow_precede_interpreter_access",
+      "observation_time_is_not_arrival_time_or_call_order",
+      "radar3_has_absolute_time_model_and_correlated_covariance",
+      "radar4_preserves_pose_velocity_mapping_and_both_doppler_signs",
+      "rounded_timestamp_collisions_keep_distinct_original_times",
+      "spherical_azimuth_preserves_canonical_values_and_seam",
+      "spherical_azimuth_preserves_direction_for_large_finite_angles",
+      "spherical_pose_supports_pitch_gimbal_lock_without_nonfinite_offsets",
+      "validation_precedes_runtime_and_missing_packages"
+    ],
+    "numeric_contract": [
+      "empty_nalgebra_arrays_are_rejected",
+      "invalid_matrix_shapes_are_rejected",
+      "invalid_vector_shapes_do_not_flatten",
+      "malformed_shape_and_checked_size_overflow_fail_before_matrix_construction",
+      "nonfinite_inputs_are_rejected_in_both_directions",
+      "outbound_vectors_are_1d_float64_and_nonsquare_matrices_preserve_every_element",
+      "strided_transposed_and_fortran_matrices_preserve_logical_order",
+      "strided_vectors_and_columns_preserve_logical_order",
+      "unsupported_dtypes_are_never_coerced"
+    ],
+    "runtime_contract": [
+      "explicit_host_initialization_is_reused_without_mutation",
+      "initialized_token_constructors_report_existing_algorithm_failures",
+      "missing_numpy_is_a_dependency_not_an_interpreter_error",
+      "missing_stonesoup_submodule_is_an_api_error",
+      "missing_symbol_is_an_api_error",
+      "missing_top_level_stonesoup_is_distinct",
+      "missing_transitive_dependency_uses_exception_identity",
+      "ordinary_python_failures_keep_type_message_context_and_traceback",
+      "token_free_constructors_require_host_initialization"
+    ],
+    "stonesoup_integration": [
+      "nalgebra_numpy_roundtrip",
+      "stonesoup_importable"
+    ]
+  }
+}
