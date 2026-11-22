@@ -117,15 +117,26 @@ export PYO3_NO_PYTHON=1
 export PYO3_PYTHON=/__thresh_python_discovery_disabled__
 export PYTHON_SYS_EXECUTABLE=/__thresh_python_discovery_disabled__
 dependency_tree="$(cargo tree --color never --locked --workspace --exclude thresh-py --no-default-features --prefix none)"
-if grep -Eq '^pyo3([ -]|$)' <<< "$dependency_tree"; then
-  echo 'Unexpected PyO3 dependency in native workspace' >&2
-  exit 1
-fi
+native_grep_status=0
+grep -Eq '^pyo3([ -]|$)' <<< "$dependency_tree" || native_grep_status=$?
+case "$native_grep_status" in
+  0)
+    echo 'Unexpected PyO3 dependency in native workspace' >&2
+    exit 1
+    ;;
+  1) ;;
+  *)
+    echo "Native dependency check failed (grep exit $native_grep_status)" >&2
+    exit "$native_grep_status"
+    ;;
+esac
 cargo build --locked --workspace --exclude thresh-py --no-default-features
 cargo test --locked --workspace --exclude thresh-py --no-default-features
 ```
 
-The dependency check rejects PyO3 and its `pyo3-*` support crates. Invalid Python
-discovery paths and `PYO3_NO_PYTHON=1` prevent a Python-enabled build script from
+The dependency check rejects PyO3 and its `pyo3-*` support crates. Only grep's
+no-match status is accepted; dependency-tree and grep execution errors fail the
+check. Invalid Python discovery paths and `PYO3_NO_PYTHON=1` prevent a
+Python-enabled build script from
 quietly relying on the machine's interpreter. This lane does not disable the
 independent `thresh-py` integration job or weaken any feature-enabled boundary test.

@@ -226,10 +226,19 @@ jobs:
         shell: bash
         run: |
           dependency_tree="$(cargo tree --color never --locked --workspace --exclude thresh-py --no-default-features --prefix none)"
-          if grep -Eq '^pyo3([ -]|$)' <<< "$dependency_tree"; then
-            echo 'Native dependency tree unexpectedly contains PyO3' >&2
-            exit 1
-          fi
+          native_grep_status=0
+          grep -Eq '^pyo3([ -]|$)' <<< "$dependency_tree" || native_grep_status=$?
+          case "$native_grep_status" in
+            0)
+              echo 'Native dependency tree unexpectedly contains PyO3' >&2
+              exit 1
+              ;;
+            1) ;;
+            *)
+              echo "Native dependency check failed (grep exit $native_grep_status)" >&2
+              exit "$native_grep_status"
+              ;;
+          esac
       - name: Build native workspace with Python discovery disabled
         run: cargo build --locked --workspace --exclude thresh-py --no-default-features
       - name: Test native workspace with Python discovery disabled

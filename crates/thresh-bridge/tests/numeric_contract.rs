@@ -8,6 +8,7 @@ use nalgebra::{DMatrix, DVector};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use thresh_bridge::convert;
+use thresh_bridge::error::BridgeError;
 
 fn with_python(test: impl for<'py> FnOnce(Python<'py>)) {
     Python::initialize();
@@ -267,8 +268,8 @@ class Malformed(np.ndarray):
     @property
     def shape(self):
         return self.reported
-def malformed(shape):
-    value = np.array([[1.0], [2.0]]).view(Malformed)
+def malformed(shape, values=None):
+    value = np.array([[1.0], [2.0]] if values is None else values).view(Malformed)
     value.reported = shape
     return value
 ",
@@ -279,11 +280,31 @@ def malformed(shape):
         let make = module.getattr("malformed").unwrap();
         for shape in [(3, 1), (usize::MAX, 2), (usize::MAX / 4, 1)] {
             let input = make.call1((shape,)).unwrap();
-            assert!(convert::numpy_to_dmatrix(py, &input).is_err());
-            assert!(convert::numpy_to_dvector(py, &input).is_err());
+            assert!(matches!(
+                convert::numpy_to_dmatrix(py, &input),
+                Err(BridgeError::ConversionError(_))
+            ));
+            assert!(matches!(
+                convert::numpy_to_dvector(py, &input),
+                Err(BridgeError::ConversionError(_))
+            ));
         }
         let input = make.call1(((-1, 1),)).unwrap();
         assert!(convert::numpy_to_dmatrix(py, &input).is_err());
         assert!(convert::numpy_to_dvector(py, &input).is_err());
+        for (expression, reported) in [
+            ("np.array([[1., 2.]])", (2, 1)),
+            ("np.arange(6, dtype='float64').reshape(2,3)", (3, 2)),
+        ] {
+            let input = make.call1((reported, array(py, expression))).unwrap();
+            assert!(matches!(
+                convert::numpy_to_dmatrix(py, &input),
+                Err(BridgeError::ConversionError(_))
+            ));
+            assert!(matches!(
+                convert::numpy_to_dvector(py, &input),
+                Err(BridgeError::ConversionError(_))
+            ));
+        }
     });
 }

@@ -66,7 +66,7 @@ pub fn numpy_to_dvector(py: Python<'_>, arr: &Bound<'_, PyAny>) -> BridgeResult<
         [len] | [len, 1] => checked_count(*len, 1)?,
         _ => return conversion_error("expected vector shape (n,) or (n,1)"),
     };
-    let values = logical_values(py, arr, len)?;
+    let values = logical_values(py, arr, &shape, len)?;
     Ok(DVector::from_vec(values))
 }
 
@@ -80,7 +80,7 @@ pub fn numpy_to_dmatrix(py: Python<'_>, arr: &Bound<'_, PyAny>) -> BridgeResult<
         return conversion_error("expected two-dimensional matrix");
     };
     let count = checked_count(*rows, *cols)?;
-    let values = logical_values(py, arr, count)?;
+    let values = logical_values(py, arr, &shape, count)?;
     Ok(DMatrix::from_row_slice(*rows, *cols, &values))
 }
 
@@ -124,6 +124,7 @@ fn validate_dtype(py: Python<'_>, arr: &Bound<'_, PyAny>) -> BridgeResult<()> {
 fn logical_values(
     py: Python<'_>,
     arr: &Bound<'_, PyAny>,
+    expected_shape: &[usize],
     expected: usize,
 ) -> BridgeResult<Vec<f64>> {
     // Subclasses such as np.matrix override ravel to retain two dimensions.
@@ -133,6 +134,13 @@ fn logical_values(
         .and_then(|np| np.call_method1("asarray", (arr,)))
         .map_err(|e| BridgeError::from_python(py, e, "normalize validated ndarray subclass"))?;
     validate_dtype(py, &base)?;
+    let actual_shape: Vec<usize> = base
+        .getattr("shape")
+        .and_then(|shape| shape.extract())
+        .map_err(|e| BridgeError::from_python(py, e, "extract normalized NumPy array shape"))?;
+    if actual_shape != expected_shape {
+        return conversion_error("NumPy subclass shape disagrees with underlying array");
+    }
     let values: Vec<f64> = base
         .call_method1("ravel", ("C",))
         .and_then(|flat| flat.call_method0("tolist"))
