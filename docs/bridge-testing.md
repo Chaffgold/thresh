@@ -22,7 +22,7 @@ python3.12 -m venv "$bridge_env"
 export PYO3_PYTHON="$bridge_env/bin/python"
 "$PYO3_PYTHON" -m unittest discover -s crates/thresh-bridge/tests -p test_runner.py -v
 "$PYO3_PYTHON" crates/thresh-bridge/tests/run_boundary_tests.py
-export PYTHONPATH="$("$PYO3_PYTHON" -c 'import os, site; print(os.pathsep.join(site.getsitepackages())))"
+export PYTHONPATH="$("$PYO3_PYTHON" -c 'import os, site; print(os.pathsep.join(site.getsitepackages()))')"
 cargo test --locked -p thresh-bridge --no-default-features --features stonesoup --doc
 ```
 

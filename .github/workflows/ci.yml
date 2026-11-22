@@ -195,7 +195,7 @@ jobs:
       - name: Execute feature-enabled bridge documentation examples
         shell: bash
         run: |
-          export PYTHONPATH="$("$PYO3_PYTHON" -c 'import os, site; print(os.pathsep.join(site.getsitepackages())))"
+          export PYTHONPATH="$("$PYO3_PYTHON" -c 'import os, site; print(os.pathsep.join(site.getsitepackages()))')"
           cargo test --locked -p thresh-bridge --no-default-features --features stonesoup --doc
 
   native-no-python:
