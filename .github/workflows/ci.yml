@@ -64,14 +64,23 @@ jobs:
   openspec:
     name: OpenSpec Validate
     runs-on: ubuntu-latest
+    env:
+      OPENSPEC_VERSION: '1.13.2'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install -g @fission-ai/openspec@latest
+      - name: Install pinned OpenSpec
+        run: npm install -g "@fission-ai/openspec@${OPENSPEC_VERSION}"
         env:
           OPENSPEC_TELEMETRY: '0'
+      - name: Verify OpenSpec version
+        shell: bash
+        run: |
+          installed_version="$(openspec --version)"
+          echo "OpenSpec ${installed_version} (expected ${OPENSPEC_VERSION})"
+          test "$installed_version" = "$OPENSPEC_VERSION"
       - run: openspec validate --all --strict --no-interactive
         env:
           OPENSPEC_TELEMETRY: '0'
