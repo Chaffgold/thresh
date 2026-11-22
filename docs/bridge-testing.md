@@ -43,11 +43,11 @@ installation through `DEVELOPER_DIR` if required by your local toolchain.
 
 `crates/thresh-bridge/tests/boundary-test-manifest.json` records exact test names
 for the library unit tests and every integration-test target. The runtime command
-currently requires **63 passed tests across six targets, zero ignored/failed**:
+currently requires **67 passed tests across six targets, zero ignored/failed**:
 
 | Target | Required tests |
 | --- | ---: |
-| Library unit tests | 17 |
+| Library unit tests | 21 |
 | `context_contract` | 11 |
 | `detection_contract` | 15 |
 | `numeric_contract` | 9 |
@@ -57,6 +57,11 @@ currently requires **63 passed tests across six targets, zero ignored/failed**:
 The last target contains the original import and nalgebra round-trip tests; they
 are no longer ignored and initialize their host explicitly. The library target
 includes physical-time, covariance, overflow, and interpreter-attachment tests.
+Four initialized-host wrapper-step tests use Python-owned dispatch doubles to
+verify ordered argument and return-object identity, repeated host reuse,
+unchanged host path/environment, missing-method diagnostics, and ordinary Python
+exception details. They exercise the real JPDA/MHT/IMM/PHD step methods but do
+not repair or validate the algorithms' constructor graphs.
 The integration targets cover five observation profiles, frame/pose/covariance,
 metadata, array rejection, lifecycle, and structured errors. Fresh-child process
 tests prevent imported modules or prior interpreter initialization from hiding

@@ -94,3 +94,21 @@ impl JpdaAssociator {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::step_test_support::assert_step_contract;
+
+    #[test]
+    fn initialized_associate_preserves_dispatch_and_errors() {
+        assert_step_contract(
+            "associate",
+            "JPDA association",
+            "JPDA association lookup",
+            3,
+            |py_associator| JpdaAssociator { py_associator },
+            |wrapper, arguments| wrapper.associate(&arguments[0], &arguments[1], &arguments[2]),
+        );
+    }
+}

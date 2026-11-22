@@ -5,7 +5,7 @@
 - [x] 1.1 Add a dedicated, fully resolved boundary-test environment under `crates/thresh-bridge/tests/` for CPython 3.12.13, Stone Soup 1.9.1, NumPy 2.5.3, and SciPy 1.18.1 without changing the training lock; verify a clean isolated install and record all resolved versions alongside the locked PyO3 version.
 - [x] 1.2 Implement fallible host-owned interpreter attachment without enabling auto-initialize; verify fresh-process tests return `PythonNotAvailable` before initialization and reuse an explicitly initialized host without changing its lifetime, path, or environment.
 - [x] 1.3 Replace reattaching/substr-matching error conversion with token-aware structured diagnostics; verify isolated import-hook tests distinguish missing top-level Stone Soup, NumPy/transitive dependency, installed-package submodule/symbol, and ordinary TypeError/ValueError while preserving available exception details.
-- [ ] 1.4 Route JPDA, MHT, IMM, and PHD entry/error plumbing through the shared runtime helpers without changing algorithm graphs; verify each token-free entry has a non-panicking uninitialized-process test and review the diff for constructor/stepping changes outside that plumbing.
+- [x] 1.4 Route JPDA, MHT, IMM, and PHD entry/error plumbing through the shared runtime helpers without changing algorithm graphs; verify non-panicking fresh-process failures for standalone token-free constructors and the shared attachment helper, exercise calls requiring Python-owned objects under an explicitly initialized host, and review the diff for constructor/stepping changes outside that plumbing.
 - [x] 1.5 Document explicit standalone-host initialization, Python-host reuse, structured error migration, interpreter lifetime, and linked-library deployment prerequisites; verify the initialization example runs and documentation does not claim missing shared libraries can always become Rust errors or that algorithm wrappers are repaired.
 
 ## 2. Typed observation context and physical time
@@ -39,16 +39,15 @@
 
 ## 6. Cross-cutting acceptance
 
-- [ ] 6.1 Run workspace formatting, warning-strict build/tests, Clippy, and rustdoc plus the feature-enabled bridge runtime manifest and native-isolation lane; attach results to the implementation review and verify every new requirement/scenario maps to an executed assertion rather than an ignored or import-only check.
+- [x] 6.1 Run workspace formatting, warning-strict build/tests, Clippy, and rustdoc plus the feature-enabled bridge runtime manifest and native-isolation lane; attach results to the implementation review and verify every new requirement/scenario maps to an executed assertion rather than an ignored or import-only check.
 - [x] 6.2 Run strict OpenSpec validation for live and archived artifacts plus the repository's metadata checks, review the final scope diff, and record remaining algorithm/deployment gaps; verify no provider data, algorithm graph repair, dependency upgrade, training/model release, crates.io publication, review archive, or unrelated validator-workflow repair was included.
 
-## Pending acceptance clarification
+## Approved acceptance clarification
 
-Task 1.4 remains unchecked: IMM/PHD construction requires an existing Python token,
-and wrapper step methods require already-created Python-owned objects. The current
-wording asks for fresh uninitialized-process tests of every token-free entry,
-which cannot safely construct those objects before Python initialization. The
-standalone constructors and shared attachment helper have fresh-process tests;
-initialized-host reuse and wrapper plumbing are covered separately. Approval to
-correct the checklist wording is pending. Task 6.1 remains unchecked until that
-acceptance mismatch is resolved; passing test execution alone does not close it.
+On 2026-11-22, the user approved separating standalone startup tests from calls
+requiring Python-owned objects. IMM/PHD construction requires an existing Python
+token, and wrapper step methods require already-created Python objects. Task 1.4
+therefore tests standalone constructors and the shared attachment helper before
+initialization, and Python-owned calls under an explicitly initialized host.
+This corrects the test plan without relaxing fallible attachment or host ownership,
+changing algorithm graphs, or claiming algorithm acceptance.

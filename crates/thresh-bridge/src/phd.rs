@@ -110,3 +110,24 @@ impl PhdFilter {
         &self.config
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::step_test_support::assert_step_contract;
+
+    #[test]
+    fn initialized_filter_preserves_dispatch_and_errors() {
+        assert_step_contract(
+            "update",
+            "PHD update",
+            "PHD update lookup",
+            2,
+            |py_updater| PhdFilter {
+                py_updater,
+                config: PhdConfig::default(),
+            },
+            |wrapper, arguments| wrapper.filter(&arguments[0], &arguments[1]),
+        );
+    }
+}

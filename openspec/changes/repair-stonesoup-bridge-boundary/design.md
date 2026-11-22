@@ -52,6 +52,15 @@ as the fix. A private `with_python` helper uses `Python::try_attach` and returns
 the supplied token. Apply the shared entry/error plumbing to all four wrapper
 modules without changing their algorithm graphs or declaring those graphs working.
 
+Lifecycle verification separates standalone calls from calls requiring existing
+Python objects. Test standalone constructors, the measurement converter, and the
+shared attachment helper in fresh processes before initialization. IMM/PHD
+construction requires a live Python token, and wrapper stepping requires objects
+created by Python; exercise those calls under an explicitly initialized host.
+Do not fabricate invalid Python objects or finalize the host to force an otherwise
+unreachable startup case. Synthetic dispatch doubles can verify wrapper plumbing
+without claiming that the upstream algorithm graphs work.
+
 Classify Python errors while a token is already held. Replace reattaching error
 conversion with an explicit token-aware mapper and structured cause information.
 The library never finalizes Python, changes `sys.path`, or changes environment

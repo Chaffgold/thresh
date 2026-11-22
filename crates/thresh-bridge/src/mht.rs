@@ -73,3 +73,21 @@ impl MhtTracker {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::step_test_support::assert_step_contract;
+
+    #[test]
+    fn initialized_run_preserves_dispatch_and_errors() {
+        assert_step_contract(
+            "track",
+            "MHT tracking",
+            "MHT track lookup",
+            2,
+            |py_tracker| MhtTracker { py_tracker },
+            |wrapper, arguments| wrapper.run(&arguments[0], &arguments[1]),
+        );
+    }
+}

@@ -40,6 +40,178 @@ pub(crate) fn required_attribute<'py>(
         .map_err(|error| BridgeError::from_python_api(object.py(), error, operation, name))
 }
 
+/// Test-only dispatch doubles prove boundary plumbing, not algorithm correctness.
+#[cfg(test)]
+pub(crate) mod step_test_support {
+    use super::*;
+    use pyo3::types::PyDict;
+
+    type HostSnapshot = (Vec<String>, Vec<(String, String)>, usize);
+
+    struct DispatchFixture {
+        object: Py<PyAny>,
+        arguments: Vec<Py<PyAny>>,
+        result: Py<PyAny>,
+        host: HostSnapshot,
+    }
+
+    /// Run a real wrapper step against a Python-owned, synthetic dispatch object.
+    pub(crate) fn assert_step_contract<W>(
+        method: &str,
+        operation: &str,
+        lookup_operation: &str,
+        arity: usize,
+        wrap: impl FnOnce(Py<PyAny>) -> W,
+        invoke: impl Fn(&W, &[Py<PyAny>]) -> BridgeResult<Py<PyAny>>,
+    ) {
+        Python::initialize();
+        Python::initialize();
+        let fixture = Python::attach(|py| create_fixture(py, method, arity));
+        let wrapper = wrap(Python::attach(|py| fixture.object.clone_ref(py)));
+        assert_successful_dispatch(&wrapper, &invoke, &fixture);
+        assert_python_failures(&wrapper, &invoke, &fixture, operation);
+        assert_missing_method(&wrapper, &invoke, &fixture, method, lookup_operation);
+        let host = Python::try_attach(host_snapshot).expect("host remains initialized");
+        assert_eq!(fixture.host, host);
+    }
+
+    fn create_fixture(py: Python<'_>, method: &str, arity: usize) -> DispatchFixture {
+        let globals = PyDict::new(py);
+        py.run(
+            c"\
+class DispatchDouble:
+    def __init__(self):
+        self.calls = []
+        self.result = object()
+        self.failure = None
+    def dispatch(self, *arguments):
+        self.calls.append(arguments)
+        if self.failure is not None:
+            raise self.failure
+        return self.result
+",
+            Some(&globals),
+            None,
+        )
+        .unwrap();
+        let object = globals
+            .get_item("DispatchDouble")
+            .unwrap()
+            .unwrap()
+            .call0()
+            .unwrap();
+        object
+            .setattr(method, object.getattr("dispatch").unwrap())
+            .unwrap();
+        DispatchFixture {
+            result: object.getattr("result").unwrap().unbind(),
+            object: object.unbind(),
+            arguments: (0..arity)
+                .map(|_| PyDict::new(py).into_any().unbind())
+                .collect(),
+            host: host_snapshot(py),
+        }
+    }
+
+    fn assert_successful_dispatch<W>(
+        wrapper: &W,
+        invoke: &impl Fn(&W, &[Py<PyAny>]) -> BridgeResult<Py<PyAny>>,
+        fixture: &DispatchFixture,
+    ) {
+        for _ in 0..2 {
+            // The call must attach itself; no Python token is held here.
+            let returned = invoke(wrapper, &fixture.arguments).unwrap();
+            Python::try_attach(|py| assert!(returned.bind(py).is(fixture.result.bind(py))))
+                .expect("step preserves the initialized host");
+        }
+        Python::attach(|py| {
+            let calls = fixture.object.bind(py).getattr("calls").unwrap();
+            assert_eq!(calls.len().unwrap(), 2);
+            for index in 0..2 {
+                let call = calls.get_item(index).unwrap();
+                assert_eq!(call.len().unwrap(), fixture.arguments.len());
+                for (position, argument) in fixture.arguments.iter().enumerate() {
+                    assert!(call.get_item(position).unwrap().is(argument.bind(py)));
+                }
+            }
+        });
+    }
+
+    fn assert_python_failures<W>(
+        wrapper: &W,
+        invoke: &impl Fn(&W, &[Py<PyAny>]) -> BridgeResult<Py<PyAny>>,
+        fixture: &DispatchFixture,
+        operation: &str,
+    ) {
+        const MESSAGE: &str = "synthetic step failure mentioning stonesoup numpy";
+        for kind in ["ValueError", "TypeError"] {
+            Python::attach(|py| {
+                let error = py
+                    .import("builtins")
+                    .unwrap()
+                    .getattr(kind)
+                    .unwrap()
+                    .call1((MESSAGE,))
+                    .unwrap();
+                fixture.object.bind(py).setattr("failure", error).unwrap();
+            });
+            let error = invoke(wrapper, &fixture.arguments).unwrap_err();
+            let BridgeError::PythonError(source) = error else {
+                panic!("expected ordinary Python execution error, got {error:?}");
+            };
+            assert_eq!(source.exception_type, kind);
+            assert_eq!(source.message, MESSAGE);
+            assert_eq!(source.operation, operation);
+            assert!(
+                source
+                    .traceback
+                    .as_ref()
+                    .is_some_and(|text| text.contains("dispatch"))
+            );
+        }
+    }
+
+    fn assert_missing_method<W>(
+        wrapper: &W,
+        invoke: &impl Fn(&W, &[Py<PyAny>]) -> BridgeResult<Py<PyAny>>,
+        fixture: &DispatchFixture,
+        method: &str,
+        lookup_operation: &str,
+    ) {
+        Python::attach(|py| fixture.object.bind(py).delattr(method).unwrap());
+        let error = invoke(wrapper, &fixture.arguments).unwrap_err();
+        let BridgeError::UnsupportedApi { api, source } = error else {
+            panic!("expected missing-method API error, got {error:?}");
+        };
+        assert_eq!(api, method);
+        assert_eq!(source.exception_type, "AttributeError");
+        assert_eq!(source.operation, lookup_operation);
+        assert!(source.message.contains(method));
+    }
+
+    fn host_snapshot(py: Python<'_>) -> HostSnapshot {
+        let sys = py.import("sys").unwrap();
+        let path = sys.getattr("path").unwrap().extract().unwrap();
+        let environment = py
+            .import("os")
+            .unwrap()
+            .getattr("environ")
+            .unwrap()
+            .call_method0("items")
+            .unwrap();
+        let values = py
+            .import("builtins")
+            .unwrap()
+            .getattr("sorted")
+            .unwrap()
+            .call1((environment,))
+            .unwrap()
+            .extract()
+            .unwrap();
+        (path, values, sys.as_ptr() as usize)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

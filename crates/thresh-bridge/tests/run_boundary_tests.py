@@ -4,8 +4,7 @@
 from __future__ import annotations
 
 import argparse
-import importlib
-from importlib import metadata
+from importlib import import_module, metadata
 import json
 import os
 from pathlib import Path
@@ -87,7 +86,7 @@ def runtime_environment() -> dict[str, str]:
     check_package_versions(locked_python_packages())
     for name in ("numpy", "scipy", "stonesoup"):
         try:
-            importlib.import_module(name)
+            import_module(name)
         except Exception as error:
             raise GateFailure(f"cannot import required Python dependency {name}: {error}") from error
     lock = tomllib.loads((REPOSITORY / "Cargo.lock").read_text(encoding="utf-8"))
