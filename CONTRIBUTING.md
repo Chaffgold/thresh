@@ -44,11 +44,32 @@ cargo clippy -p thresh-synth --features rcs-compute --all-targets -- -D warnings
 
 ### OpenSpec
 
-Design specs live in `openspec/`. Validate before committing:
+Design specs live in `openspec/`. CI uses **OpenSpec 1.13.2** on Node 22.
+Install the matching version (Node >=20.19.0 is required) and verify it before
+validating; do not use a floating `@latest` for reproducibility:
+
+```sh
+npm install -g @fission-ai/openspec@1.13.2
+openspec --version # must report 1.13.2
+```
+
+Run all three checks from the repository root before committing. `--all` does
+not validate archived tasks, and document validation alone does not check active
+change metadata:
 
 ```sh
 openspec validate --all --strict --no-interactive
+openspec validate --archived --strict --no-interactive
+for change in openspec/changes/*; do
+  if [ -d "$change" ] && [ "${change##*/}" != archive ]; then
+    openspec status --change "${change##*/}" || exit 1
+  fi
+done
 ```
+
+Upgrade the CI version pin and these instructions together in a reviewed PR,
+exercising all three checks. Keep strict validation enabled; do not weaken specs
+or remove archive/metadata checks to work around a validator mismatch.
 
 ### Commit Messages
 
