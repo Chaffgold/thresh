@@ -74,10 +74,8 @@ fn token_free_constructors_require_host_initialization() {
     fresh_process(
         "token_free_constructors_require_host_initialization",
         || {
-            assert!(matches!(
-                JpdaAssociator::new(&JpdaConfig::default()),
-                Err(BridgeError::PythonNotAvailable(_))
-            ));
+            // JPDA now requires Python-owned components, which cannot exist
+            // before host initialization. Its initialized-host path is below.
             assert!(matches!(
                 MhtTracker::new(&MhtConfig::default()),
                 Err(BridgeError::PythonNotAvailable(_))
@@ -100,8 +98,8 @@ fn explicit_host_initialization_is_reused_without_mutation() {
             });
             for _ in 0..3 {
                 assert!(matches!(
-                    JpdaAssociator::new(&JpdaConfig::default()),
-                    Err(BridgeError::StoneSoupNotInstalled(_))
+                    jpda_dependency_error(),
+                    BridgeError::StoneSoupNotInstalled(_)
                 ));
                 assert!(matches!(
                     MhtTracker::new(&MhtConfig::default()),
@@ -112,6 +110,88 @@ fn explicit_host_initialization_is_reused_without_mutation() {
             assert_eq!(before, after);
         },
     );
+}
+
+fn jpda_dependency_error() -> BridgeError {
+    Python::attach(|py| {
+        let placeholder = py.None();
+        JpdaAssociator::new(&JpdaConfig::default(), &placeholder, &placeholder)
+            .err()
+            .expect("blocked dependency must fail before component use")
+    })
+}
+
+fn reference_context(py: Python<'_>) -> Bound<'_, PyDict> {
+    let globals = PyDict::new(py);
+    py.run(
+        c"\
+from datetime import datetime, timezone
+from stonesoup.models.transition.linear import RandomWalk
+from stonesoup.models.measurement.linear import LinearGaussian
+from stonesoup.predictor.kalman import KalmanPredictor
+from stonesoup.updater.kalman import KalmanUpdater
+predictor = KalmanPredictor(RandomWalk(0.0))
+updater = KalmanUpdater(LinearGaussian(ndim_state=1, mapping=[0], noise_covar=[[1.0]]))
+timestamp = datetime(2020, 1, 1, tzinfo=timezone.utc)
+tracks, detections = set(), set()
+prior, births = [], []
+",
+        Some(&globals),
+        None,
+    )
+    .unwrap();
+    globals
+}
+
+#[test]
+fn initialized_reference_calls_reuse_host_without_mutation() {
+    fresh_process(
+        "initialized_reference_calls_reuse_host_without_mutation",
+        || {
+            Python::initialize();
+            Python::attach(|py| {
+                let context = reference_context(py);
+                let before = environment_snapshot(py);
+                for _ in 0..3 {
+                    assert_empty_reference_calls(py, &context);
+                }
+                assert_eq!(before, environment_snapshot(py));
+            });
+        },
+    );
+}
+
+fn assert_empty_reference_calls(py: Python<'_>, context: &Bound<'_, PyDict>) {
+    let item = |name| context.get_item(name).unwrap().unwrap().unbind();
+    let predictor = item("predictor");
+    let updater = item("updater");
+    let timestamp = item("timestamp");
+    let detections = item("detections");
+    let jpda = JpdaAssociator::new(&JpdaConfig::default(), &predictor, &updater).unwrap();
+    let associations = jpda
+        .associate(&item("tracks"), &detections, &timestamp)
+        .unwrap();
+    assert_eq!(associations.bind(py).len().unwrap(), 0);
+    let phd = PhdFilter::new(
+        py,
+        PhdConfig::default(),
+        predictor.bind(py),
+        updater.bind(py),
+    )
+    .unwrap();
+    let posterior = phd
+        .filter(&item("prior"), &item("births"), &detections, &timestamp)
+        .unwrap();
+    assert_eq!(
+        posterior
+            .bind(py)
+            .getattr("components")
+            .unwrap()
+            .len()
+            .unwrap(),
+        0
+    );
+    assert!(posterior.bind(py).getattr("timestamp").unwrap().is_none());
 }
 
 fn environment_snapshot(py: Python<'_>) -> (Vec<String>, Vec<(String, String)>, usize) {
@@ -141,7 +221,7 @@ fn missing_top_level_stonesoup_is_distinct() {
     fresh_process("missing_top_level_stonesoup_is_distinct", || {
         Python::initialize();
         Python::attach(|py| block_import(py, "stonesoup", "stonesoup"));
-        let error = JpdaAssociator::new(&JpdaConfig::default()).err().unwrap();
+        let error = jpda_dependency_error();
         assert!(matches!(&error, BridgeError::StoneSoupNotInstalled(_)));
         assert_import_details(&error);
     });
@@ -175,7 +255,7 @@ fn missing_transitive_dependency_uses_exception_identity() {
         || {
             Python::initialize();
             Python::attach(|py| block_import(py, "stonesoup", "synthetic_dependency"));
-            let error = JpdaAssociator::new(&JpdaConfig::default()).err().unwrap();
+            let error = jpda_dependency_error();
             assert!(
                 matches!(&error, BridgeError::MissingDependency { name, .. } if name == "synthetic_dependency")
             );
@@ -292,31 +372,17 @@ fn assert_ordinary_error(py: Python<'_>, source: &std::ffi::CStr, kind: &str) {
 }
 
 #[test]
-fn initialized_token_constructors_report_existing_algorithm_failures() {
-    fresh_process(
-        "initialized_token_constructors_report_existing_algorithm_failures",
-        || {
-            Python::initialize();
-            Python::attach(|py| {
-                let models = PyList::empty(py);
-                let imm_error = ImmFilter::new(py, &ImmConfig::default(), &models)
-                    .err()
-                    .unwrap();
-                assert!(
-                    matches!(&imm_error, BridgeError::UnsupportedApi { api, .. } if api == "stonesoup.predictor.interacting")
-                );
-                let placeholder = py.None();
-                let phd_error = PhdFilter::new(
-                    py,
-                    PhdConfig::default(),
-                    placeholder.bind(py),
-                    placeholder.bind(py),
-                )
+fn initialized_imm_constructor_reports_unresolved_api() {
+    fresh_process("initialized_imm_constructor_reports_unresolved_api", || {
+        Python::initialize();
+        Python::attach(|py| {
+            let models = PyList::empty(py);
+            let imm_error = ImmFilter::new(py, &ImmConfig::default(), &models)
                 .err()
                 .unwrap();
-                assert!(matches!(&phd_error, BridgeError::PythonError(_)));
-                assert_eq!(exception(&phd_error).exception_type, "TypeError");
-            });
-        },
-    );
+            assert!(
+                matches!(&imm_error, BridgeError::UnsupportedApi { api, .. } if api == "stonesoup.predictor.interacting")
+            );
+        });
+    });
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed, dependency-pinned Rust/Python boundary test gate (stdlib only)."""
+"""Fail-closed, pinned boundary and bounded algorithm-reference gate (stdlib only)."""
 
 from __future__ import annotations
 
@@ -246,7 +246,8 @@ def main() -> int:
         print(f"Boundary gate FAILED: {error}", file=sys.stderr)
         return 1
     print(f"Boundary gate PASSED: {count} required tests across {len(targets)} targets; zero ignored.")
-    print("Boundary conformance only: algorithm wrappers and linked-library deployment remain separate gaps.")
+    print("Boundary and bounded linear-Gaussian JPDA/GM-PHD checks only; "
+          "MHT/IMM, whole-track accuracy and linked-library deployment remain separate gaps.")
     return 0
 
 

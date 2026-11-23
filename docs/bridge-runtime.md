@@ -5,22 +5,45 @@ interpreter. It does not initialize or finalize Python. Standalone Rust hosts
 must initialize explicitly; Python-hosted applications reuse their interpreter.
 
 ```rust
-use pyo3::Python;
+use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use thresh_bridge::jpda::{JpdaAssociator, JpdaConfig};
+use thresh_bridge::phd::{PhdFilter, PhdConfig};
 
 fn main() {
     Python::initialize(); // Host-owned, idempotent when already initialized.
-    match JpdaAssociator::new(&JpdaConfig::default()) {
-        Ok(_associator) => {}
-        Err(error) => eprintln!("{error}"),
-    }
+    Python::attach(|py| {
+        let objects = PyDict::new(py);
+        py.run(c"\
+from stonesoup.models.transition.linear import ConstantVelocity
+from stonesoup.models.measurement.linear import LinearGaussian
+from stonesoup.predictor.kalman import KalmanPredictor
+from stonesoup.updater.kalman import KalmanUpdater
+predictor = KalmanPredictor(ConstantVelocity(0.1))
+updater = KalmanUpdater(LinearGaussian(ndim_state=2, mapping=[0], noise_covar=[[1.0]]))
+", Some(&objects), None).unwrap();
+        let predictor = objects.get_item("predictor").unwrap().unwrap().unbind();
+        let updater = objects.get_item("updater").unwrap().unwrap().unbind();
+        let _jpda = JpdaAssociator::new(&JpdaConfig::default(), &predictor, &updater).unwrap();
+        let _phd = PhdFilter::new(py, PhdConfig::default(), predictor.bind(py), updater.bind(py))
+            .unwrap();
+    });
 }
 ```
 
-The constructor can still fail: **this boundary change does not repair the
-JPDA, MHT, IMM, or GM-PHD algorithm graphs**. The test suite executes this
-initialization pattern and verifies that known algorithm/API failures are
-reported rather than mistaken for a missing interpreter.
+JPDA and GM-PHD now require explicit compatible predictor/updater components;
+the example supplies invented dynamics and observation noise, not defaults
+chosen by the bridge. Their linear-Gaussian reference tests exercise real
+construction and calls. MHT/IMM reference graphs remain unresolved, and none of
+these checks certifies full-track accuracy or deployment readiness. See
+[bridge-references.md](bridge-references.md) for the scan APIs and compatibility
+limits. Missing dependencies and ordinary upstream failures remain structured
+errors, not evidence of a missing interpreter.
+
+JPDA's constructor now accepts Python-owned objects, so it cannot be exercised
+with valid inputs before host initialization. Fresh-process startup assertions
+remain on standalone entry points and the shared attachment helper; initialized
+JPDA/GM-PHD calls verify host reuse without path or environment mutation.
 
 Token-free calls use `Python::try_attach`, returning
 `BridgeError::PythonNotAvailable` when attachment is unavailable. This remains

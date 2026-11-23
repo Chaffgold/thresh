@@ -168,7 +168,7 @@ jobs:
 
   stonesoup-boundary:
     # Required on every PR, including PRs to develop; never path-filter this lane.
-    # Boundary success does not certify the separate algorithm-wrapper repairs.
+    # Includes bounded JPDA/GM-PHD references, not whole-track/MHT/IMM acceptance.
     name: Stone Soup boundary
     runs-on: ubuntu-latest
     steps:
@@ -188,7 +188,7 @@ jobs:
           echo "PYO3_PYTHON=$RUNNER_TEMP/thresh-bridge-python/bin/python" >> "$GITHUB_ENV"
       - name: Verify boundary runner failure modes
         run: '"$PYO3_PYTHON" -m unittest discover -s crates/thresh-bridge/tests -p test_runner.py -v'
-      - name: Execute every manifest boundary test
+      - name: Execute every manifest boundary and reference test
         # Runner verifies versions and sets child PYTHONPATH for embedding only.
         # It rejects missing packages, ignored tests, missing names and zero tests.
         run: '"$PYO3_PYTHON" crates/thresh-bridge/tests/run_boundary_tests.py'

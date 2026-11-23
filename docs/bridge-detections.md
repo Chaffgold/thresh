@@ -89,5 +89,7 @@ observations may round to the same microsecond without artificial time increment
 Unsupported variants and Rust-side validation errors take precedence over Python
 availability. Finite inputs producing nonfinite derived values are rejected.
 Native core measurement vectors/defaults and the training pipeline's ADS-B role
-are unchanged. Passing these examples certifies only boundary construction: the
-known JPDA, MHT, IMM, PHD, and missing-shared-library deployment gaps remain.
+are unchanged. Passing these examples certifies only boundary construction.
+Separate [linear-Gaussian JPDA/GM-PHD reference checks](bridge-references.md) do
+not certify these nonlinear models' algorithm results. MHT/IMM reference and
+missing-shared-library deployment gaps remain unresolved.
