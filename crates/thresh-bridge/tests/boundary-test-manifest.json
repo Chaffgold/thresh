@@ -19,6 +19,7 @@
       "phd::tests::component_copy_failure_is_structured_and_never_dispatches",
       "phd::tests::construction_maps_config_and_preserves_component_identity",
       "phd::tests::constructor_import_and_api_failures_retain_structured_causes",
+      "phd::tests::distinct_same_tag_components_may_share_arrays_and_ancestry",
       "phd::tests::graph_dispatch_deep_copies_once_and_retains_provenance",
       "phd::tests::graph_missing_methods_are_operation_specific_api_errors",
       "phd::tests::invalid_config_fails_before_imports_and_endpoints_are_valid",
@@ -29,6 +30,7 @@
       "phd::tests::reducer_merging_matches_moments_and_clips_weight_at_one",
       "phd::tests::reducer_pruning_redistributes_and_pruning_everything_is_empty",
       "phd::tests::reducer_truncation_redistributes_removed_weight",
+      "phd::tests::repeated_component_objects_fail_before_copy_and_preserve_inputs",
       "phd::tests::unexpected_validation_and_result_errors_keep_their_context",
       "phd::tests::valid_collection_types_and_intensity_weights_are_not_normalized",
       "runtime::tests::uninitialized_shared_attachment_is_fallible",
@@ -97,6 +99,7 @@
     ],
     "phd_reference": [
       "detected_birth_receives_survival_and_no_missed_birth",
+      "distinct_components_with_shared_arrays_and_ancestry_preserve_total_intensity",
       "existing_and_birth_intensities_share_detection_denominator",
       "independently_empty_scan_inputs_preserve_birth_and_missed_semantics",
       "intensity_weights_may_exceed_one_without_normalization",

@@ -115,6 +115,8 @@ impl PhdFilter {
     ///
     /// Priors/births are repeatable collections of tagged Gaussian states with finite
     /// nonnegative weights and compatible finite float64 state/covariance arrays.
+    /// Each component must be a distinct Python object across both collections;
+    /// distinct objects may share tags, array storage, and reachable ancestry.
     /// Birth tags must be `birth`; prior tags must not. All times must be aware
     /// UTC datetimes. Priors share a time no later than the scan; birth/detection
     /// times equal the scan. Detections are also a repeatable collection and share

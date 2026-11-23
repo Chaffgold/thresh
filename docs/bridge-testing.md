@@ -63,16 +63,16 @@ installation through `DEVELOPER_DIR` if required by your local toolchain.
 
 `crates/thresh-bridge/tests/boundary-test-manifest.json` records exact test names
 for the library unit tests and every integration-test target. The runtime command
-currently requires **106 passed tests across eight targets, zero ignored/failed**:
+currently requires **109 passed tests across eight targets, zero ignored/failed**:
 
 | Target | Required tests |
 | --- | ---: |
-| Library unit tests | 36 |
+| Library unit tests | 38 |
 | `context_contract` | 11 |
 | `detection_contract` | 17 |
 | `numeric_contract` | 9 |
 | `jpda_reference` | 11 |
-| `phd_reference` | 10 |
+| `phd_reference` | 11 |
 | `runtime_contract` | 10 |
 | `stonesoup_integration` | 2 |
 
@@ -115,9 +115,9 @@ An ordinary `cargo test` exit code of zero is not a substitute for this gate.
 ## Recorded reference verification (2026-11-22)
 
 The JPDA/GM-PHD repair was verified locally with the exact runtime above and
-unchanged dependency locks. The complete manifest passed all 106 tests with zero
+unchanged dependency locks. The complete manifest passed all 109 tests with zero
 ignored, failed, or filtered tests; all 14 runner self-tests and seven
-feature-enabled doctests also passed. The library inventory includes 15 PHD
+feature-enabled doctests also passed. The library inventory includes 17 PHD
 contract/reducer tests and two JPDA construction/dispatch tests.
 
 Observed maximum absolute residuals across the independent numerical runs were
@@ -139,17 +139,23 @@ fails the test. The separate independent quantile/oracle checks are unchanged;
 no gate tolerance or test skip was introduced.
 
 Sonar coverage now combines normal workspace profiles with an instrumented run
-of the same exact bridge manifest, including fresh-process children. A local
+of the same exact bridge manifest, including fresh-process children. An earlier local
 merge check ran 296 core tests plus all 106 bridge tests and retained both native
 and bridge coverage: JPDA 172/172 lines, PHD 245/250, and scan validation 222/237.
 Synthetic Python fixtures live under `tests/support`, and Rust `src/**/tests.rs`
 files are classified as tests. Production coverage exclusions and quality-gate
 thresholds were not relaxed.
 
-Independent source/test review checked all six added requirements and 18
+Independent source/test reviews checked all six added requirements and 20
 scenarios. A missing preflight-order regression check was added: when detections
 is a generator, counted reusable prior/birth collections remain unread and the
-generator remains unconsumed. No review findings remain. Caller-model
+generator remains unconsumed. The repeated-component review finding was also
+resolved with the user-approved identity-only input contract. Duplicate prior
+and birth objects are rejected before copying or dispatch, without changing
+caller inputs. Distinct components with equal tags, shared arrays and shared
+ancestry remain accepted; the real-runtime fixture retains two weight-0.5 missed
+components and total intensity 1.0 (numeric residual 0). All three added tests
+are required by the exact manifest. No review findings remain. Caller-model
 compatibility, including updater-owned fallback models, remains an explicit
 precondition documented in [bridge-references.md](bridge-references.md).
 

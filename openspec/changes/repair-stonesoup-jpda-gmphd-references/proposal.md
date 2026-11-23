@@ -9,6 +9,7 @@ The Stone Soup review identified unsupported constructor and call contracts in t
 - **BREAKING**: Require caller-supplied predictor and updater objects for JPDA construction; make detection probability explicit alongside gate probability and clutter spatial density.
 - **BREAKING**: Replace GM-PHD's unsupported direct updater call with an explicit hypothesiser, intensity updater, and reducer composition; require an update timestamp and explicit caller-owned birth components.
 - Define configuration domains, measurement-space units, missed-detection behavior, birth/survival semantics, and reduction behavior for the pinned Stone Soup 1.9.1 runtime.
+- Require reusable GM-PHD input collections and unique prior/birth component objects, while retaining support for distinct components that share values, tags, arrays, or ancestry.
 - Add executable Rust-to-Python constructor and one-step tests, independent small JPDA event enumeration, and hand-derived GM-PHD intensity/reduction fixtures.
 - Preserve the host-owned interpreter, observation conversion, structured-error, feature-isolation, and exact executed-test-manifest contracts established by the boundary repair.
 

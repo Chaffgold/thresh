@@ -1,5 +1,7 @@
 //! Attached input checks; contract violations never reach hypothesis generation.
 
+use std::collections::HashSet;
+
 use pyo3::exceptions::{PyAttributeError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyIterator, PyList};
@@ -55,6 +57,7 @@ struct ScanValidator<'py> {
     state_dimension: Option<usize>,
     detection_dimension: Option<usize>,
     prior_time: Option<Bound<'py, PyAny>>,
+    component_identities: HashSet<usize>,
 }
 
 impl<'py> ScanValidator<'py> {
@@ -84,6 +87,7 @@ impl<'py> ScanValidator<'py> {
             state_dimension: None,
             detection_dimension: None,
             prior_time: None,
+            component_identities: HashSet::new(),
         };
         validator.validate_time(timestamp)?;
         Ok(validator)
@@ -110,6 +114,7 @@ impl<'py> ScanValidator<'py> {
         if !component.is_instance(&self.component_type).map_err(error)? {
             return invalid("components must be TaggedWeightedGaussianState instances");
         }
+        self.validate_component_identity(component)?;
         validate_tag_and_weight(component, birth)?;
         let state = input_attribute(component, "state_vector")?;
         let state = array_contract(numpy_to_dvector(component.py(), &state))?;
@@ -121,6 +126,19 @@ impl<'py> ScanValidator<'py> {
         compatible_dimension(&mut self.state_dimension, state.len(), "component state")?;
         let timestamp = input_attribute(component, "timestamp")?;
         self.validate_component_time(&timestamp, birth)
+    }
+
+    fn validate_component_identity(&mut self, component: &Bound<'py, PyAny>) -> BridgeResult<()> {
+        // The combined list retains earlier components, so their addresses cannot
+        // be reused during this scan. Do not invoke Python equality or hashing:
+        // distinct components may share tags, values, arrays, and ancestry.
+        if !self
+            .component_identities
+            .insert(component.as_ptr() as usize)
+        {
+            return invalid("prior and birth components must be distinct Python objects");
+        }
+        Ok(())
     }
 
     fn validate_component_time(

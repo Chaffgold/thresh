@@ -33,6 +33,8 @@ The GM-PHD reference SHALL accept caller-supplied compatible predictor and updat
 
 Prior, birth, and detection inputs SHALL be reusable collections, such as lists, tuples, sets, or Gaussian mixtures. One-shot iterators and generators SHALL be rejected before any input collection is consumed.
 
+Every component entry across the combined prior and birth collections SHALL refer to a distinct Python component object. Repeated component identities SHALL be rejected with an algorithm-validation error before component copying or hypothesis generation. Distinct components SHALL remain accepted when their values or tags are equal, or when they share numeric arrays or ancestry, provided the other scan contracts hold.
+
 #### Scenario: Supported scan
 - **WHEN** valid prior, birth, and detection inputs describe one compatible linear-Gaussian measurement space at the declared scan time
 - **THEN** the reference predicts, forms hypotheses, updates the intensity, and reduces the mixture, returning Gaussian components with hypothesis provenance rather than fabricated target tracks
@@ -48,6 +50,14 @@ Prior, birth, and detection inputs SHALL be reusable collections, such as lists,
 #### Scenario: One-shot input cannot be preserved
 - **WHEN** any prior, birth, or detection input is a generator or another one-shot iterator
 - **THEN** the call returns an algorithm-validation error without consuming that iterator or any other input collection
+
+#### Scenario: Repeated component identity
+- **WHEN** a prior or birth collection contains the same component object more than once
+- **THEN** the call returns an algorithm-validation error before copying components or dispatching the graph, leaving caller containers and component contents unchanged
+
+#### Scenario: Distinct components with shared contents
+- **WHEN** two distinct prior components each have weight 0.5 and share equal values, a tag, numeric arrays, and ancestry, with survival probability one, detection probability zero, no detections, and neutral reduction
+- **THEN** both components remain accepted, the output contains two missed components with total intensity 1.0, and caller inputs and their shared relationships remain unchanged
 
 ### Requirement: GM-PHD intensity and birth compatibility
 The reference SHALL preserve the pinned runtime's documented intensity semantics rather than normalizing mixture weights to sum to one. For supported ungated fixtures, an existing component of weight w SHALL contribute missed weight (1-Pd) Ps w and per-detection weight Pd Ps w q divided by the sum of clutter density and all eligible Pd Ps w q contributions. Detected births SHALL receive the pinned composition's survival factor and a non-birth tag; undetected births SHALL contribute no missed component. Exact zero updater weights SHALL receive the pinned runtime's machine-epsilon replacement before reduction, documented separately from mathematical zero; subsequent reduction SHALL retain its configured removal and redistribution behavior.

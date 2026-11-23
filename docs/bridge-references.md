@@ -46,6 +46,10 @@ provenance, not stable target IDs or extracted tracks.
   nonnegative intensity weights. Weights can exceed one and do not sum to one.
 - Every birth carries tag `birth`; no prior carries it. Births are supplied
   explicitly each scan, never inferred from detections.
+- Each prior/birth entry must be a distinct component object. Repeating the same
+  object returns `AlgorithmError` before copying or graph dispatch; the pinned
+  hypothesiser would otherwise silently collapse its intensity. Distinct objects
+  may have equal values or tags and may share numeric arrays or ancestry.
 - Required times are timezone-aware UTC. Priors share a time no later than the
   scan; births and detections have exactly the scan time. Invalid type, tag,
   numeric shape/value, or temporal context is an `AlgorithmError` before

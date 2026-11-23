@@ -333,6 +333,97 @@ fn malformed_scan_inputs_fail_before_hypothesis_generation() {
 }
 
 #[test]
+fn repeated_component_objects_fail_before_copy_and_preserve_inputs() {
+    for collection in ["prior", "births"] {
+        let source = format!(
+            "f.{collection}.append(f.{collection}[0]); f.original_collection = f.{collection}"
+        );
+        let fixture = Fixture::new(Some(&source));
+        let error = fixture.invoke().unwrap_err();
+        let BridgeError::AlgorithmError(message) = error else {
+            panic!("expected identity validation error, got {error:?}");
+        };
+        assert!(message.contains("distinct Python objects"), "{message}");
+        assert!(fixture.calls().is_empty());
+        Python::attach(|py| {
+            let object = fixture.object.bind(py);
+            let components = object.getattr(collection).unwrap();
+            assert!(components.is(object.getattr("original_collection").unwrap()));
+            assert!(
+                components
+                    .get_item(0)
+                    .unwrap()
+                    .is(components.get_item(1).unwrap())
+            );
+            assert_eq!(
+                object
+                    .getattr("copy_count")
+                    .unwrap()
+                    .extract::<usize>()
+                    .unwrap(),
+                0
+            );
+            let prior_count = if collection == "prior" { 2 } else { 1 };
+            let birth_count = if collection == "births" { 2 } else { 1 };
+            fixture
+                .module
+                .bind(py)
+                .call_method1("assert_preserved", (object, prior_count, birth_count))
+                .unwrap();
+        });
+    }
+}
+
+#[test]
+fn distinct_same_tag_components_may_share_arrays_and_ancestry() {
+    for births in [false, true] {
+        let source = format!(
+            "with_distinct_shared_components(f, {})",
+            if births { "True" } else { "False" }
+        );
+        let fixture = Fixture::new(Some(&source));
+        let result = fixture.invoke().unwrap();
+        assert_eq!(fixture.calls(), ["hypothesise", "update", "reduce"]);
+        Python::attach(|py| {
+            let object = fixture.object.bind(py);
+            let collection = if births { "births" } else { "prior" };
+            let original = object.getattr(collection).unwrap();
+            let original_first = original.get_item(0).unwrap();
+            let original_second = original.get_item(1).unwrap();
+            assert!(!original_first.is(&original_second));
+            assert!(
+                original_first
+                    .getattr("tag")
+                    .unwrap()
+                    .eq(original_second.getattr("tag").unwrap())
+                    .unwrap()
+            );
+            let components = result.bind(py).getattr("components").unwrap();
+            assert_eq!(components.len().unwrap(), 2);
+            let first = components.get_item(0).unwrap();
+            let second = components.get_item(1).unwrap();
+            assert!(!first.is(&second));
+            assert_shared_component_graph(&first, &second);
+            assert_shared_component_graph(&original_first, &original_second);
+            assert_float_attr(&first, "weight", 0.5);
+            assert_float_attr(&second, "weight", 0.5);
+        });
+    }
+}
+
+fn assert_shared_component_graph(first: &Bound<'_, PyAny>, second: &Bound<'_, PyAny>) {
+    for name in ["state_vector", "covar", "ancestry"] {
+        assert!(
+            first
+                .getattr(name)
+                .unwrap()
+                .is(second.getattr(name).unwrap()),
+            "shared {name}"
+        );
+    }
+}
+
+#[test]
 fn one_shot_inputs_are_rejected_without_consumption() {
     for collection in ["prior", "births", "detections"] {
         let source = format!(

@@ -110,8 +110,8 @@ def fixture():
     return f
 
 
-def assert_preserved(f):
-    assert len(f.prior) == 1 and len(f.births) == 1 and len(f.detections) == 1
+def assert_preserved(f, prior_count=1, birth_count=1):
+    assert len(f.prior) == prior_count and len(f.births) == birth_count and len(f.detections) == 1
     a, b, p = f.prior[0], f.births[0], f.parent
     assert a.tag == "existing" and b.tag == "birth" and p.tag == "ancestor"
     assert a.weight == 0.5 and b.weight == 0.5 and p.weight == 2.5
@@ -122,6 +122,20 @@ def assert_preserved(f):
     np.testing.assert_array_equal(a.covar, [[1.0]])
     np.testing.assert_array_equal(p.state_vector, [[-1.0]])
     np.testing.assert_array_equal(p.covar, [[1.0]])
+
+
+def with_distinct_shared_components(f, births):
+    # Reuse the fixture's two distinct objects and its shared arrays/ancestry.
+    # Giving both objects the same tag must not make their identities collide.
+    prior, birth = f.prior[0], f.births[0]
+    if births:
+        prior.tag = "birth"
+        f.prior = []
+        f.births = [prior, birth]
+    else:
+        birth.tag = "existing"
+        f.prior = [prior, birth]
+        f.births = []
 
 
 class CopyFailure(TaggedWeightedGaussianState):

@@ -53,6 +53,25 @@ def add_ancestry(scan):
     scan["prior"][0] = Update.from_state(ancestor, hypothesis=hypothesis)
 
 
+def share_prior_arrays_and_ancestry(scan):
+    """Keep two equal components distinct while sharing their reachable graph."""
+    first, second = scan["prior"]
+    ancestor = TaggedWeightedGaussianState(
+        np.array([[-1.0]]), np.array([[2.0]]), timestamp=first.timestamp,
+        weight=0.25, tag="ancestor",
+    )
+    first = Prediction.from_state(first, prior=ancestor)
+    second = Prediction.from_state(second, prior=ancestor, tag=first.tag)
+    second.state_vector = first.state_vector
+    second.covar = first.covar
+    scan["prior"][:] = [first, second]
+    assert first is not second
+    assert first.state_vector is second.state_vector
+    assert first.covar is second.covar
+    assert first.prior is second.prior is ancestor
+    assert first.tag == second.tag
+
+
 def state_snapshot(state):
     fields = (id(state), state.tag, float(state.weight), state.timestamp,
               id(state.state_vector), state.state_vector.dtype.str,

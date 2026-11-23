@@ -459,3 +459,38 @@ fn successful_scan_preserves_inputs_arrays_and_reachable_ancestry() {
         );
     });
 }
+
+#[test]
+fn distinct_components_with_shared_arrays_and_ancestry_preserve_total_intensity() {
+    with_python(|py| {
+        let fixture = Fixture::new(py, "scalar", &[0.5, 0.5], &[], &[]);
+        fixture
+            .module
+            .getattr("share_prior_arrays_and_ancestry")
+            .unwrap()
+            .call1((&fixture.scan,))
+            .unwrap();
+        let before = fixture.snapshot();
+        let config = PhdConfig {
+            survival_probability: 1.0,
+            detection_probability: 0.0,
+            ..neutral_config()
+        };
+        let result = fixture.filter(config);
+        // Each distinct prior contributes (1-Pd)*Ps*w = (1-0)*1*.5 = .5.
+        // Shared arrays, ancestry and equal tags must not collapse multiplicity.
+        assert_components(
+            fixture.components(&result),
+            vec![scalar(0.5, 0.0, 1.0), scalar(0.5, 0.0, 1.0)],
+            1.0,
+        );
+        // The snapshot records component/container IDs, shared array IDs and the
+        // complete shared prior graph as well as values, weights, tags and times.
+        assert!(before.eq(fixture.snapshot()).unwrap());
+        let components = result.getattr("components").unwrap();
+        let first_tag = components.get_item(0).unwrap().getattr("tag").unwrap();
+        let second_tag = components.get_item(1).unwrap().getattr("tag").unwrap();
+        // Neutral numeric merging still permits the pin's duplicate-tag repair.
+        assert!(!first_tag.eq(second_tag).unwrap());
+    });
+}
