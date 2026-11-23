@@ -4,7 +4,7 @@ use std::ffi::CString;
 use pyo3::types::PyModule;
 
 fn fixture_module(py: Python<'_>) -> Bound<'_, PyModule> {
-    let source = CString::new(include_str!("contract_fixture.py")).unwrap();
+    let source = CString::new(include_str!("../../tests/support/phd_contract_fixture.py")).unwrap();
     PyModule::from_code(
         py,
         &source,
@@ -501,7 +501,7 @@ fn component_copy_failure_is_structured_and_never_dispatches() {
 fn valid_collection_types_and_intensity_weights_are_not_normalized() {
     for source in [
         "f.prior[0].weight = 2.5; f.births[0].weight = 0.0; f.prior = tuple(f.prior); f.births = tuple(f.births)",
-        "f.prior[0].weight = 2.5; f.births[0].weight = 0.0; f.prior = GaussianMixture(f.prior)",
+        "f.prior[0].weight = 2.5; f.births[0].weight = 0.0; with_mixture_prior(f)",
     ] {
         let fixture = Fixture::new(Some(source));
         let result = fixture.invoke().unwrap();

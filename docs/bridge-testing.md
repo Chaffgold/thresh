@@ -130,6 +130,22 @@ failed the oracle assertion (Cargo exit 101); the perturbation was removed and
 the suite passed again. These residuals describe tiny synthetic fixtures, not
 sequence-level tracking accuracy.
 
+The first Linux PR run exposed an adjacent-float SciPy quantile difference
+(`6.6348966010212145` versus the local `6.634896601021215`). The gate-equality
+fixture now calibrates real numeric inputs over a bounded set of positive
+measurement variances, requires exact computed distance equality, and checks the
+next larger observation is strictly outside. Failure to construct that geometry
+fails the test. The separate independent quantile/oracle checks are unchanged;
+no gate tolerance or test skip was introduced.
+
+Sonar coverage now combines normal workspace profiles with an instrumented run
+of the same exact bridge manifest, including fresh-process children. A local
+merge check ran 296 core tests plus all 106 bridge tests and retained both native
+and bridge coverage: JPDA 172/172 lines, PHD 245/250, and scan validation 222/237.
+Synthetic Python fixtures live under `tests/support`, and Rust `src/**/tests.rs`
+files are classified as tests. Production coverage exclusions and quality-gate
+thresholds were not relaxed.
+
 Independent source/test review checked all six added requirements and 18
 scenarios. A missing preflight-order regression check was added: when detections
 is a generator, counted reusable prior/birth collections remain unread and the

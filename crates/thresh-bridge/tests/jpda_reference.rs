@@ -342,44 +342,51 @@ fn probability_gate_uses_independent_one_dimensional_squared_threshold() {
 
 #[test]
 fn controlled_gate_equality_is_inclusive_without_rounding_tolerance() {
-    with_fixtures(|py, module| {
-        // The pinned chi2 implementation differs from the independent tabulated
-        // quantile by 4e-15. For this comparator-only fixture, S=4 yields an
-        // exactly representable computed d² equal to the pinned threshold.
-        // Assert bitwise equality before relying on this deliberate boundary.
-        let pinned_threshold: f64 = 6.634_896_601_021_215;
-        assert!((pinned_threshold - GATE_99).abs() <= ATOL);
-        let boundary = 2.0 * pinned_threshold.sqrt();
-        let kwargs = PyDict::new(py);
-        kwargs.set_item("diffusion", 0.0).unwrap();
-        kwargs.set_item("measurement_variance", 2.0).unwrap();
+    with_fixtures(|_, module| {
+        // Calibrate actual inputs to the runtime quantile: the same pinned SciPy
+        // can return adjacent float64 values on different platforms. This test
+        // controls comparator equality; the separate independent quantile test
+        // checks the probability-to-distance mapping without calibration.
         let data = module
-            .getattr("fixture")
+            .getattr("gate_boundary_fixture")
             .unwrap()
-            .call(
-                (
-                    vec![vec![0.0, 0.0]],
-                    vec![boundary, boundary.next_up()],
-                    vec![1.0, 1.0],
-                ),
-                Some(&kwargs),
-            )
+            .call0()
             .unwrap();
-        let (distance, threshold): (f64, f64) = module
+        let (_, threshold): (f64, f64) = module
             .getattr("gate_geometry")
             .unwrap()
             .call1((&data,))
             .unwrap()
             .extract()
             .unwrap();
-        assert_eq!(distance, threshold);
-        assert_eq!(threshold, pinned_threshold);
+        assert!((threshold - GATE_99).abs() <= ATOL);
+        assert_exact_gate_geometry(&module, &data, threshold);
         let result = associate(&data, &JpdaConfig::default());
         let actual = marginals(&module, &result, &data);
         assert!(actual[0][1] > 0.0);
         assert_eq!(actual[0][2], 0.0);
         assert!((actual[0].iter().sum::<f64>() - 1.0).abs() <= ATOL);
+        for adjacent in [threshold.next_down(), threshold.next_up()] {
+            let data = module
+                .getattr("gate_boundary_fixture")
+                .unwrap()
+                .call1((adjacent,))
+                .unwrap();
+            assert_exact_gate_geometry(&module, &data, adjacent);
+        }
     });
+}
+
+fn assert_exact_gate_geometry(
+    module: &Bound<'_, PyModule>,
+    data: &Bound<'_, PyAny>,
+    threshold: f64,
+) {
+    let geometry = module.getattr("gate_geometry").unwrap();
+    let (distance, _): (f64, f64) = geometry.call1((data,)).unwrap().extract().unwrap();
+    let (exterior_distance, _): (f64, f64) = geometry.call1((data, 1)).unwrap().extract().unwrap();
+    assert_eq!(distance, threshold);
+    assert!(exterior_distance > threshold);
 }
 
 #[test]

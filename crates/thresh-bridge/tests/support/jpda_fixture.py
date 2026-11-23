@@ -72,10 +72,34 @@ def prediction_context(associations, data):
             detected.prediction.timestamp != missed.prediction.timestamp)
 
 
-def gate_geometry(data):
+def gate_geometry(data, detection_index=0):
     track = data['track_order'][0]
-    detection = data['detection_order'][0]
+    detection = data['detection_order'][detection_index]
     prediction = data['predictor'].predict(track, timestamp=detection.timestamp)
     measurement = data['updater'].predict_measurement(prediction, detection.measurement_model)
     return (float(SquaredMahalanobis()(measurement, detection)),
             float(PDAHypothesiser._gate_threshold(0.99, 1)))
+
+
+def gate_boundary_fixture(threshold=None):
+    """Calibrate real inputs to an exact gate boundary; never widen the gate.
+
+    The same pinned SciPy version can return adjacent float64 quantiles on
+    different platforms. With zero diffusion and a one-second CV prediction,
+    the measurement variance is S=2+R. Try bounded positive R values so rounding
+    in sqrt(S*q) and the real distance calculation yields d² exactly equal to q.
+    The next representable larger observation must also measure strictly above q.
+    An explicit threshold is used only to verify adjacent-quantile calibration.
+    """
+    if threshold is None:
+        threshold = float(PDAHypothesiser._gate_threshold(0.99, 1))
+    for measurement_variance in range(1, 65):
+        boundary = np.sqrt((2 + measurement_variance) * threshold)
+        exterior = np.nextafter(boundary, np.inf)
+        data = fixture([[0.0, 0.0]], [boundary, exterior], [1.0, 1.0],
+                       diffusion=0.0, measurement_variance=measurement_variance)
+        distance, _ = gate_geometry(data)
+        exterior_distance, _ = gate_geometry(data, 1)
+        if distance == threshold and exterior_distance > threshold:
+            return data
+    raise AssertionError(f'no exactly representable gate fixture for {threshold!r}')

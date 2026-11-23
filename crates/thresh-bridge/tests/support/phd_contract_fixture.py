@@ -130,6 +130,8 @@ class CopyFailure(TaggedWeightedGaussianState):
 
 
 class UnexpectedWeight:
+    """Intentionally broken numeric protocol to test captured upstream causes."""
+
     def __float__(self):
         raise ValueError("synthetic weight inspection failure")
 
@@ -172,6 +174,15 @@ def with_copy_failure(f):
                            weight=0.5, tag="existing")]
 
 
+def with_untagged_birth(f):
+    f.births = [WeightedGaussianState(np.array([[0.0]]), np.array([[1.0]]),
+                                     timestamp=f.time, weight=0.5)]
+
+
+def with_mixture_prior(f):
+    f.prior = GaussianMixture(f.prior)
+
+
 def malformed_cases():
     return [
         "f.prior = None",
@@ -180,7 +191,7 @@ def malformed_cases():
         "f.prior = iter(f.prior)",
         "f.detections = iter(f.detections)",
         "f.prior = [object()]",
-        "f.births = [WeightedGaussianState(np.array([[0.0]]), np.array([[1.0]]), timestamp=f.time, weight=.5)]",
+        "with_untagged_birth(f)",
         "f.prior[0].tag = 'birth'",
         "f.births[0].tag = 'other'",
         "f.prior[0].tag = None",

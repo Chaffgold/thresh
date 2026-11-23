@@ -31,7 +31,7 @@
 
 ## 5. Integrated verification and bounded handoff
 
-- [x] 5.1 Extend runner/CI descriptions to include bounded JPDA/GM-PHD reference checks without changing the required job identity or dependency locks; run runner negative self-tests and the complete exact manifest, recording versions, executed counts, and maximum numeric residuals.
+- [x] 5.1 Extend runner/CI descriptions to include bounded JPDA/GM-PHD reference checks without changing the required job identity or dependency locks; run runner negative self-tests and the complete exact manifest, recording versions, executed counts, and maximum numeric residuals. Include instrumented exact-manifest execution in the existing Sonar coverage report while preserving workspace profiles, subprocess coverage, and production quality thresholds.
 - [x] 5.2 Run feature-enabled bridge tests and doctests, `cargo fmt --all -- --check`, bridge Clippy with warnings denied, and bridge docs with `RUSTDOCFLAGS=-Dwarnings`; verify no stale constructor/step examples or unsupported working-reference claims remain in current docs.
 - [x] 5.3 Run the native dependency-tree, build and test checks with Python discovery disabled (`--workspace --exclude thresh-py --no-default-features`), plus normal workspace tests; verify the native dependency tree contains no PyO3 and no optional-runtime regression is hidden by a skip.
 - [x] 5.4 Run `openspec validate --all --strict --no-interactive`, `openspec validate --archived --strict --no-interactive`, active-change metadata checks and `git diff --check`; review the final diff against every scenario, keep MHT/IMM, native parity, sequence evaluation, rights and release gates explicitly unresolved, and record verification evidence before marking implementation complete.

@@ -36,6 +36,8 @@ For each track, use raw detected weights `Pd * N(z; predicted_mean, S) / lambda`
 
 Cover 0-3 tracks/detections, shared observations, asymmetric likelihoods, ties, empty inputs, all gated out, and `Pd=0`. Compare by fixture identity, not Python set order; absent gated hypotheses count as zero. Assert finite nonnegative marginals, use `atol=1e-12`, `rtol=1e-10`, row sums within `1e-12`, and detection occupancy at most `1+1e-12`. Independently check the 1D 0.99 gate against squared distance 6.634896601021211 with clearly interior/exterior observations; test equality deliberately without hiding rounding tolerance in general gate membership.
 
+Pinned SciPy quantiles can differ by one float64 ULP across platforms. For the controlled equality fixture only, calibrate real residual/covariance inputs over a bounded set of positive measurement variances until the computed squared distance equals the runtime threshold exactly and the adjacent larger observation is strictly outside. Failure to find such inputs is a test failure. Keep the independent quantile and marginal-oracle checks separate and unchanged.
+
 ### 3. Explicit GM-PHD graph and scan API
 
 Keep `PhdFilter::new(py, config, predictor, updater)`, with live Python token and supplied components. Own the following graph:
@@ -88,6 +90,8 @@ Test reducer operations independently from updates: prune [.05,.2,.3] at .1 to [
 ### 6. Extend the existing verification lane
 
 Keep the current locked environment and required `Stone Soup boundary` job; extend its wording to distinguish boundary checks from bounded JPDA/GM-PHD reference checks without changing branch-protection job identity. Register new reference targets/names in `tests/boundary-test-manifest.json`, matching the runner's complete Cargo inventory checks. Retain runner negative tests for missing/ignored/zero tests and dependency failures. Dispatch doubles test error/context handling only, never substitute for real numerical tests.
+
+The existing Sonar lane also executes that exact manifest under coverage instrumentation and combines its profiles, including fresh-process children, with normal workspace profiles. Keep a shared coverage target/profile directory so neither run discards the other. Classify fixture files as tests; do not lower thresholds or exclude production bridge code to satisfy the coverage gate.
 
 Preserve native/no-Python checks (excluding unconditional `thresh-py`). Do not relax required lanes, install OR-Tools, upgrade dependencies, or introduce provider captures. Historical review evidence remains historical; update current status text in runtime/detection docs and runner/CI comments after implementation.
 

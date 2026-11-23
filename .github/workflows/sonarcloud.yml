@@ -21,12 +21,32 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, llvm-tools-preview
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.13'
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
-      - name: "Generate coverage (LCOV with absolute SF: paths)"
+      - name: Install isolated, hash-locked boundary dependencies
+        shell: bash
         run: |
-          cargo llvm-cov --workspace --lcov --output-path lcov.info
+          python -m venv "$RUNNER_TEMP/thresh-bridge-python"
+          "$RUNNER_TEMP/thresh-bridge-python/bin/python" -m pip install --require-hashes -r crates/thresh-bridge/tests/requirements.txt
+          echo "PYO3_PYTHON=$RUNNER_TEMP/thresh-bridge-python/bin/python" >> "$GITHUB_ENV"
+      - name: "Generate coverage (LCOV with absolute SF: paths)"
+        shell: bash
+        run: |
+          # Normal coverage and show-env must share artifacts and raw profiles.
+          export CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target/llvm-cov-target"
+          export CARGO_LLVM_COV_TARGET_DIR="$CARGO_TARGET_DIR"
+          cargo llvm-cov clean --workspace
+          cargo llvm-cov --workspace --no-report
+          coverage_environment="$(cargo llvm-cov show-env --sh)"
+          eval "$coverage_environment"
+          # The runner keeps LLVM_PROFILE_FILE (including its process ID), so
+          # its direct test binaries and fresh-process children all contribute.
+          "$PYO3_PYTHON" crates/thresh-bridge/tests/run_boundary_tests.py
+          cargo llvm-cov report --lcov --output-path lcov.info
           # Rewrite SF: entries to absolute paths so SonarCloud can match
           # them back to the crates/ source tree (cargo-llvm-cov emits
           # repo-relative paths by default).
@@ -63,7 +83,7 @@ jobs:
           args: >
             -Dsonar.sources=crates/
             -Dsonar.tests=crates/
-            -Dsonar.test.inclusions=**/*test*/**,**/tests/**
+            -Dsonar.test.inclusions=**/*test*/**,**/tests/**,**/src/**/tests.rs
             -Dsonar.exclusions=**/target/**
             -Dsonar.coverage.exclusions=**/tests/**,**/test*/**,**/src/bin/**
             -Dsonar.rust.lcov.reportPaths=lcov.info
