@@ -1,10 +1,13 @@
-# Stone Soup boundary verification
+# Stone Soup boundary and reference verification
 
 The `Stone Soup boundary` CI job runs on every pull request, including PRs to
-`develop`, without path-based skipping. It verifies only the Rust/Python boundary.
-It does **not** certify JPDA, MHT, IMM, or GM-PHD algorithm graphs, trained-model
-acceptance, provider-data permissions, or deployment without a linked Python
-shared library. All inputs are synthetic; no OpenSky access or data is needed.
+`develop`, without path-based skipping. It verifies the Rust/Python boundary and
+bounded linear-Gaussian JPDA/GM-PHD reference graphs. It does **not** certify
+native/reference parity, full-track accuracy, nonlinear algorithm behavior,
+MHT/IMM reference graphs, trained-model acceptance, provider-data permissions, or
+deployment without a linked Python shared library. All inputs are synthetic;
+no OpenSky access or data is needed. See [bridge-references.md](bridge-references.md)
+for the explicit APIs and pinned compatibility semantics.
 
 ## Exact isolated runtime
 
@@ -60,25 +63,31 @@ installation through `DEVELOPER_DIR` if required by your local toolchain.
 
 `crates/thresh-bridge/tests/boundary-test-manifest.json` records exact test names
 for the library unit tests and every integration-test target. The runtime command
-currently requires **69 passed tests across six targets, zero ignored/failed**:
+currently requires **106 passed tests across eight targets, zero ignored/failed**:
 
 | Target | Required tests |
 | --- | ---: |
-| Library unit tests | 21 |
+| Library unit tests | 36 |
 | `context_contract` | 11 |
 | `detection_contract` | 17 |
 | `numeric_contract` | 9 |
-| `runtime_contract` | 9 |
+| `jpda_reference` | 11 |
+| `phd_reference` | 10 |
+| `runtime_contract` | 10 |
 | `stonesoup_integration` | 2 |
 
 The last target contains the original import and nalgebra round-trip tests; they
 are no longer ignored and initialize their host explicitly. The library target
 includes physical-time, covariance, overflow, and interpreter-attachment tests.
-Four initialized-host wrapper-step tests use Python-owned dispatch doubles to
+Initialized-host wrapper-step tests use Python-owned dispatch doubles to
 verify ordered argument and return-object identity, repeated host reuse,
 unchanged host path/environment, missing-method diagnostics, and ordinary Python
-exception details. They exercise the real JPDA/MHT/IMM/PHD step methods but do
-not repair or validate the algorithms' constructor graphs.
+exception details. Dispatch doubles are plumbing checks, not algorithm evidence.
+JPDA and GM-PHD additionally execute real constructor/scan tests with independent
+numerical expectations: exhaustive exclusive-event marginals for JPDA and
+hand-derived prediction, intensity, birth, and reduction fixtures for GM-PHD.
+The PHD step tests also assert input preservation across the deep-copy boundary
+and operation-specific failures. MHT/IMM remain unresolved reference graphs.
 The integration targets cover five observation profiles, frame/pose/covariance,
 canonical and large finite azimuths, metadata, ndarray-subclass conversion,
 array rejection, lifecycle, and structured errors. Fresh-child process
@@ -102,6 +111,39 @@ children, missing/incorrect dependencies, zero execution, filtered/duplicate
 results, missing test targets, and Linux shared-library discovery. They require no
 third-party Python packages.
 An ordinary `cargo test` exit code of zero is not a substitute for this gate.
+
+## Recorded reference verification (2026-11-22)
+
+The JPDA/GM-PHD repair was verified locally with the exact runtime above and
+unchanged dependency locks. The complete manifest passed all 106 tests with zero
+ignored, failed, or filtered tests; all 14 runner self-tests and seven
+feature-enabled doctests also passed. The library inventory includes 15 PHD
+contract/reducer tests and two JPDA construction/dispatch tests.
+
+Observed maximum absolute residuals across the independent numerical runs were
+`3.3306690738754696e-16` for JPDA marginals, `2.220446049250313e-16` for PHD
+prediction/update fixtures, and `0` for the reducer fixtures. General fixture
+tolerances are `atol=1e-12`, `rtol=1e-10`; endpoint epsilon assertions and
+deliberately constructed gate-equality cases are checked separately. A negative
+control changed the expected scalar detected weight from `0.5` to `0.51` and
+failed the oracle assertion (Cargo exit 101); the perturbation was removed and
+the suite passed again. These residuals describe tiny synthetic fixtures, not
+sequence-level tracking accuracy.
+
+Independent source/test review checked all six added requirements and 18
+scenarios. A missing preflight-order regression check was added: when detections
+is a generator, counted reusable prior/birth collections remain unread and the
+generator remains unconsumed. No review findings remain. Caller-model
+compatibility, including updater-owned fallback models, remains an explicit
+precondition documented in [bridge-references.md](bridge-references.md).
+
+Warning-strict bridge Clippy/docs, workspace formatting, normal workspace tests,
+and native dependency-tree/build/tests with Python discovery disabled passed.
+The native tree contains no PyO3. Ordinary workspace tests retain pre-existing
+ignored tests; they are separate from the zero-ignored required bridge manifest.
+OpenSpec 1.13.2 strict validation passed 52 live/spec items and 29 archives, with
+valid metadata for all four active changes. This is local verification, not a
+claim that a GitHub PR or remote CI has completed.
 
 ## Native workspace without Python
 
