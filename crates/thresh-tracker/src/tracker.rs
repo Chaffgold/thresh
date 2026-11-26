@@ -80,6 +80,24 @@ pub enum AssociationStrategy {
         clutter_density: f64,
     },
     /// Multi-Hypothesis Tracking: deferred decision via hypothesis tree.
+    ///
+    /// # Warning: not yet a working MHT
+    ///
+    /// This native path does not yet behave as a multi-hypothesis tracker:
+    ///
+    /// - hypothesis expansion applies one shared likelihood matrix to every
+    ///   parent hypothesis, so it ignores per-hypothesis history;
+    /// - N-scan pruning is not invoked: `n_scan` reaches the hypothesis tree,
+    ///   but each scan runs only expansion and k-best pruning;
+    /// - with the default heads, the path does not associate: a track born
+    ///   with the default head's broad covariance scores every detection
+    ///   below the `ln(clutter_density)` gate (for example
+    ///   `ln(1e-6) ≈ −13.8`), so it is never updated and each scan starts new
+    ///   tracks instead.
+    ///
+    /// The rebuild is planned in the OpenSpec change
+    /// `rebuild-native-mht-hypothesis-history`. Until it lands, prefer
+    /// [`AssociationStrategy::Hungarian`] or [`AssociationStrategy::Jpda`].
     Mht {
         /// N-scan pruning depth.
         n_scan: usize,
@@ -204,6 +222,15 @@ impl MultiObjectTracker {
     /// `config_factory` is called once per new track to produce a fresh
     /// `ImmConfig`. Each track maintains its own `ImmFilter` bank.
     /// Association and lifecycle logic are shared with the single-model path.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the configuration returned by `config_factory` fails
+    /// [`ImmConfig::validate`] — checked once here, and again by
+    /// [`ImmFilter::new`] whenever a track is born. The panic message carries
+    /// the validation error. To handle an invalid configuration without
+    /// panicking, validate one from the factory before calling this
+    /// constructor.
     pub fn new_imm_position(
         config_factory: impl Fn() -> ImmConfig + 'static,
         measurement_noise_sigma: f64,

@@ -2,12 +2,16 @@
 
 The `Stone Soup boundary` CI job runs on every pull request, including PRs to
 `develop`, without path-based skipping. It verifies the Rust/Python boundary and
-bounded linear-Gaussian JPDA/GM-PHD reference graphs. It does **not** certify
-native/reference parity, full-track accuracy, nonlinear algorithm behavior,
-MHT/IMM reference graphs, trained-model acceptance, provider-data permissions, or
-deployment without a linked Python shared library. All inputs are synthetic;
-no OpenSky access or data is needed. See [bridge-references.md](bridge-references.md)
-for the explicit APIs and pinned compatibility semantics.
+bounded linear-Gaussian JPDA/GM-PHD reference graphs; the bridge provides JPDA
+and GM-PHD references only. It does **not** certify native/reference parity,
+full-track accuracy, nonlinear algorithm behavior, trained-model acceptance,
+provider-data permissions, or deployment without a linked Python shared library.
+There is no bridge MHT or IMM reference: those contracts are native
+(`mht-tracking`, `imm-estimation`) and both have interim gaps, tracked by
+`rebuild-native-mht-hypothesis-history` and `correct-native-imm-mode-policies`.
+All inputs are synthetic; no OpenSky access or data is needed. See
+[bridge-references.md](bridge-references.md) for the explicit APIs and pinned
+compatibility semantics.
 
 ## Exact isolated runtime
 
@@ -63,22 +67,25 @@ installation through `DEVELOPER_DIR` if required by your local toolchain.
 
 `crates/thresh-bridge/tests/boundary-test-manifest.json` records exact test names
 for the library unit tests and every integration-test target. The runtime command
-currently requires **109 passed tests across eight targets, zero ignored/failed**:
+currently requires **106 passed tests across eight targets, zero ignored/failed**:
 
 | Target | Required tests |
 | --- | ---: |
-| Library unit tests | 38 |
+| Library unit tests | 37 |
 | `context_contract` | 11 |
 | `detection_contract` | 17 |
 | `numeric_contract` | 9 |
 | `jpda_reference` | 11 |
 | `phd_reference` | 11 |
-| `runtime_contract` | 10 |
+| `runtime_contract` | 8 |
 | `stonesoup_integration` | 2 |
 
 The last target contains the original import and nalgebra round-trip tests; they
 are no longer ignored and initialize their host explicitly. The library target
-includes physical-time, covariance, overflow, and interpreter-attachment tests.
+includes physical-time, covariance, overflow, and interpreter-attachment tests,
+plus a pinned-absence classification regression: on Stone Soup 1.9.1, importing
+the absent `stonesoup.predictor.interacting` classifies as an unsupported API.
+It observes only the pinned package and is not an upstream canary.
 Initialized-host wrapper-step tests use Python-owned dispatch doubles to
 verify ordered argument and return-object identity, repeated host reuse,
 unchanged host path/environment, missing-method diagnostics, and ordinary Python
@@ -87,7 +94,8 @@ JPDA and GM-PHD additionally execute real constructor/scan tests with independen
 numerical expectations: exhaustive exclusive-event marginals for JPDA and
 hand-derived prediction, intensity, birth, and reduction fixtures for GM-PHD.
 The PHD step tests also assert input preservation across the deep-copy boundary
-and operation-specific failures. MHT/IMM remain unresolved reference graphs.
+and operation-specific failures. The bridge has no MHT or IMM reference graph;
+those contracts are native (`mht-tracking`, `imm-estimation`), with interim gaps.
 The integration targets cover five observation profiles, frame/pose/covariance,
 canonical and large finite azimuths, metadata, ndarray-subclass conversion,
 array rejection, lifecycle, and structured errors. Fresh-child process
@@ -166,6 +174,30 @@ ignored tests; they are separate from the zero-ignored required bridge manifest.
 OpenSpec 1.13.2 strict validation passed 52 live/spec items and 29 archives, with
 valid metadata for all four active changes. This is local verification, not a
 claim that a GitHub PR or remote CI has completed.
+
+## Recorded reference verification (2026-11-26)
+
+The `resolve-stonesoup-mht-imm-claims` change removed the bridge MHT and IMM
+wrappers, which never worked on the pinned runtime, and re-homed the boundary
+diagnostics that used them as test vehicles. It was verified locally with
+CPython 3.12.13, Stone Soup 1.9.1, NumPy 2.5.3, SciPy 1.18.1, Pillow 13.0.0
+(after the #167 lock bump) and PyO3 0.29.0, installed with `--require-hashes`
+from the lock.
+
+- While the wrappers still existed, the re-homed vehicles and the new
+  `runtime::tests::pinned_stonesoup_lacks_interacting_predictor_api` regression
+  passed with the full manifest at 110 tests.
+- After the deletion, the complete manifest passed **106** tests across 8
+  targets (37 library, 8 `runtime_contract`) with zero ignored, failed, or
+  filtered tests. All 14 runner self-tests and the seven feature-enabled bridge
+  doctests (four run, three compile-fail) passed.
+- Warning-strict bridge Clippy with and without `stonesoup`, workspace Clippy,
+  formatting and warning-strict docs passed. OpenSpec 1.13.2 strict validation
+  passed 52 live/spec items and 30 archives.
+
+The MHT and IMM contracts are native and verified in the native lane instead;
+see [native-reference-tests.md](native-reference-tests.md). This is local
+verification, not a claim that a GitHub PR or remote CI has completed.
 
 ## Native workspace without Python
 

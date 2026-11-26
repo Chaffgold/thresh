@@ -34,16 +34,19 @@ updater = KalmanUpdater(LinearGaussian(ndim_state=2, mapping=[0], noise_covar=[[
 JPDA and GM-PHD now require explicit compatible predictor/updater components;
 the example supplies invented dynamics and observation noise, not defaults
 chosen by the bridge. Their linear-Gaussian reference tests exercise real
-construction and calls. MHT/IMM reference graphs remain unresolved, and none of
-these checks certifies full-track accuracy or deployment readiness. See
+construction and calls. The bridge provides JPDA and GM-PHD references only; it
+has no MHT or IMM entry point, because those contracts are native
+(`mht-tracking`, `imm-estimation`) and both have interim gaps. None of these
+checks certifies full-track accuracy or deployment readiness. See
 [bridge-references.md](bridge-references.md) for the scan APIs and compatibility
 limits. Missing dependencies and ordinary upstream failures remain structured
 errors, not evidence of a missing interpreter.
 
 JPDA's constructor now accepts Python-owned objects, so it cannot be exercised
-with valid inputs before host initialization. Fresh-process startup assertions
-remain on standalone entry points and the shared attachment helper; initialized
-JPDA/GM-PHD calls verify host reuse without path or environment mutation.
+with valid inputs before host initialization. The only standalone bridge entry
+point is `measurement_to_detection`; fresh-process startup assertions remain on
+it and on the shared attachment helper. Initialized JPDA/GM-PHD calls verify host
+reuse without path or environment mutation.
 
 Token-free calls use `Python::try_attach`, returning
 `BridgeError::PythonNotAvailable` when attachment is unavailable. This remains

@@ -4,13 +4,17 @@
 
 use std::process::Command;
 
+use nalgebra::{DMatrix, Matrix3, Vector3};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::PyDict;
+use thresh_bridge::context::{
+    CommonFrame, DetectionContext, EnuOrigin, ObservationProfile, SensorPose,
+};
+use thresh_bridge::detection::measurement_to_detection;
 use thresh_bridge::error::{BridgeError, PythonException};
-use thresh_bridge::imm::{ImmConfig, ImmFilter};
 use thresh_bridge::jpda::{JpdaAssociator, JpdaConfig};
-use thresh_bridge::mht::{MhtConfig, MhtTracker};
 use thresh_bridge::phd::{PhdConfig, PhdFilter};
+use thresh_core::{measurement::Measurement, sensor::SensorRegistration, time::Epoch};
 
 fn fresh_process(name: &str, assertion: impl FnOnce()) {
     if std::env::var("THRESH_BRIDGE_RUNTIME_CASE").as_deref() == Ok(name) {
@@ -70,22 +74,6 @@ fn assert_import_details(error: &BridgeError) {
 }
 
 #[test]
-fn token_free_constructors_require_host_initialization() {
-    fresh_process(
-        "token_free_constructors_require_host_initialization",
-        || {
-            // JPDA now requires Python-owned components, which cannot exist
-            // before host initialization. Its initialized-host path is below.
-            assert!(matches!(
-                MhtTracker::new(&MhtConfig::default()),
-                Err(BridgeError::PythonNotAvailable(_))
-            ));
-            assert!(Python::try_attach(|_| ()).is_none());
-        },
-    );
-}
-
-#[test]
 fn explicit_host_initialization_is_reused_without_mutation() {
     fresh_process(
         "explicit_host_initialization_is_reused_without_mutation",
@@ -101,10 +89,6 @@ fn explicit_host_initialization_is_reused_without_mutation() {
                     jpda_dependency_error(),
                     BridgeError::StoneSoupNotInstalled(_)
                 ));
-                assert!(matches!(
-                    MhtTracker::new(&MhtConfig::default()),
-                    Err(BridgeError::StoneSoupNotInstalled(_))
-                ));
             }
             let after = Python::try_attach(environment_snapshot).expect("host remains initialized");
             assert_eq!(before, after);
@@ -119,6 +103,35 @@ fn jpda_dependency_error() -> BridgeError {
             .err()
             .expect("blocked dependency must fail before component use")
     })
+}
+
+/// Invented radar observation and context that pass every Rust-side check, so
+/// conversion reaches its Python imports.
+fn valid_detection_inputs() -> (Measurement, DetectionContext) {
+    let sensor =
+        SensorRegistration::with_rotation(Vector3::new(10.0, 20.0, 30.0), Matrix3::identity(), 7);
+    let measurement = Measurement::Radar {
+        range: 100.0,
+        azimuth: 0.2,
+        elevation: 0.1,
+        range_rate: None,
+        time: 0.0,
+        sensor_id: 7,
+    };
+    let context = DetectionContext {
+        origin: Epoch::from_iso8601("2020-01-01T00:00:00 UTC").unwrap(),
+        arrival: None,
+        frame: CommonFrame::Wgs84Enu(EnuOrigin {
+            latitude_rad: 0.0,
+            longitude_rad: 0.0,
+            ellipsoid_height_m: 0.0,
+        }),
+        profile: ObservationProfile::Radar3 {
+            sensor: SensorPose::Stationary(sensor),
+        },
+        covariance: DMatrix::identity(3, 3),
+    };
+    (measurement, context)
 }
 
 fn reference_context(py: Python<'_>) -> Bound<'_, PyDict> {
@@ -233,17 +246,18 @@ fn missing_numpy_is_a_dependency_not_an_interpreter_error() {
         "missing_numpy_is_a_dependency_not_an_interpreter_error",
         || {
             Python::initialize();
-            Python::attach(|py| {
-                block_import(py, "numpy", "numpy");
-                let models = PyList::empty(py);
-                let error = ImmFilter::new(py, &ImmConfig::default(), &models)
-                    .err()
-                    .unwrap();
-                assert!(
-                    matches!(&error, BridgeError::MissingDependency { name, .. } if name == "numpy")
-                );
-                assert_import_details(&error);
-            });
+            // Importing Stone Soup does not load NumPy, so with a valid context
+            // the converter's own NumPy import is the first blocked import.
+            Python::attach(|py| block_import(py, "numpy", "numpy"));
+            let (measurement, context) = valid_detection_inputs();
+            let error = measurement_to_detection(&measurement, &context)
+                .err()
+                .unwrap();
+            assert!(
+                matches!(&error, BridgeError::MissingDependency { name, .. } if name == "numpy")
+            );
+            assert_import_details(&error);
+            assert_eq!(exception(&error).operation, "import numpy");
         },
     );
 }
@@ -269,20 +283,19 @@ fn missing_stonesoup_submodule_is_an_api_error() {
     fresh_process("missing_stonesoup_submodule_is_an_api_error", || {
         Python::initialize();
         Python::attach(|py| {
+            // The JPDA constructor's first import; placeholder components are
+            // never used because the import fails first.
             block_import(
                 py,
-                "stonesoup.predictor.interacting",
-                "stonesoup.predictor.interacting",
+                "stonesoup.hypothesiser.probability",
+                "stonesoup.hypothesiser.probability",
             );
-            let models = PyList::empty(py);
-            let error = ImmFilter::new(py, &ImmConfig::default(), &models)
-                .err()
-                .unwrap();
-            assert!(
-                matches!(&error, BridgeError::UnsupportedApi { api, .. } if api == "stonesoup.predictor.interacting")
-            );
-            assert_import_details(&error);
         });
+        let error = jpda_dependency_error();
+        assert!(
+            matches!(&error, BridgeError::UnsupportedApi { api, .. } if api == "stonesoup.hypothesiser.probability")
+        );
+        assert_import_details(&error);
     });
 }
 
@@ -290,13 +303,13 @@ fn missing_stonesoup_submodule_is_an_api_error() {
 fn missing_symbol_is_an_api_error() {
     fresh_process("missing_symbol_is_an_api_error", || {
         Python::initialize();
-        Python::attach(|py| {
+        let error = Python::attach(|py| {
             py.run(
                 c"\
 import sys, types, importlib.util
 class EmptyModule:
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == 'stonesoup.tracker.simple':
+        if fullname == 'stonesoup.dataassociator.probability':
             return importlib.util.spec_from_loader(fullname, self)
         return None
     def create_module(self, spec):
@@ -309,15 +322,19 @@ sys.meta_path.insert(0, EmptyModule())
                 None,
             )
             .unwrap();
+            // Real components, so the hypothesiser is built and only the
+            // associator symbol lookup can fail.
+            let context = reference_context(py);
+            let item = |name| context.get_item(name).unwrap().unwrap().unbind();
+            JpdaAssociator::new(&JpdaConfig::default(), &item("predictor"), &item("updater"))
+                .err()
+                .expect("empty associator module must fail the JPDA lookup")
         });
-        let error = MhtTracker::new(&MhtConfig::default()).err().unwrap();
-        assert!(
-            matches!(&error, BridgeError::UnsupportedApi { api, .. } if api == "MultiTargetMixtureTracker")
-        );
+        assert!(matches!(&error, BridgeError::UnsupportedApi { api, .. } if api == "JPDA"));
         let source = exception(&error);
         assert_eq!(source.exception_type, "AttributeError");
-        assert!(source.message.contains("MultiTargetMixtureTracker"));
-        assert_eq!(source.operation, "MHT tracker lookup");
+        assert!(source.message.contains("JPDA"));
+        assert_eq!(source.operation, "JPDA associator lookup");
     });
 }
 
@@ -369,20 +386,4 @@ fn assert_ordinary_error(py: Python<'_>, source: &std::ffi::CStr, kind: &str) {
             .is_some_and(|traceback| traceback.contains("<module>"))
     );
     assert!(std::error::Error::source(&error).is_some());
-}
-
-#[test]
-fn initialized_imm_constructor_reports_unresolved_api() {
-    fresh_process("initialized_imm_constructor_reports_unresolved_api", || {
-        Python::initialize();
-        Python::attach(|py| {
-            let models = PyList::empty(py);
-            let imm_error = ImmFilter::new(py, &ImmConfig::default(), &models)
-                .err()
-                .unwrap();
-            assert!(
-                matches!(&imm_error, BridgeError::UnsupportedApi { api, .. } if api == "stonesoup.predictor.interacting")
-            );
-        });
-    });
 }

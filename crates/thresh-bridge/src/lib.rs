@@ -1,4 +1,9 @@
-//! PyO3 bridge to Stone Soup for advanced tracking algorithms (JPDA, MHT, IMM).
+//! PyO3 bridge to Stone Soup JPDA and Gaussian Mixture PHD reference algorithms.
+//!
+//! The bridge provides JPDA and GM-PHD references only; it has no MHT or IMM
+//! entry point. Those contracts are native, in the `mht-tracking`
+//! (`thresh-association`, `thresh-tracker`) and `imm-estimation`
+//! (`thresh-filter`) capabilities, and both have open interim gaps.
 //!
 //! All modules are gated behind the `stonesoup` Cargo feature which pulls in
 //! `pyo3`.  When the feature is disabled, this crate is intentionally empty
@@ -16,11 +21,7 @@ pub mod detection;
 #[cfg(feature = "stonesoup")]
 pub mod error;
 #[cfg(feature = "stonesoup")]
-pub mod imm;
-#[cfg(feature = "stonesoup")]
 pub mod jpda;
-#[cfg(feature = "stonesoup")]
-pub mod mht;
 #[cfg(feature = "stonesoup")]
 mod observation;
 #[cfg(feature = "stonesoup")]

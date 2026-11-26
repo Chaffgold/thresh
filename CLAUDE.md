@@ -38,7 +38,7 @@ thresh-fusion        (centralized fusion, information filter, covariance interse
 thresh-tracker       (track lifecycle, M-of-N confirmation, class-specific heads)
     ↓
 thresh-inference     (ONNX Runtime pipeline — feature-gated: `onnx`)
-thresh-bridge        (PyO3 → Stone Soup JPDA/MHT/IMM — feature-gated: `stonesoup`)
+thresh-bridge        (PyO3 → Stone Soup JPDA/GM-PHD references — feature-gated: `stonesoup`)
 thresh-synth         (synthetic radar, EO/IR, ADS-B data generation; PyO3 bridges — feature-gated: `jsbsim`, `rcs-compute`, `radar-scene`)
 thresh-eval          (MOT metrics: MOTA, MOTP, IDF1, HOTA, AMOTA)
 thresh-data          (dataset bridges: nuScenes via PyO3 — feature-gated: `nuscenes`)

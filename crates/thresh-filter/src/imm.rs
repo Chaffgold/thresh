@@ -483,6 +483,40 @@ pub struct ImmConfig {
 
 impl ImmConfig {
     /// Validate the configuration. Returns an error message if invalid.
+    ///
+    /// A configuration is rejected when any of the following holds:
+    ///
+    /// - it has no models;
+    /// - the number of mappings, the length of the initial mode-probability
+    ///   vector, or the transition-matrix shape (`N x N`) disagrees with the
+    ///   number of models;
+    /// - any transition-matrix entry is non-finite (NaN or ±∞) or negative —
+    ///   the error names the offending row and column;
+    /// - any transition-matrix row does not sum to one within `1e-6`;
+    /// - any initial mode probability is non-finite or negative — the error
+    ///   names the offending index;
+    /// - the initial mode probabilities do not sum to one within `1e-6`;
+    /// - a model's state dimension disagrees with its mapping's model
+    ///   dimension.
+    ///
+    /// The entry checks run before the sum checks, so a NaN entry (which
+    /// fails every comparison) or negative mass in a row that still sums to
+    /// one is rejected. Every library preset passes validation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use nalgebra::DMatrix;
+    /// use thresh_filter::imm::ImmConfig;
+    ///
+    /// let mut config = ImmConfig::cv_ca(1.0, 1.0);
+    /// assert!(config.validate().is_ok());
+    ///
+    /// // Row 0 sums to one but carries negative probability mass.
+    /// config.transition_matrix = DMatrix::from_row_slice(2, 2, &[1.2, -0.2, 0.05, 0.95]);
+    /// let err = config.validate().unwrap_err();
+    /// assert!(err.contains("transition matrix entry (0, 1)"));
+    /// ```
     pub fn validate(&self) -> Result<(), String> {
         let n = self.models.len();
         if n == 0 {
@@ -505,6 +539,30 @@ impl ImmConfig {
                 "TPM dimensions ({}x{}) must be {n}x{n}",
                 self.transition_matrix.nrows(),
                 self.transition_matrix.ncols()
+            ));
+        }
+
+        // Reject non-finite or negative probabilities before the sum checks:
+        // NaN fails every comparison, and negative mass can still sum to one.
+        // The half-open range [0, ∞) excludes NaN and both infinities.
+        let is_probability = |v: f64| (0.0..f64::INFINITY).contains(&v);
+        if let Some((i, j)) = (0..n)
+            .flat_map(|i| (0..n).map(move |j| (i, j)))
+            .find(|&(i, j)| !is_probability(self.transition_matrix[(i, j)]))
+        {
+            return Err(format!(
+                "transition matrix entry ({i}, {j}) is {}; entries must be finite and non-negative",
+                self.transition_matrix[(i, j)]
+            ));
+        }
+        if let Some(i) = self
+            .initial_mode_probabilities
+            .iter()
+            .position(|&p| !is_probability(p))
+        {
+            return Err(format!(
+                "initial mode probability {i} is {}; probabilities must be finite and non-negative",
+                self.initial_mode_probabilities[i]
             ));
         }
 
@@ -717,6 +775,12 @@ impl ImmFilter {
     ///
     /// Behaviour is byte-for-byte identical to the pre-pluggable
     /// implementation; existing callers need no changes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `config` fails [`ImmConfig::validate`]; the panic message
+    /// carries the validation error. Validate first to handle an invalid
+    /// configuration without panicking.
     pub fn new(
         config: ImmConfig,
         initial_state: &DVector<f64>,
@@ -728,6 +792,12 @@ impl ImmFilter {
     /// Create a new IMM filter with an explicit leaf kind (EKF / UKF / CKF)
     /// for every mode. The kind is owned by the returned `ImmFilter` and
     /// also drives the common-space update leaf in `update_step`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `config` fails [`ImmConfig::validate`]; the panic message
+    /// carries the validation error. Validate first to handle an invalid
+    /// configuration without panicking.
     pub fn with_leaf_kind(
         config: ImmConfig,
         leaf_kind: ImmLeafKind,

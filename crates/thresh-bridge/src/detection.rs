@@ -22,7 +22,8 @@ use crate::time::ObservationTime;
 /// and a measurement model carrying the transformed covariance.
 ///
 /// This replaces the old token-taking, context-free converter. Boundary success
-/// does not imply that JPDA/MHT/IMM/PHD algorithm wrappers are operational.
+/// does not imply that the JPDA or GM-PHD reference wrappers are operational.
+/// The bridge provides no MHT or IMM reference; those contracts are native.
 pub fn measurement_to_detection(
     measurement: &Measurement,
     context: &DetectionContext,

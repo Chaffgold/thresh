@@ -239,4 +239,26 @@ mod tests {
         assert!(matches!(result, Err(BridgeError::PythonNotAvailable(_))));
         assert!(Python::try_attach(|_| ()).is_none());
     }
+
+    /// Pinned-absence classification regression for Stone Soup 1.9.1.
+    ///
+    /// The hash-locked runtime has no `stonesoup.predictor.interacting` module,
+    /// and importing it must classify as an unsupported Stone Soup API rather
+    /// than a missing dependency or an interpreter failure. This observes only
+    /// the pinned package; it is not an upstream canary and says nothing about
+    /// whether a newer Stone Soup release provides that module.
+    #[test]
+    fn pinned_stonesoup_lacks_interacting_predictor_api() {
+        Python::initialize();
+        Python::attach(|py| {
+            let error = import_module(py, "stonesoup.predictor.interacting")
+                .expect_err("pinned Stone Soup 1.9.1 has no interacting predictor module");
+            let BridgeError::UnsupportedApi { api, source } = error else {
+                panic!("expected unsupported-API classification, got {error:?}");
+            };
+            assert_eq!(api, "stonesoup.predictor.interacting");
+            assert_eq!(source.exception_type, "ModuleNotFoundError");
+            assert_eq!(source.operation, "import stonesoup.predictor.interacting");
+        });
+    }
 }
