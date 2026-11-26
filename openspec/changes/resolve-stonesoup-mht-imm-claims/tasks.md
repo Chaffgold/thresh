@@ -200,7 +200,7 @@
     - `cargo clippy -p thresh-filter -p thresh-tracker --all-targets --features learned-imm -- -D warnings`;
     - `cargo fmt --all -- --check`;
     - `RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --no-deps`.
-- [ ] 6.4 Confirm the SonarCloud pull-request quality gate.
+- [x] 6.4 Confirm the SonarCloud pull-request quality gate.
   - **Verify:** the gate passes on new code for cognitive complexity (rule `rust:S3776`, ≤ 15 per function), duplication between `imm_reference.rs` and `imm_current_policy.rs`, and coverage.
 - [x] 6.5 Run the specification and diff checks:
   - `openspec validate --all --strict --no-interactive`;
