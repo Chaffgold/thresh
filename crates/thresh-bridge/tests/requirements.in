@@ -12,7 +12,7 @@ matplotlib==3.11.2
 narwhals==2.26.0
 ordered-set==4.1.0
 packaging==26.3
-pillow==12.3.0
+pillow==13.0.0
 plotly==7.1.0
 pymap3d==3.2.0
 pyparsing==3.3.3
