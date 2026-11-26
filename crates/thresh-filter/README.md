@@ -69,11 +69,11 @@ mathematics. In the common state `[x, vx, y, vy, z, vz]` (m, m/s):
   configured transition matrix.
 - **Log-likelihood.** `ℓ = −½ (m ln 2π + ln det S + yᵀ S⁻¹ y)` with
   `y = z − H x̂` and `S = H P Hᵀ + R`, evaluated in log space.
-- **Posterior.** With floor 0 and every `c_j > 1e-12`, the mode update is
-  the exact Bayes posterior `μ⁺_j ∝ c_j exp(ℓ_j)`, normalised by
-  log-sum-exp, so underflowing likelihoods give finite probabilities (for
-  example `[0, 1]`), never NaN, a uniform distribution or a reversion to
-  `c`. With floor 0, a mode with `c_j = 0` gets zero when every other
+- **Posterior.** With floor 0, every `c_j > 1e-12` and every `|ℓ_j| ≤ 1e6`,
+  the mode update is the exact Bayes posterior `μ⁺_j ∝ c_j exp(ℓ_j)`,
+  normalised by log-sum-exp, so underflowing likelihoods give finite
+  probabilities (for example `[0, 1]`), never NaN, and never a fallback to a
+  uniform distribution or to `c` in place of the posterior. With floor 0, a mode with `c_j = 0` gets zero when every other
   `c_k > 1e-12` and its log-likelihood (from whatever estimate it is
   assigned) does not exceed the largest among the others.
 - **Combination.** The output is the moment match

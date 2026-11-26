@@ -89,3 +89,24 @@ fn new_imm_position_learned_returns_error_for_nan_transition_entry() {
         "unexpected error: {err}"
     );
 }
+
+#[cfg(feature = "learned-imm")]
+#[test]
+fn new_imm_position_learned_validates_before_loading_the_classifier() {
+    // The model path does not exist, so this returns a configuration error
+    // only if validation runs before the classifier is loaded.
+    let missing = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../test-data/models/does-not-exist.onnx"
+    );
+    let result = MultiObjectTracker::new_imm_position_learned(
+        || cv_ca_ctrv_ct_with_entry_0_1(f64::NAN),
+        missing,
+        10.0,
+        100.0,
+    );
+    let err = result
+        .err()
+        .expect("an invalid configuration must be rejected");
+    assert!(err.contains("invalid ImmConfig"), "unexpected error: {err}");
+}

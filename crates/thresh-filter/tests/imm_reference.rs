@@ -446,6 +446,23 @@ fn oracle_worked_posterior_matches_given_log_likelihoods() {
 }
 
 #[test]
+fn oracle_posterior_is_exact_for_extreme_log_likelihoods() {
+    // Float64 spacing near 1e16 is 2, so adding ln c_j directly to ℓ_j would
+    // round the priors away. The exact posterior is ∝ [0.6, 0.4 e^-2].
+    let c = DVector::from_column_slice(&[0.6, 0.4]);
+    let mu = mode_posterior(&c, &[-1e16, -1e16 - 2.0]);
+    let w2 = 0.4 * (-2.0_f64).exp();
+    let expected = [0.6 / (0.6 + w2), w2 / (0.6 + w2)];
+    assert_probabilities_sum_to_one("extreme-ℓ μ⁺", &mu);
+    assert_slice_close(
+        Residual::OracleVsHand,
+        "extreme-ℓ μ⁺",
+        mu.as_slice(),
+        &expected,
+    );
+}
+
+#[test]
 fn oracle_log_space_underflow_gives_zero_and_one() {
     assert!(
         LL_UNDERFLOW.iter().all(|ll| ll.exp() == 0.0),
@@ -543,9 +560,11 @@ fn assert_mixing_columns_sum_to_one(label: &str, weights: &DMatrix<f64>) {
     }
 }
 
-/// `Σ_j c_j x0_j = Σ_i (Σ_j π_ij) μ_i x_i`.
+/// `Σ_j c_j x0_j = Σ_i (Σ_j π_ij) μ_i x_i`, componentwise within
+/// `ATOL + RTOL · Σ_i (Σ_j π_ij) μ_i |x_i|`. The relative term scales with
+/// the magnitude of the summed terms, not with the result, so cancellation
+/// cannot shrink the bound (spec scenario "Mixing invariants").
 fn assert_mean_invariant(
-    kind: Residual,
     label: &str,
     pi: &DMatrix<f64>,
     mu: &DVector<f64>,
@@ -557,13 +576,21 @@ fn assert_mean_invariant(
         .iter()
         .enumerate()
         .fold(DVector::zeros(6), |acc, (j, x)| acc + x * c[j]);
-    let rhs = commons
-        .iter()
-        .enumerate()
-        .fold(DVector::zeros(6), |acc, (i, g)| {
-            acc + &g.mean * (pi.row(i).sum() * mu[i])
-        });
-    assert_vector_close(kind, &format!("{label} Σ c x0"), &lhs, &rhs);
+    let (rhs, magnitude) = commons.iter().enumerate().fold(
+        (DVector::zeros(6), DVector::zeros(6)),
+        |(sum, mag), (i, g)| {
+            let w = pi.row(i).sum() * mu[i];
+            (sum + &g.mean * w, mag + g.mean.abs() * w)
+        },
+    );
+    for k in 0..6 {
+        let diff = (lhs[k] - rhs[k]).abs();
+        assert!(
+            diff.is_finite() && diff <= ATOL + RTOL * magnitude[k],
+            "{label} Σ c x0 component {k}: |Δ| = {diff:e}, scale {:e}",
+            magnitude[k]
+        );
+    }
 }
 
 /// The spread `P0_j − Σ_i μ_i|j P_i` is positive semidefinite within tolerance.
@@ -592,7 +619,6 @@ fn assert_spread_psd(
 
 /// All three mixing invariants for one set of mixed estimates.
 fn assert_mixing_invariants(
-    kind: Residual,
     label: &str,
     pi: &DMatrix<f64>,
     mu: &DVector<f64>,
@@ -604,7 +630,7 @@ fn assert_mixing_invariants(
     let weights = mixing_weights(pi, mu, &c);
     assert_mixing_columns_sum_to_one(label, &weights);
     let means: Vec<DVector<f64>> = mixed.iter().map(|g| g.mean.clone()).collect();
-    assert_mean_invariant(kind, label, pi, mu, commons, &means);
+    assert_mean_invariant(label, pi, mu, commons, &means);
     for (j, g) in mixed.iter().enumerate() {
         assert_spread_psd(label, &g.cov, commons, &weights, j);
     }
@@ -621,7 +647,6 @@ fn oracle_mixed(pi: &DMatrix<f64>, mu: &DVector<f64>, commons: &[Gaussian]) -> V
 
 #[test]
 fn oracle_mixing_invariants_hold() {
-    let kind = Residual::OracleVsHand;
     let commons = worked_cv_cv_leaves();
     for (label, pi) in [
         ("identity", pi_identity()),
@@ -629,11 +654,11 @@ fn oracle_mixing_invariants_hold() {
         ("asymmetric", pi_asymmetric()),
     ] {
         let mixed = oracle_mixed(&pi, &mu_worked(), &commons);
-        assert_mixing_invariants(kind, label, &pi, &mu_worked(), &commons, &mixed);
+        assert_mixing_invariants(label, &pi, &mu_worked(), &commons, &mixed);
     }
     let case = three_mode_case();
     let mixed = oracle_mixed(&case.pi, &case.mu, &case.leaves);
-    assert_mixing_invariants(kind, "three-mode", &case.pi, &case.mu, &case.leaves, &mixed);
+    assert_mixing_invariants("three-mode", &case.pi, &case.mu, &case.leaves, &mixed);
 }
 
 // ---------------------------------------------------------------------------
@@ -924,7 +949,6 @@ fn native_mixing_and_posterior_invariants_hold() {
         );
     }
     assert_mixing_invariants(
-        Residual::NativeVsHand,
         "three-mode native",
         &case.pi,
         &case.mu,

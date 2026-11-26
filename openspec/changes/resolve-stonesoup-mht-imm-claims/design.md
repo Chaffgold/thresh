@@ -313,6 +313,7 @@ The second enumeration in the test target follows the same rule: `label_product 
   - the CA mode's contribution to mixing, which the spec fixes as the marginal of its common components;
   - an equal-dimension bank, which involves no projection.
 - **Small predicted probabilities.** The spec states the mixing and posterior formulas for c_j > 1e-12, a bound both native thresholds (1e-30 and 1e-300) satisfy. Treatment at or below 1e-12 is listed as unspecified, with one exception: the zero-probability case, when the zero-probability mode is no more likely than the best of the others. Native meets that exception because its 1e-300 clamp leaves such a mode at most 1e-300/1e-12 of the dominant weight. The general treatment is not claimed: the review probe recorded in Context gives [0, 1] where the exact posterior is [1, 0].
+- **Log-likelihood magnitude.** Native adds ln c_j to ℓ_j before shifting by the maximum (`imm.rs` `update_mode_probabilities`), so for very large |ℓ| the priors round away: at ℓ ≈ −1e16, where float64 spacing is 2, c = [0.6, 0.4] gives about 0.881 instead of 0.917. The spec therefore claims the exact posterior only for |ℓ| ≤ 1e6, where that rounding is about 1e-10 relative, inside the tolerance, and lists larger magnitudes as unspecified. Sums to one hold for every finite ℓ, because native renormalises after exponentiating. The oracle shifts ℓ by the largest active value before adding ln c_j and normalises in shifted coordinates, so it is exact at any finite magnitude (`oracle_posterior_is_exact_for_extreme_log_likelihoods`). Applying the same shift natively is a Change 3 item.
 - **Elapsed time.** The spec fixes Π for a 1 s cycle as the configured matrix and leaves other intervals unspecified (F7). An identity Π stays the identity under any elapsed-time policy, so Π = I runs at any dt are specified behaviour. Non-identity Π runs at dt ≠ 1 are characterisation.
 
 **Specified-behaviour tests (`imm_reference`):**
@@ -340,7 +341,7 @@ The second enumeration in the test target follows the same rule: `label_product 
      - The 1e-300 clamp puts mode 2's log-weight about 868 nats below mode 1's, which underflows to exactly 0.
      - The test claims nothing about larger ℓ_2.
    - **Combination with supplied probabilities:** overwrite the bank's public mode probabilities with a given distribution, call `combine()`, and compare with the oracle's moment match. The learned classifier uses exactly this path (`imm_adapter.rs:245-247`), so this verifies the spec's learned-classifier clause without ONNX.
-   - **The invariants**, with every c_j > 1e-12: mixing columns sum to one within 1e-12, Σ_j c_j x0_j = Σ_i (Σ_j π_ij) μ_i x_i, spread terms are PSD, and posteriors sum to one within 1e-12.
+   - **The invariants**, with every c_j > 1e-12: mixing columns sum to one within 1e-12, Σ_j c_j x0_j = Σ_i (Σ_j π_ij) μ_i x_i (relative tolerance scaled by Σ_i (Σ_j π_ij) μ_i |x_i|, so cancellation cannot shrink the bound), spread terms are PSD, and posteriors sum to one within 1e-12.
    - **Probability guard:** in every end-to-end run above, each predicted probability exceeds 1e-12 at every asserted cycle, except in the declared zero-destination case. Runs are limited to a stated number of cycles, and the test asserts the bound, so that no cited test depends on the unspecified treatment at or below 1e-12.
 4. **Validation tests** (Decision 8).
 
@@ -592,7 +593,7 @@ The fail conclusions rest on the retained outputs: the 0.0099 and 0.0196 floors,
 - ADD the maneuvering requirement to `imm-estimation`, using the preregistered criterion.
 - MODIFY "Explicitly unspecified mode policies" as each policy becomes specified.
 - MODIFY the `imm-estimation` requirements whose wording a chosen fix touches:
-  - "Analytic mode-probability posterior": its zero-probability clause and the 1e-12 bound, when the exclusion policy is specified;
+  - "Analytic mode-probability posterior": its zero-probability clause and the 1e-12 bound, when the exclusion policy is specified; and its |ℓ| ≤ 1e6 bound, once native shifts log-likelihoods before adding the log priors;
   - "Common-state mixing": the 1e-12 bound and the 1 s transition-matrix anchor, if rate semantics or mixing beyond the common state (carrying mode-specific components) change them;
   - "Model-conditioned log-likelihood": if F2 is fixed by evaluating each mode's likelihood in its own state.
   These requirements are already worded to admit the recommended defaults, so a MODIFIED is needed only when a fix departs from that wording.

@@ -35,7 +35,7 @@ The mixed estimate of a mode whose predicted probability is at most 1e-12 is not
 #### Scenario: Mixing invariants
 - **WHEN** a valid Π and μ mix finite common estimates, and every predicted probability c_j exceeds 1e-12
 - **THEN** each column of μ_i|j sums to one within 1e-12
-- **AND** Σ_j c_j x0_j equals Σ_i (Σ_j π_ij) μ_i x_i within the verification tolerance, which is Σ_i μ_i x_i when every row of Π sums to exactly one
+- **AND** Σ_j c_j x0_j equals Σ_i (Σ_j π_ij) μ_i x_i componentwise, within an absolute tolerance of 1e-10 plus 1e-9 times Σ_i (Σ_j π_ij) μ_i |x_i|, so that the bound scales with the summed terms rather than with a result that may cancel; when every row of Π sums to exactly one, the right-hand side is Σ_i μ_i x_i
 - **AND** every spread term is positive semidefinite within the verification tolerance
 
 ### Requirement: Model-conditioned log-likelihood
@@ -55,9 +55,9 @@ For each mode, let x̂ and P be the mean and covariance of its predicted estimat
 - **THEN** each mode's log-likelihood agrees with an independently derived value for that interval, within the verification tolerance
 
 ### Requirement: Analytic mode-probability posterior
-With no probability floor applied (floor zero), and whenever every mode's predicted probability exceeds 1e-12, the analytic mode-probability update SHALL return the exact Bayes posterior μ⁺_j = c_j exp(ℓ_j) / Σ_k c_k exp(ℓ_k) within the verification tolerance. The update SHALL be evaluated in log space by log-sum-exp, so that every finite set of log-likelihoods yields finite probabilities that sum to one within 1e-12.
-- **Zero predicted probability:** with floor zero, the update SHALL also return the exact posterior within the verification tolerance, which gives zero to each mode whose predicted probability is zero, when every other mode's predicted probability exceeds 1e-12 and no zero-probability mode's log-likelihood, computed from whatever estimate that mode is assigned, exceeds the largest log-likelihood among the other modes. Other cases with a predicted probability of at most 1e-12 are not specified.
-- **Underflow:** when linear likelihoods underflow, the update SHALL NOT produce NaN, a uniform distribution, or a reversion to the predicted probabilities.
+With no probability floor applied (floor zero), whenever every mode's predicted probability exceeds 1e-12 and every log-likelihood is finite with magnitude at most 1e6, the analytic mode-probability update SHALL return the exact Bayes posterior μ⁺_j = c_j exp(ℓ_j) / Σ_k c_k exp(ℓ_k) within the verification tolerance. The update SHALL be evaluated in log space by log-sum-exp, so that every finite set of log-likelihoods yields finite probabilities that sum to one within 1e-12.
+- **Zero predicted probability:** with floor zero and every log-likelihood finite with magnitude at most 1e6, the update SHALL also return the exact posterior within the verification tolerance, which gives zero to each mode whose predicted probability is zero, when every other mode's predicted probability exceeds 1e-12 and no zero-probability mode's log-likelihood, computed from whatever estimate that mode is assigned, exceeds the largest log-likelihood among the other modes. Other cases with a predicted probability of at most 1e-12 are not specified.
+- **Underflow:** when linear likelihoods underflow, the update SHALL NOT produce NaN, and SHALL NOT fall back to a uniform distribution or to the predicted probabilities in place of the posterior. A uniform result, or one equal to the predicted probabilities, is correct only when it is the Bayes posterior, for example when every log-likelihood is equal.
 - **Learned classifier:** when an opt-in learned mode classifier replaces the analytic posterior, the requirements that define that classifier govern the replacement probabilities. The combination requirement still applies to the replaced probabilities.
 
 #### Scenario: Worked posterior
@@ -126,7 +126,8 @@ This capability SHALL NOT be read as specifying the following behaviours. They r
 - the reconstruction of a mode's own state from mixed or updated common-state moments, including components outside the common state such as acceleration and turn rate;
 - the common-state representation of modes whose state does not contain the common-state components, such as speed, heading and turn-rate modes, including their vertical channel;
 - how the transition matrix in effect for a cycle depends on that cycle's elapsed time, other than for a 1 s cycle;
-- behaviour when an innovation covariance is not positive definite or is numerically singular: a determinant that is not finite or is at most 1e-300, or a matrix that cannot be inverted.
+- behaviour when an innovation covariance is not positive definite or is numerically singular: a determinant that is not finite or is at most 1e-300, or a matrix that cannot be inverted;
+- the precision of the mode-probability posterior when a log-likelihood's magnitude exceeds 1e6.
 
 Tests that pin these behaviours SHALL be labelled as current-policy characterisation and kept separate from tests of specified behaviour. They SHALL NOT be cited as evidence for this capability's requirements.
 

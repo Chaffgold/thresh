@@ -349,8 +349,11 @@ pub fn joseph_update(prior: &Gaussian, m: &Measurement) -> UpdateOutput {
     }
 }
 
-/// Normalise log weights by log-sum-exp and exponentiate. Entries of
-/// `−∞` map to exactly zero.
+/// Normalise log weights in shifted coordinates:
+/// `w_j = exp(lw_j − max) / Σ_k exp(lw_k − max)`. Normalising after the
+/// shift, rather than adding the log normaliser back to `max`, keeps the
+/// result summing to one when `|max|` is large. Entries of `−∞` map to
+/// exactly zero.
 pub fn normalise_log_weights(log_weights: &[f64]) -> DVector<f64> {
     let max = log_weights
         .iter()
@@ -360,27 +363,32 @@ pub fn normalise_log_weights(log_weights: &[f64]) -> DVector<f64> {
         max.is_finite(),
         "at least one finite log weight is required"
     );
-    let lse = max
-        + log_weights
-            .iter()
-            .map(|lw| (lw - max).exp())
-            .sum::<f64>()
-            .ln();
-    DVector::from_iterator(
+    let shifted = DVector::from_iterator(
         log_weights.len(),
-        log_weights.iter().map(|lw| (lw - lse).exp()),
-    )
+        log_weights.iter().map(|lw| (lw - max).exp()),
+    );
+    let sum = shifted.sum();
+    shifted / sum
 }
 
-/// Exact Bayes posterior `μ⁺_j ∝ c_j exp(ℓ_j)` in log space. A mode with
+/// Exact Bayes posterior `μ⁺_j ∝ c_j exp(ℓ_j)` in log space. The
+/// log-likelihoods are shifted by the largest one among modes with
+/// `c_j > 0` before the log priors are added, so the priors survive even
+/// when `|ℓ|` is large; the shift cancels in the normalisation. A mode with
 /// `c_j = 0` gets exactly zero, whatever its log-likelihood.
 pub fn mode_posterior(c: &DVector<f64>, log_likelihoods: &[f64]) -> DVector<f64> {
+    let max_active = c
+        .iter()
+        .zip(log_likelihoods)
+        .filter(|(cj, _)| **cj > 0.0)
+        .map(|(_, &lj)| lj)
+        .fold(f64::NEG_INFINITY, f64::max);
     let log_weights: Vec<f64> = c
         .iter()
         .zip(log_likelihoods)
         .map(|(&cj, &lj)| {
             if cj > 0.0 {
-                cj.ln() + lj
+                cj.ln() + (lj - max_active)
             } else {
                 f64::NEG_INFINITY
             }

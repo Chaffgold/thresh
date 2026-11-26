@@ -727,6 +727,11 @@ fn order_residual(oracle: &[Leaf], labelled: &[Leaf], what: &str) -> f64 {
 
 fn leaf_residual(a: &Leaf, b: &Leaf) -> f64 {
     assert_eq!(a.scan_scores.len(), b.scan_scores.len(), "{}", a.key);
+    // `f64::max` drops a NaN operand, so reject non-finite scores first.
+    let all_scores = a.scan_scores.iter().chain(&b.scan_scores);
+    for score in all_scores.chain([&a.score, &b.score]) {
+        assert!(score.is_finite(), "{}: non-finite score {score}", a.key);
+    }
     a.scan_scores
         .iter()
         .zip(&b.scan_scores)

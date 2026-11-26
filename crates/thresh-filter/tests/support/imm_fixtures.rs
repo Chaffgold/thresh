@@ -410,8 +410,13 @@ pub enum Residual {
     OracleVsPinned,
 }
 
+/// Both operands must be finite: with an infinite expected value the
+/// relative bound is infinite too, and any finite actual value would pass.
+/// A test that expects a non-finite value must assert it explicitly.
 fn within_tolerance(actual: f64, expected: f64) -> bool {
-    (actual - expected).abs() <= ATOL + RTOL * expected.abs()
+    actual.is_finite()
+        && expected.is_finite()
+        && (actual - expected).abs() <= ATOL + RTOL * expected.abs()
 }
 
 /// Print the worst absolute residual and the worst residual relative to
