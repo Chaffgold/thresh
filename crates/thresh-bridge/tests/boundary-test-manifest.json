@@ -7,10 +7,8 @@
       "covariance::tests::covariance_tolerance_is_scale_aware_without_repairs",
       "covariance::tests::extreme_finite_covariance_never_gets_infinite_tolerance",
       "covariance::tests::malformed_nonfinite_and_indefinite_covariance_rejected",
-      "imm::tests::initialized_predict_preserves_dispatch_and_errors",
       "jpda::tests::initialized_associate_preserves_dispatch_and_errors",
       "jpda::tests::real_constructor_preserves_components_and_configuration",
-      "mht::tests::initialized_run_preserves_dispatch_and_errors",
       "observation::pose_tests::pose_euler_does_not_amplify_tolerated_near_lock_matrix_error",
       "observation::pose_tests::pose_euler_preserves_both_exact_gimbal_locks",
       "observation::pose_tests::pose_euler_preserves_both_near_gimbal_locks",
@@ -33,6 +31,7 @@
       "phd::tests::repeated_component_objects_fail_before_copy_and_preserve_inputs",
       "phd::tests::unexpected_validation_and_result_errors_keep_their_context",
       "phd::tests::valid_collection_types_and_intensity_weights_are_not_normalized",
+      "runtime::tests::pinned_stonesoup_lacks_interacting_predictor_api",
       "runtime::tests::uninitialized_shared_attachment_is_fallible",
       "time::tests::timestamps_accept_large_nonleap_intervals_without_float_cancellation",
       "time::tests::timestamps_preserve_offsets_order_and_arrival",
@@ -112,15 +111,13 @@
     ],
     "runtime_contract": [
       "explicit_host_initialization_is_reused_without_mutation",
-      "initialized_imm_constructor_reports_unresolved_api",
       "initialized_reference_calls_reuse_host_without_mutation",
       "missing_numpy_is_a_dependency_not_an_interpreter_error",
       "missing_stonesoup_submodule_is_an_api_error",
       "missing_symbol_is_an_api_error",
       "missing_top_level_stonesoup_is_distinct",
       "missing_transitive_dependency_uses_exception_identity",
-      "ordinary_python_failures_keep_type_message_context_and_traceback",
-      "token_free_constructors_require_host_initialization"
+      "ordinary_python_failures_keep_type_message_context_and_traceback"
     ],
     "stonesoup_integration": [
       "nalgebra_numpy_roundtrip",

@@ -80,6 +80,29 @@ pub enum AssociationStrategy {
         clutter_density: f64,
     },
     /// Multi-Hypothesis Tracking: deferred decision via hypothesis tree.
+    ///
+    /// # Warning: not yet a working MHT
+    ///
+    /// This native path does not yet behave as a multi-hypothesis tracker:
+    ///
+    /// - hypothesis expansion applies one shared likelihood matrix to every
+    ///   parent hypothesis, so it ignores per-hypothesis history;
+    /// - N-scan pruning is not invoked: `n_scan` reaches the hypothesis tree,
+    ///   but each scan runs only expansion and k-best pruning;
+    /// - a miss adds no score term, so an assignment whose log-likelihood
+    ///   `ln(P_D · N(z))` is negative scores below a miss even when it passes
+    ///   the gate;
+    /// - under heads with broad position priors, such as `Unknown`,
+    ///   `Ballistic` and `Orbital`, a newly born track also scores every
+    ///   detection below the `ln(clutter_density)` gate (for example
+    ///   `ln(1e-6) ≈ −13.8`).
+    ///
+    /// Tracks are then not updated by their detections, and each scan starts
+    /// new tracks instead.
+    ///
+    /// The rebuild is planned in the OpenSpec change
+    /// `rebuild-native-mht-hypothesis-history`. Until it lands, prefer
+    /// [`AssociationStrategy::Hungarian`] or [`AssociationStrategy::Jpda`].
     Mht {
         /// N-scan pruning depth.
         n_scan: usize,
@@ -204,6 +227,15 @@ impl MultiObjectTracker {
     /// `config_factory` is called once per new track to produce a fresh
     /// `ImmConfig`. Each track maintains its own `ImmFilter` bank.
     /// Association and lifecycle logic are shared with the single-model path.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a configuration returned by `config_factory` fails
+    /// [`ImmConfig::validate`]. This constructor checks one factory result,
+    /// and [`ImmFilter::new`] checks each new result again whenever a track
+    /// is born. The panic message carries the validation error. Callers must
+    /// ensure that every factory result is valid; a factory that builds each
+    /// configuration from the same validated parameters is one way to do so.
     pub fn new_imm_position(
         config_factory: impl Fn() -> ImmConfig + 'static,
         measurement_noise_sigma: f64,

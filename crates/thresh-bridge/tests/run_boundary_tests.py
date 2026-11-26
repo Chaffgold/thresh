@@ -246,8 +246,10 @@ def main() -> int:
         print(f"Boundary gate FAILED: {error}", file=sys.stderr)
         return 1
     print(f"Boundary gate PASSED: {count} required tests across {len(targets)} targets; zero ignored.")
-    print("Boundary and bounded linear-Gaussian JPDA/GM-PHD checks only; "
-          "MHT/IMM, whole-track accuracy and linked-library deployment remain separate gaps.")
+    print("Boundary and bounded linear-Gaussian JPDA/GM-PHD reference checks only; the bridge "
+          "provides no MHT/IMM reference (native mht-tracking and imm-estimation contracts, "
+          "with interim gaps). Whole-track accuracy and linked-library deployment remain "
+          "separate gaps.")
     return 0
 
 

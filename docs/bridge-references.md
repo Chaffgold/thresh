@@ -106,6 +106,8 @@ are the desired production tracking policy.
 The tests establish small linear-Gaussian reference behavior, boundary contracts,
 and structured failures. They do not establish native/reference parity,
 sequence-level tracking accuracy, nonlinear/multi-sensor algorithm correctness,
-MHT/IMM reference correctness, or deployment without a linked Python library.
+or deployment without a linked Python library. The bridge provides JPDA and
+GM-PHD references only; there is no bridge MHT or IMM reference. Those contracts
+are native (`mht-tracking`, `imm-estimation`), with interim gaps.
 Data/model rights, the strict no-regression release gate, and deferred crates.io
 publishing remain unchanged.

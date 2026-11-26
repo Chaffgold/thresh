@@ -56,6 +56,90 @@ common-space measurement-update leaf. `ImmFilter::new` defaults to
 `ImmLeafKind::Ekf`, so existing callers and the `thresh-tracker` IMM path
 are unaffected.
 
+## IMM mathematics: specified, unspecified, verified
+
+The `imm-estimation` capability specifies only the policy-independent IMM
+mathematics. In the common state `[x, vx, y, vy, z, vz]` (m, m/s):
+
+- **Mixing.** `c_j = Σ_i π_ij μ_i`; for every mode with `c_j > 1e-12`,
+  `μ_i|j = π_ij μ_i / c_j`, `x0_j = Σ_i μ_i|j x_i` and
+  `P0_j = Σ_i μ_i|j [P_i + (x_i − x0_j)(x_i − x0_j)ᵀ]`, including the
+  between-mode spread. A mode whose state contains the common components
+  (such as CA) contributes their marginal. For a 1 s cycle, `Π` is the
+  configured transition matrix.
+- **Log-likelihood.** `ℓ = −½ (m ln 2π + ln det S + yᵀ S⁻¹ y)` with
+  `y = z − H x̂` and `S = H P Hᵀ + R`, evaluated in log space.
+- **Posterior.** With floor 0, every `c_j > 1e-12` and every `|ℓ_j| ≤ 1e6`,
+  the mode update is the exact Bayes posterior `μ⁺_j ∝ c_j exp(ℓ_j)`,
+  normalised by log-sum-exp, so underflowing likelihoods give finite
+  probabilities (for example `[0, 1]`), never NaN, and never a fallback to a
+  uniform distribution or to `c` in place of the posterior. With floor 0, a mode with `c_j = 0` gets zero when every other
+  `c_k > 1e-12` and its log-likelihood (from whatever estimate it is
+  assigned) does not exceed the largest among the others.
+- **Combination.** The output is the moment match
+  `x = Σ_j μ⁺_j x_j`, `P = Σ_j μ⁺_j [P_j + (x_j − x)(x_j − x)ᵀ]` under
+  whichever mode probabilities are in effect, including probabilities
+  supplied by the learned classifier.
+
+**Not specified.** These are current implementation choices, not contract.
+The follow-up OpenSpec change `correct-native-imm-mode-policies` changes
+them deliberately:
+
+- the default mode-probability floor (0.01) and the renormalisation after
+  flooring;
+- the treatment of a mode whose predicted probability is at most 1e-12,
+  including zero: its mixed estimate, its likelihood, its weight in the mode
+  update, and the thresholds that treat a small probability as zero (1e-30
+  in mixing, 1e-300 in the mode update), beyond the zero-probability case
+  above;
+- the weighting of the predicted (pre-update) combined estimate used for
+  gating (currently the prior `μ`);
+- mode-probability propagation when a prediction is not followed by an
+  update (currently left unchanged);
+- the reconstruction of a mode's own state from common-state moments,
+  including components outside the common state such as acceleration
+  (currently mean 0, variance 100 (m/s²)²) and turn rate;
+- the common-state representation of speed, heading and turn-rate modes
+  (CTRV, CT), including their vertical channel (currently `z = vz = 0` with
+  variance 100);
+- how the transition matrix depends on the elapsed time, other than for a
+  1 s cycle (currently applied as configured for every `dt`);
+- behaviour when an innovation covariance is not positive definite or is
+  numerically singular.
+
+**Verification.** `tests/imm_reference.rs` checks the specified mathematics
+against hand-derived exact rationals and an independent reference
+(`tests/support/imm_oracle.rs`, which uses only `nalgebra` and `std` and
+shares no code with this crate), at an absolute tolerance of 1e-10 plus a
+relative tolerance of 1e-9, with probability sums within 1e-12. Its native
+tests use only configurations that depend on none of the policies above.
+`tests/imm_current_policy.rs` pins today's behaviour under those policies;
+its tests are prefixed `current_policy_` and are characterisation, not
+evidence for the specification.
+
+```sh
+cargo test -p thresh-filter --test imm_reference --test imm_current_policy
+# Print every compared residual:
+IMM_REFERENCE_RESIDUALS=1 cargo test -p thresh-filter --test imm_reference -- --nocapture
+```
+
+**Validation.** `ImmConfig::validate` rejects a configuration with no models;
+with mismatched counts or dimensions; with any transition-matrix entry that
+is non-finite (NaN, ±∞) or negative; with a transition-matrix row that does
+not sum to one within 1e-6; with any initial mode probability that is
+non-finite or negative; or with initial probabilities that do not sum to one
+within 1e-6. The entry checks are new: a NaN entry, or a row such as
+`[1.2, −0.2]` that sums to one, used to pass. The error names the offending
+entry, for example `transition matrix entry (0, 1)` or
+`initial mode probability 1`. Every library preset still validates, and
+every configuration that still validates behaves exactly as before.
+
+`ImmFilter::new`, `ImmFilter::with_leaf_kind` and
+`thresh_tracker::tracker::MultiObjectTracker::new_imm_position` panic on a
+rejected configuration (see their `# Panics` sections), while
+`MultiObjectTracker::new_imm_position_learned` returns the error. Call
+`validate()` first to handle an invalid configuration without panicking.
+
 ## `learned-imm` feature (Track B)
 
 The optional `learned-imm` feature (off by default) adds `imm_adapter`, which

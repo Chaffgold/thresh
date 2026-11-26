@@ -168,7 +168,8 @@ jobs:
 
   stonesoup-boundary:
     # Required on every PR, including PRs to develop; never path-filter this lane.
-    # Includes bounded JPDA/GM-PHD references, not whole-track/MHT/IMM acceptance.
+    # The bridge provides bounded JPDA/GM-PHD references only, not whole-track acceptance.
+    # MHT/IMM contracts are native (mht-tracking, imm-estimation), with interim gaps.
     name: Stone Soup boundary
     runs-on: ubuntu-latest
     steps:
@@ -243,6 +244,11 @@ jobs:
         run: cargo build --locked --workspace --exclude thresh-py --no-default-features
       - name: Test native workspace with Python discovery disabled
         run: cargo test --locked --workspace --exclude thresh-py --no-default-features
+      # Exact-name gate for the native MHT/IMM reference targets (docs/native-reference-tests.md).
+      - name: Self-test native reference gate
+        run: bash scripts/check-native-reference-tests.sh --self-test
+      - name: Check native reference tests by exact name
+        run: bash scripts/check-native-reference-tests.sh
 
   python-tests:
     name: Python tests

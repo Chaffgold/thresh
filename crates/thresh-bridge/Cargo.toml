@@ -1,6 +1,6 @@
 [package]
 name = "thresh-bridge"
-description = "PyO3 bridge to Stone Soup for JPDA, MHT, IMM algorithms"
+description = "PyO3 bridge to Stone Soup JPDA and GM-PHD reference algorithms"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

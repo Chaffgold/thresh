@@ -91,5 +91,7 @@ availability. Finite inputs producing nonfinite derived values are rejected.
 Native core measurement vectors/defaults and the training pipeline's ADS-B role
 are unchanged. Passing these examples certifies only boundary construction.
 Separate [linear-Gaussian JPDA/GM-PHD reference checks](bridge-references.md) do
-not certify these nonlinear models' algorithm results. MHT/IMM reference and
-missing-shared-library deployment gaps remain unresolved.
+not certify these nonlinear models' algorithm results. The bridge provides JPDA
+and GM-PHD references only; MHT and IMM contracts are native (`mht-tracking`,
+`imm-estimation`) and have interim gaps. The missing-shared-library deployment
+gap remains unresolved.
